@@ -15,7 +15,7 @@ fi
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 GROUP_ID="${TELEGRAM_GROUP_ID:-}"
 USER_ID="${TELEGRAM_USER_ID:-}"
-SPRINT_THREAD_ID="${SPRINT_THREAD_ID:-}"
+SERVER_THREAD="${SERVER_THREAD_ID:-7}"
 
 # Prefer sending to group's serveur topic, fallback to user DM
 CHAT_ID="${GROUP_ID:-$USER_ID}"
@@ -26,10 +26,9 @@ send_alert() {
         -d "chat_id=${CHAT_ID}" \
         -d "text=${message}")
 
-    # If sending to group, use the serveur topic if known
-    # Thread ID 7 is typically the serveur topic (adjust if needed)
+    # If sending to group, use the serveur topic
     if [ -n "$GROUP_ID" ] && [ "$CHAT_ID" = "$GROUP_ID" ]; then
-        params+=(-d "message_thread_id=7")
+        params+=(-d "message_thread_id=${SERVER_THREAD}")
     fi
 
     curl "${params[@]}" > /dev/null 2>&1
