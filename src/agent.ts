@@ -10,6 +10,7 @@ import { spawn, spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { updateTaskStatus, type Task } from "./tasks.ts";
 import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
+import { runCodeReview, saveReviewResult, formatReviewResult } from "./code-review.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -24,6 +25,8 @@ export interface AgentResult {
   prUrl?: string;
   ciPassed?: boolean;
   ciDetails?: string;
+  reviewScore?: number;
+  reviewSummary?: string;
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
@@ -238,11 +241,41 @@ export async function executeTask(
     // Check if there are any changes to commit
     const status = git("status", "--porcelain");
     let prUrl: string | undefined;
+    let reviewResult: Awaited<ReturnType<typeof runCodeReview>> | undefined;
 
     if (status.stdout) {
       // Stage and commit all changes
       git("add", "-A");
       git("commit", "-m", `feat: ${task.title}`);
+
+      // Gate 3: Adversarial code review before push
+      if (onProgress) {
+        await onProgress("Code review adversariale en cours...");
+      }
+      reviewResult = await runCodeReview(branchName, task.title, onProgress);
+
+      if (supabase) {
+        await saveReviewResult(supabase, task.id, branchName, reviewResult);
+      }
+
+      if (onProgress) {
+        const reviewText = formatReviewResult(reviewResult);
+        await onProgress(reviewText.length > 4000 ? reviewText.substring(0, 4000) : reviewText);
+      }
+
+      if (!reviewResult.passesGate) {
+        git("checkout", "master");
+        if (supabase) {
+          await updateTaskStatus(supabase, task.id, "review");
+        }
+        return {
+          success: true,
+          output: output.trim(),
+          durationMs: Date.now() - startTime,
+          reviewScore: reviewResult.score,
+          reviewSummary: `Code review bloquee (score: ${reviewResult.score}/100). ${reviewResult.findings.filter(f => f.severity === "critical").length} findings critiques.`,
+        };
+      }
 
       // Push branch
       const pushResult = git("push", "-u", "origin", branchName);
@@ -302,6 +335,8 @@ export async function executeTask(
       durationMs,
       prUrl,
       ciPassed: prUrl ? true : undefined,
+      reviewScore: reviewResult?.score,
+      reviewSummary: reviewResult?.summary,
     };
   } catch (error) {
     git("checkout", "master");
