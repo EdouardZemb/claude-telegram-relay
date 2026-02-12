@@ -12,6 +12,7 @@ import { updateTaskStatus, type Task } from "./tasks.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
+const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
 
 export interface AgentResult {
   success: boolean;
@@ -55,7 +56,7 @@ async function waitForCIChecks(
 
   while (Date.now() - startTime < maxWaitMs) {
     const result = spawnSync(
-      ["gh", "pr", "checks", branchName, "--json", "name,state,conclusion"],
+      ["gh", "pr", "checks", branchName, "-R", GITHUB_REPO, "--json", "name,state,conclusion"],
       { cwd: PROJECT_DIR }
     );
     const output = new TextDecoder().decode(result.stdout).trim();
@@ -224,6 +225,7 @@ export async function executeTask(
         // Create PR via gh CLI
         const prResult = spawnSync(
           ["gh", "pr", "create",
+            "-R", GITHUB_REPO,
             "--title", task.title,
             "--body", `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${task.description || ""}`.trim(),
             "--base", "master",
