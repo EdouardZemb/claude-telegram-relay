@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: |
+          for f in src/*.ts dashboard/server.ts; do
+            echo "Checking $f..."
+            bun build --no-bundle --target=bun "$f" || exit 1
+          done
+
+      - name: Syntax check setup scripts
+        run: |
+          for f in setup/*.ts; do
+            echo "Checking $f..."
+            bun build --no-bundle --target=bun "$f" || exit 1
+          done

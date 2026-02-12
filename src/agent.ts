@@ -19,6 +19,8 @@ export interface AgentResult {
   error?: string;
   durationMs: number;
   prUrl?: string;
+  ciPassed?: boolean;
+  ciDetails?: string;
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
@@ -37,6 +39,102 @@ function sanitizeBranchName(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .substring(0, 50);
+}
+
+/**
+ * Wait for CI checks to complete on a branch.
+ * Polls gh pr checks every 15s for up to 10 minutes.
+ */
+async function waitForCIChecks(
+  branchName: string,
+  onProgress?: (message: string) => Promise<void>
+): Promise<{ passed: boolean; details: string }> {
+  const maxWaitMs = 10 * 60 * 1000; // 10 minutes
+  const pollIntervalMs = 15_000; // 15 seconds
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const result = spawnSync(
+      ["gh", "pr", "checks", branchName, "--json", "name,state,conclusion"],
+      { cwd: PROJECT_DIR }
+    );
+    const output = new TextDecoder().decode(result.stdout).trim();
+
+    if (result.exitCode !== 0 || !output) {
+      // Checks not yet available, wait and retry
+      await Bun.sleep(pollIntervalMs);
+      continue;
+    }
+
+    try {
+      const checks = JSON.parse(output) as Array<{
+        name: string;
+        state: string;
+        conclusion: string;
+      }>;
+
+      if (checks.length === 0) {
+        // No checks configured yet, wait
+        await Bun.sleep(pollIntervalMs);
+        continue;
+      }
+
+      const allCompleted = checks.every(
+        (c) => c.state === "COMPLETED" || c.state === "completed"
+      );
+
+      if (!allCompleted) {
+        await Bun.sleep(pollIntervalMs);
+        continue;
+      }
+
+      const allPassed = checks.every(
+        (c) =>
+          c.conclusion === "SUCCESS" ||
+          c.conclusion === "success" ||
+          c.conclusion === "NEUTRAL" ||
+          c.conclusion === "neutral" ||
+          c.conclusion === "SKIPPED" ||
+          c.conclusion === "skipped"
+      );
+
+      const details = checks
+        .map((c) => `${c.name}: ${c.conclusion}`)
+        .join(", ");
+
+      if (allPassed) {
+        if (onProgress) {
+          await onProgress(`CI OK: ${details}`);
+        }
+        return { passed: true, details };
+      } else {
+        const failed = checks.filter(
+          (c) =>
+            c.conclusion !== "SUCCESS" &&
+            c.conclusion !== "success" &&
+            c.conclusion !== "NEUTRAL" &&
+            c.conclusion !== "neutral" &&
+            c.conclusion !== "SKIPPED" &&
+            c.conclusion !== "skipped"
+        );
+        const failDetails = failed
+          .map((c) => `${c.name}: ${c.conclusion}`)
+          .join(", ");
+        if (onProgress) {
+          await onProgress(`CI echouee: ${failDetails}`);
+        }
+        return { passed: false, details: failDetails };
+      }
+    } catch {
+      await Bun.sleep(pollIntervalMs);
+      continue;
+    }
+  }
+
+  if (onProgress) {
+    await onProgress("Timeout: CI n'a pas termine apres 10 minutes.");
+  }
+  return { passed: false, details: "Timeout apres 10 minutes" };
 }
 
 /**
@@ -136,6 +234,26 @@ export async function executeTask(
         const prOutput = new TextDecoder().decode(prResult.stdout).trim();
         if (prResult.exitCode === 0 && prOutput.startsWith("http")) {
           prUrl = prOutput;
+
+          // Wait for CI checks to complete
+          if (onProgress) {
+            await onProgress("PR creee. Attente des checks CI...");
+          }
+          const ciResult = await waitForCIChecks(branchName, onProgress);
+          if (!ciResult.passed) {
+            git("checkout", "master");
+            if (supabase) {
+              await updateTaskStatus(supabase, task.id, "review");
+            }
+            return {
+              success: true,
+              output: output.trim(),
+              durationMs: Date.now() - startTime,
+              prUrl,
+              ciPassed: false,
+              ciDetails: ciResult.details,
+            };
+          }
         }
       }
     }
@@ -153,6 +271,7 @@ export async function executeTask(
       output: output.trim(),
       durationMs,
       prUrl,
+      ciPassed: prUrl ? true : undefined,
     };
   } catch (error) {
     git("checkout", "master");

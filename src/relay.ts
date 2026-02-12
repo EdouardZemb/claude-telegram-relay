@@ -673,14 +673,21 @@ bot.command("exec", async (ctx) => {
       ? result.output.substring(result.output.length - 3000)
       : result.output;
     const prLine = result.prUrl ? `\n\nPR: ${result.prUrl}` : "";
-    await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}\n\n${summary}`);
+    const ciLine = result.ciPassed === false
+      ? `\n\nCI echouee: ${result.ciDetails || "voir la PR"}\nTache en statut "review" — a corriger avant merge.`
+      : result.ciPassed === true
+      ? "\n\nCI OK"
+      : "";
+    await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}${ciLine}\n\n${summary}`);
 
     // Proactive notifications to other topics
     if (result.prUrl) {
       const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
       await notifyPRCreated(task.title, result.prUrl, branchName);
     }
-    await notifyTaskDone(task.title, task.id);
+    if (result.ciPassed !== false) {
+      await notifyTaskDone(task.title, task.id);
+    }
   } else {
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
