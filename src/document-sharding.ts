@@ -12,10 +12,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ── Types ────────────────────────────────────────────────────
 
+export type DocumentType = "prd" | "architecture" | "story" | "research" | "memory" | "retro" | "analysis";
+
 export interface DocumentShard {
   id: string;
   document_id: string;
-  document_type: "prd" | "architecture" | "story" | "research";
+  document_type: DocumentType;
   section_title: string;
   section_index: number;
   content: string;
@@ -28,7 +30,7 @@ export interface DocumentShard {
 export interface ShardedDocument {
   id: string;
   title: string;
-  type: "prd" | "architecture" | "story" | "research";
+  type: DocumentType;
   total_shards: number;
   total_tokens: number;
   sections: string[]; // ordered list of section titles
@@ -134,7 +136,7 @@ export async function shardDocument(
     id: string;
     title: string;
     content: string;
-    type: "prd" | "architecture" | "story" | "research";
+    type: DocumentType;
     project_id?: string | null;
   }
 ): Promise<ShardedDocument | null> {
@@ -470,4 +472,106 @@ export function formatCrossRefs(
     lines.push(`  ${ref.document_type.toUpperCase()} [${ref.document_id.substring(0, 8)}] > ${ref.section_title} (score: ${ref.overlap_score})`);
   }
   return lines.join("\n");
+}
+
+// ── Extended Sharding: Memory & Research (S16-08) ─────────────
+
+/**
+ * Shard a retro into indexed sections for efficient retrieval.
+ * Creates sections: what_worked, what_didnt, patterns, actions.
+ */
+export async function shardRetro(
+  supabase: SupabaseClient,
+  retro: {
+    sprint_id: string;
+    what_worked: string[];
+    what_didnt: string[];
+    patterns_detected: string[];
+    actions_proposed?: Array<{ action: string; priority: string }>;
+    raw_analysis?: string;
+  },
+  projectId?: string
+): Promise<ShardedDocument | null> {
+  const sections: string[] = [];
+
+  if (retro.what_worked?.length > 0) {
+    sections.push(`## Ce qui a bien marche\n${retro.what_worked.map((w) => `- ${w}`).join("\n")}`);
+  }
+  if (retro.what_didnt?.length > 0) {
+    sections.push(`## Ce qui a coince\n${retro.what_didnt.map((w) => `- ${w}`).join("\n")}`);
+  }
+  if (retro.patterns_detected?.length > 0) {
+    sections.push(`## Patterns detectes\n${retro.patterns_detected.map((p) => `- ${p}`).join("\n")}`);
+  }
+  if (retro.actions_proposed?.length) {
+    sections.push(`## Actions proposees\n${retro.actions_proposed.map((a) => `- [${a.priority}] ${a.action}`).join("\n")}`);
+  }
+  if (retro.raw_analysis) {
+    sections.push(`## Analyse detaillee\n${retro.raw_analysis}`);
+  }
+
+  const content = `# Retro ${retro.sprint_id}\n\n${sections.join("\n\n")}`;
+
+  return shardDocument(supabase, {
+    id: `retro-${retro.sprint_id}`,
+    title: `Retro Sprint ${retro.sprint_id}`,
+    content,
+    type: "retro",
+    project_id: projectId,
+  });
+}
+
+/**
+ * Shard memory facts into searchable sections.
+ * Groups facts by category for efficient context loading.
+ */
+export async function shardMemoryFacts(
+  supabase: SupabaseClient,
+  facts: Array<{ content: string; category?: string }>,
+  projectId?: string
+): Promise<ShardedDocument | null> {
+  if (facts.length === 0) return null;
+
+  // Group by category
+  const groups: Record<string, string[]> = {};
+  for (const fact of facts) {
+    const cat = fact.category || "general";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(fact.content);
+  }
+
+  const sections = Object.entries(groups)
+    .map(([cat, items]) => `## ${cat}\n${items.map((i) => `- ${i}`).join("\n")}`)
+    .join("\n\n");
+
+  const content = `# Memory Facts\n\n${sections}`;
+
+  return shardDocument(supabase, {
+    id: `memory-facts-${projectId || "global"}`,
+    title: "Memory Facts",
+    content,
+    type: "memory",
+    project_id: projectId,
+  });
+}
+
+/**
+ * Shard an analysis output (from /patterns or agent analysis).
+ */
+export async function shardAnalysis(
+  supabase: SupabaseClient,
+  analysis: {
+    id: string;
+    title: string;
+    content: string;
+    projectId?: string;
+  }
+): Promise<ShardedDocument | null> {
+  return shardDocument(supabase, {
+    id: analysis.id,
+    title: analysis.title,
+    content: analysis.content,
+    type: "analysis",
+    project_id: analysis.projectId,
+  });
 }
