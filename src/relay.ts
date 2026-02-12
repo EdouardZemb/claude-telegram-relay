@@ -70,6 +70,12 @@ import {
   formatProfileInsights,
   formatProfileUpdates,
 } from "./profile-evolution.ts";
+import {
+  enrichPromptWithAgent,
+  buildBmadExecPrompt,
+  formatAgentList,
+  getAgentForCommand,
+} from "./bmad-agents.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -615,11 +621,19 @@ bot.command("help", async (ctx) => {
     "/patterns -- Analyse de patterns multi-sprints",
     "/alerts [sprint] -- Alertes proactives (taches bloquees, rework)",
     "/profile -- Analyse et evolution du profil utilisateur",
+    "/agents -- Voir les agents BMad et leurs commandes",
     "/export -- Exporter conversations et memoire",
     "",
     "Envoie un message texte ou vocal pour discuter librement.",
   ].join("\n");
   await ctx.reply(help, threadOpts(ctx));
+});
+
+// /agents — list BMad agents and their capabilities
+bot.command("agents", async (ctx) => {
+  const blocked = commandGuard(ctx, "agents");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  await ctx.reply(formatAgentList(), threadOpts(ctx));
 });
 
 // /speak command — synthesize text to voice
@@ -1405,9 +1419,13 @@ bot.command("retro", async (ctx) => {
   // Also run pattern analysis to feed into the retro
   const patternAnalysis = await analyzePatterns(supabase);
 
-  // Use Claude to analyze and generate the retro
+  // Use Claude to analyze and generate the retro (enriched with SM agent Bob)
+  const smAgent = getAgentForCommand("retro");
+  const agentPrefix = smAgent
+    ? `Tu es ${smAgent.name}, ${smAgent.title} (${smAgent.icon}). ${smAgent.communicationStyle}\n\n`
+    : "";
   const retroPrompt = [
-    "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
+    agentPrefix + "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
     "Reponds UNIQUEMENT en JSON valide, sans markdown, sans commentaires.",
     "",
     `Sprint: ${sprintId}`,
