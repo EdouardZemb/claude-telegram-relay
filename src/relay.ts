@@ -1556,6 +1556,9 @@ bot.on("callback_query:data", async (ctx) => {
         });
         console.log(`Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`);
 
+        // Reload feedback rules into memory so buildFeedbackContext uses fresh data
+        await loadFeedbackRules(supabase);
+
         // Apply workflow suggestions (checkpoint mode changes) from accepted actions
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
 
