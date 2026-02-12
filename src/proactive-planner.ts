@@ -127,7 +127,9 @@ function detectStuckPatterns(tasks: any[]): PlannerRecommendation[] {
 
   for (const task of tasks) {
     if (task.status === "in_progress") {
-      const age = (now - new Date(task.updated_at).getTime()) / (60 * 60 * 1000);
+      const updatedAt = task.updated_at ? new Date(task.updated_at).getTime() : NaN;
+      if (isNaN(updatedAt)) continue;
+      const age = (now - updatedAt) / (60 * 60 * 1000);
       if (age > 24) {
         recs.push({
           type: "blocker",
