@@ -13,7 +13,7 @@ import { updateTaskStatus, type Task } from "./tasks.ts";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
-const AGENT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 
 export interface AgentResult {
   success: boolean;
@@ -205,17 +205,21 @@ export async function executeTask(
       env: { ...process.env },
     });
 
-    // Race between process completion and timeout
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        proc.kill();
-        reject(new Error(`Agent timeout: tache non terminee apres ${AGENT_TIMEOUT_MS / 60000} minutes`));
-      }, AGENT_TIMEOUT_MS)
-    );
+    // Heartbeat: send periodic progress updates instead of hard timeout
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    if (onProgress) {
+      heartbeatTimer = setInterval(async () => {
+        const elapsed = Math.round((Date.now() - startTime) / 60000);
+        await onProgress(`Agent toujours en cours... (${elapsed} min)`).catch(() => {});
+      }, AGENT_HEARTBEAT_MS);
+    }
 
-    const output = await Promise.race([new Response(proc.stdout).text(), timeoutPromise]);
-    const stderr = await Promise.race([new Response(proc.stderr).text(), timeoutPromise]);
-    const exitCode = await Promise.race([proc.exited, timeoutPromise]);
+    // No hard timeout — let the process run until completion
+    const output = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
 
     const durationMs = Date.now() - startTime;
 

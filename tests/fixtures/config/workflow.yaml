@@ -1,0 +1,67 @@
+# Test workflow config — minimal for testing
+version: 1
+
+steps:
+  - id: request
+    label: Demande
+    description: Reception de la demande
+    checkpoint:
+      enabled: false
+      mode: off
+
+  - id: decomposition
+    label: Decomposition
+    description: Analyse et decoupage
+    checkpoint:
+      enabled: true
+      mode: light
+      criteria:
+        - Le plan couvre la demande
+
+  - id: execution
+    label: Execution
+    description: Implementation
+    checkpoint:
+      enabled: true
+      mode: strict
+      criteria:
+        - Code propre
+        - Tests passent
+
+  - id: review
+    label: Review
+    description: Verification
+    checkpoint:
+      enabled: true
+      mode: light
+
+  - id: closure
+    label: Cloture
+    description: Merge et deploy
+    checkpoint:
+      enabled: false
+      mode: off
+
+transitions:
+  - from: request
+    to: decomposition
+  - from: decomposition
+    to: execution
+  - from: execution
+    to: review
+  - from: review
+    to: closure
+  - from: review
+    to: execution
+    condition: rework
+
+checkpoint_modes:
+  off:
+    description: Pas d'evaluation
+    auto_pass: true
+  light:
+    description: Verification rapide
+    max_retries: 1
+  strict:
+    description: Evaluation approfondie
+    max_retries: 3

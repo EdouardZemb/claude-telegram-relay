@@ -60,6 +60,15 @@ import {
   formatRetro,
   WorkflowTracker,
 } from "./workflow.ts";
+import { analyzePatterns, formatPatterns } from "./patterns.ts";
+import { runAllChecks, formatAlerts } from "./alerts.ts";
+import {
+  analyzeProfile,
+  proposeProfileUpdates,
+  applyProfileUpdates,
+  formatProfileInsights,
+  formatProfileUpdates,
+} from "./profile-evolution.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -68,11 +77,16 @@ const PROJECT_ROOT = dirname(dirname(import.meta.path));
 // ============================================================
 
 let claudeBusy = false;
+interface ClaudeCallOptions {
+  resume?: boolean;
+  imagePath?: string;
+  heartbeat?: { chatId: number | string; threadId?: number };
+}
 const claudeQueue: Array<{
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
   prompt: string;
-  options?: { resume?: boolean; imagePath?: string };
+  options?: ClaudeCallOptions;
 }> = [];
 
 async function processClaudeQueue(): Promise<void> {
@@ -90,7 +104,7 @@ async function processClaudeQueue(): Promise<void> {
   }
 }
 
-const CLAUDE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes — send a "still working" message
 
 // ============================================================
 // CONFIGURATION
@@ -350,7 +364,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Focus on technical discussions: code, architecture, bugs, deployments, CI/CD. " +
       "Be precise and technical. Refer to files, functions, and line numbers when relevant. " +
       "You can suggest code changes and execute tasks.",
-    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak", "metrics", "retro"],
+    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
   },
   "idees": {
     label: "Brainstorm",
@@ -367,7 +381,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "This is the sprint management topic. " +
       "Focus on task tracking, progress updates, priorities, and planning. " +
       "Keep messages short and actionable. Use task IDs when referencing work.",
-    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak", "metrics", "retro"],
+    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
   },
   "serveur": {
     label: "Ops",
@@ -410,6 +424,12 @@ function getTopicName(ctx: Context): string | undefined {
     TOPIC_NAMES[threadId] = topicCreated.name;
   }
   return TOPIC_NAMES[threadId];
+}
+
+function heartbeatOpts(ctx: Context): { chatId: number | string; threadId?: number } {
+  const chatId = ctx.chat?.id ?? "";
+  const threadId = getThreadId(ctx);
+  return threadId ? { chatId, threadId } : { chatId };
 }
 
 function isCommandAllowed(ctx: Context, command: string): boolean {
@@ -469,7 +489,7 @@ bot.use(async (ctx, next) => {
 
 async function callClaude(
   prompt: string,
-  options?: { resume?: boolean; imagePath?: string }
+  options?: ClaudeCallOptions
 ): Promise<string> {
   // If Claude is already busy, queue this call and notify caller
   if (claudeBusy) {
@@ -489,7 +509,7 @@ async function callClaude(
 
 async function callClaudeInternal(
   prompt: string,
-  options?: { resume?: boolean; imagePath?: string }
+  options?: ClaudeCallOptions
 ): Promise<string> {
   const args = [CLAUDE_PATH, "-p", prompt];
 
@@ -501,6 +521,30 @@ async function callClaudeInternal(
   args.push("--output-format", "text", "--dangerously-skip-permissions");
 
   console.log(`Calling Claude: ${prompt.substring(0, 50)}...`);
+
+  // Heartbeat: send periodic "still working" signals on Telegram
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let heartbeatCount = 0;
+  const startTime = Date.now();
+
+  if (options?.heartbeat) {
+    const { chatId, threadId } = options.heartbeat;
+    heartbeatTimer = setInterval(async () => {
+      heartbeatCount++;
+      const elapsed = Math.round((Date.now() - startTime) / 60000);
+      try {
+        const opts: Record<string, unknown> = {};
+        if (threadId) opts.message_thread_id = threadId;
+        await bot.api.sendMessage(
+          chatId,
+          `Je travaille toujours dessus... (${elapsed} min)`,
+          opts
+        );
+      } catch (e) {
+        console.error("Heartbeat send error:", e);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+  }
 
   try {
     // Filter out Claude Code env vars to prevent nested session detection
@@ -517,17 +561,10 @@ async function callClaudeInternal(
       env: cleanEnv,
     });
 
-    // Race between process completion and timeout
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        proc.kill();
-        reject(new Error("Claude timeout apres 5 minutes"));
-      }, CLAUDE_TIMEOUT_MS)
-    );
-
-    const output = await Promise.race([new Response(proc.stdout).text(), timeoutPromise]);
-    const stderr = await Promise.race([new Response(proc.stderr).text(), timeoutPromise]);
-    const exitCode = await Promise.race([proc.exited, timeoutPromise]);
+    // No hard timeout — let the process run until completion
+    const output = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
       console.error("Claude error:", stderr);
@@ -544,11 +581,10 @@ async function callClaudeInternal(
 
     return output.trim();
   } catch (error) {
-    if (error instanceof Error && error.message.includes("timeout")) {
-      return "Desole, le traitement a pris trop de temps (> 5 minutes). Reessaie avec un message plus court.";
-    }
     console.error("Spawn error:", error);
     return `Error: Could not run Claude CLI`;
+  } finally {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
   }
 }
 
@@ -575,6 +611,9 @@ bot.command("help", async (ctx) => {
     "/speak [texte] -- Synthese vocale (TTS)",
     "/metrics [sprint] -- Metriques du sprint (amelioration continue)",
     "/retro [sprint] -- Retrospective automatique du sprint",
+    "/patterns -- Analyse de patterns multi-sprints",
+    "/alerts [sprint] -- Alertes proactives (taches bloquees, rework)",
+    "/profile -- Analyse et evolution du profil utilisateur",
     "/export -- Exporter conversations et memoire",
     "",
     "Envoie un message texte ou vocal pour discuter librement.",
@@ -1084,6 +1123,37 @@ bot.on("callback_query:data", async (ctx) => {
     return;
   }
 
+  // Profile update callbacks
+  if (data.startsWith("profile_")) {
+    if (data === "profile_apply") {
+      if (!supabase) {
+        await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+        return;
+      }
+      const insights = await analyzeProfile(supabase);
+      const updates = proposeProfileUpdates(insights, profileContext);
+      if (updates.length > 0) {
+        const applied = applyProfileUpdates(updates);
+        if (applied) {
+          // Reload profile context
+          try {
+            profileContext = await readFile(join(PROJECT_ROOT, "config", "profile.md"), "utf-8");
+          } catch {}
+          await ctx.answerCallbackQuery({ text: "Profil mis a jour !" });
+          await ctx.editMessageText("Profil mis a jour avec succes.");
+        } else {
+          await ctx.answerCallbackQuery({ text: "Erreur lors de la mise a jour." });
+        }
+      } else {
+        await ctx.answerCallbackQuery({ text: "Aucune mise a jour a appliquer." });
+      }
+    } else if (data === "profile_skip") {
+      await ctx.answerCallbackQuery({ text: "Modifications ignorees." });
+      await ctx.editMessageText("Modifications du profil ignorees.");
+    }
+    return;
+  }
+
   // Unknown callback
   await ctx.answerCallbackQuery();
 });
@@ -1196,6 +1266,65 @@ bot.command("remind", async (ctx) => {
   await ctx.reply(`Rappel programme ${timeLabel}: ${text}`, threadOpts(ctx));
 });
 
+// /patterns — multi-sprint pattern analysis
+bot.command("patterns", async (ctx) => {
+  const blocked = commandGuard(ctx, "patterns");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  await ctx.replyWithChatAction("typing");
+  const analysis = await analyzePatterns(supabase);
+  await sendResponse(ctx, formatPatterns(analysis));
+});
+
+// /alerts — proactive anomaly detection
+bot.command("alerts", async (ctx) => {
+  const blocked = commandGuard(ctx, "alerts");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+  const sprintId = arg || await getCurrentSprint(supabase) || undefined;
+
+  await ctx.replyWithChatAction("typing");
+  const alerts = await runAllChecks(supabase, sprintId);
+  await sendResponse(ctx, formatAlerts(alerts));
+});
+
+// /profile — analyze and evolve user profile
+bot.command("profile", async (ctx) => {
+  const blocked = commandGuard(ctx, "profile");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  await ctx.replyWithChatAction("typing");
+  const insights = await analyzeProfile(supabase);
+  const updates = proposeProfileUpdates(insights, profileContext);
+
+  let response = formatProfileInsights(insights);
+  if (updates.length > 0) {
+    response += "\n\n" + formatProfileUpdates(updates);
+
+    const keyboard = new InlineKeyboard()
+      .text("Appliquer les mises a jour", `profile_apply`)
+      .row()
+      .text("Ignorer", `profile_skip`);
+    await sendResponse(ctx, response);
+    await ctx.reply("Appliquer ces modifications au profil ?", { ...threadOpts(ctx), reply_markup: keyboard });
+  } else {
+    await sendResponse(ctx, response);
+  }
+});
+
 // /export — export conversations and memory
 // /metrics — show sprint metrics
 bot.command("metrics", async (ctx) => {
@@ -1278,7 +1407,7 @@ bot.command("retro", async (ctx) => {
   ].join("\n");
 
   try {
-    const analysis = await callClaude(retroPrompt);
+    const analysis = await callClaude(retroPrompt, { heartbeat: heartbeatOpts(ctx) });
     const jsonMatch = analysis.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       await ctx.reply("Erreur: impossible de parser la retro generee.", threadOpts(ctx));
@@ -1377,7 +1506,7 @@ bot.on("message:text", async (ctx) => {
     ]);
 
     const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName);
-    const rawResponse = await callClaude(enrichedPrompt, { resume: true });
+    const rawResponse = await callClaude(enrichedPrompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
 
     // Parse and save any memory intents, strip tags from response
     const response = await processMemoryIntents(supabase, rawResponse);
@@ -1445,7 +1574,7 @@ bot.on("message:voice", async (ctx) => {
       recentMessages,
       topicName
     );
-    const rawResponse = await callClaude(enrichedPrompt, { resume: true });
+    const rawResponse = await callClaude(enrichedPrompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
     const claudeResponse = await processMemoryIntents(supabase, rawResponse);
 
     await saveMessage("assistant", claudeResponse, meta);
@@ -1496,7 +1625,7 @@ bot.on("message:photo", async (ctx) => {
 
     await saveMessage("user", `[Image]: ${caption}`, meta);
 
-    const claudeResponse = await callClaude(prompt, { resume: true });
+    const claudeResponse = await callClaude(prompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
 
     // Cleanup after processing
     await unlink(filePath).catch(() => {});
@@ -1546,7 +1675,7 @@ bot.on("message:document", async (ctx) => {
 
     await saveMessage("user", `[Document: ${doc.file_name}]: ${caption}`, meta);
 
-    const claudeResponse = await callClaude(prompt, { resume: true });
+    const claudeResponse = await callClaude(prompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
 
     await unlink(filePath).catch(() => {});
 

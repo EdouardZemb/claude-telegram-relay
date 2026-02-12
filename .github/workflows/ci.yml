@@ -31,3 +31,9 @@ jobs:
             echo "Checking $f..."
             bun build --no-bundle --target=bun "$f" || exit 1
           done
+
+      - name: Run unit tests
+        run: bun test tests/unit
+
+      - name: Run integration tests
+        run: bun test tests/integration
