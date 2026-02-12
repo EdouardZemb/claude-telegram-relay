@@ -1,21 +1,139 @@
-# Claude Telegram Relay — Setup Guide
+# Claude Telegram Relay
 
-> Claude Code reads this file automatically. Walk the user through setup one phase at a time.
-> Ask for what you need, configure everything yourself, and confirm each step works before moving on.
+> Claude Code reads this file automatically.
 
-## How This Works
+## Architecture
 
-This project turns Telegram into a personal AI assistant powered by Claude.
+Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supabase.
 
-The user cloned this repo (or gave you the link). Your job: guide them through setup conversationally. Ask questions, save their answers to `.env`, test each step, move on.
+**Data flow:** Telegram → relay.ts → Supabase (tasks, memory, metrics) → Claude Code agents → GitHub PRs → deployment
 
-Do not dump all phases at once. Start with Phase 1. When it works, move to Phase 2. Let the user control the pace.
+### Source Modules (`src/`)
 
-If this is a fresh clone, run `bun run setup` first to install dependencies and create `.env`.
+| Module | Purpose |
+|--------|---------|
+| `relay.ts` | Main bot: message handling, 24 Telegram commands, voice, photos, docs |
+| `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow |
+| `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
+| `memory.ts` | Persistent facts/goals via intent tags ([REMEMBER:], [GOAL:], [DONE:]) |
+| `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
+| `orchestrator.ts` | Multi-agent pipeline: chains analyst → pm → architect → dev → qa |
+| `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates |
+| `bmad-prompts.ts` | Context-aware prompt builder per agent |
+| `auto-pipeline.ts` | Autonomous end-to-end pipeline (PRD → arch → dev → review → done) |
+| `workflow.ts` | Workflow engine: loads config/workflow.yaml, tracks state transitions |
+| `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
+| `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
+| `prd.ts` | PRD management: draft → approved/rejected |
+| `code-review.ts` | Adversarial code review before merge |
+| `feedback-loop.ts` | Learning from retros → permanent agent prompt enrichment |
+| `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
+| `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
+| `workflow-propagation.ts` | Cross-project improvement voting |
+| `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
+| `proactive-planner.ts` | Daily backlog analysis + recommendations |
+| `projects.ts` | Multi-project CRUD with topic-based routing |
+| `notifications.ts` | Proactive Telegram notifications to forum topics |
+| `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
+| `tts.ts` | Text-to-speech via Piper (local) |
+| `alert-cron.ts` | Hourly scheduled alert runner |
+
+### Telegram Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/help` | Command reference |
+| `/task <title>` | Create task (--desc, --priority, --hours) |
+| `/backlog` | View backlog |
+| `/sprint` | View current sprint + progress bar |
+| `/start <id>` | Mark task in_progress |
+| `/done <id>` | Mark task complete |
+| `/exec <id>` | Launch Claude Code agent (requires Gate 1) |
+| `/orchestrate <id>` | Full BMad multi-agent pipeline |
+| `/autopipeline <id>` | Autonomous end-to-end pipeline |
+| `/plan <request>` | Decompose request into subtasks |
+| `/planify` | Proactive planner: backlog reordering, pacing |
+| `/prd` | PRD management (create, list, view, approve, reject) |
+| `/project` | Project management (create, switch, archive, topic) |
+| `/projects` | List all projects |
+| `/profile` | User profile (view, update, insights) |
+| `/metrics` | Sprint metrics (velocity, rework, cycle time) |
+| `/retro <sprint>` | Generate retrospective |
+| `/patterns` | Workflow pattern analysis |
+| `/alerts` | Check anomalies |
+| `/status` | System health check |
+| `/speak <text>` | Text-to-speech |
+| `/remind <msg>` | Set reminder |
+| `/workflow` | BMad workflow overview |
+| `/agents` | List BMad agents |
+| `/export` | Export tasks/metrics |
+
+### Database (Supabase)
+
+Tables: `messages`, `memory`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`
+
+RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`
+
+Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search)
+
+### BMad Workflow
+
+**Gates:**
+1. PRD approval required before /exec
+2. Architecture validation
+3. Code review (CI + adversarial review, 3+ findings required)
+
+**Pipelines:**
+- DEFAULT: analyst → pm → architect → dev → qa
+- QUICK: dev → qa
+- REVIEW: qa → architect
+
+**Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
+
+### Infrastructure
+
+**PM2 services** (ecosystem.config.cjs):
+- `claude-relay` — Main bot (start-relay.sh)
+- `claude-dashboard` — Kanban board (port 3456)
+- `claude-autodeploy` — CI/CD auto-deploy
+- `claude-alert-cron` — Hourly anomaly detection
+
+**Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health
+
+### Project Structure
+
+```
+src/                    25 TypeScript modules (core logic)
+dashboard/              Kanban board (server.ts + index.html)
+config/
+  profile.md            User profile
+  workflow.yaml         Workflow state machine
+  bmad-templates/       Agent YAML definitions + workflow templates
+db/schema.sql           Authoritative database schema
+supabase/functions/     Edge Functions (embed, search)
+tests/                  244 tests (unit + integration)
+scripts/                Deployment, token rotation, setup
+examples/               Onboarding examples (morning briefing, checkin, memory)
+```
+
+### Conventions
+
+- Runtime: Bun
+- Tests: `bun test` (244 tests, all must pass before merge)
+- Git workflow: feature branch → PR → CI → merge to master
+- Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
+- Telegram responses: plain text only, no markdown formatting
+- Voice messages: always respond with voice + text (dual format)
+- Language: French for user-facing, English for code/comments
 
 ---
 
-## Phase 1: Telegram Bot (~3 min)
+## Setup Guide
+
+> For new users setting up the project. Walk through one phase at a time.
+> If this is a fresh clone, run `bun run setup` first.
+
+### Phase 1: Telegram Bot (~3 min)
 
 **You need from the user:**
 - A Telegram bot token from @BotFather
@@ -34,13 +152,9 @@ If this is a fresh clone, run `bun run setup` first to install dependencies and 
 
 **Done when:** Test message arrives on Telegram.
 
----
+### Phase 2: Database & Memory — Supabase (~12 min)
 
-## Phase 2: Database & Memory — Supabase (~12 min)
-
-Your bot's memory lives in Supabase: conversation history, facts, goals, and semantic search.
-
-### Step 1: Create Supabase Project
+#### Step 1: Create Supabase Project
 
 **You need from the user:**
 - Supabase Project URL
@@ -56,9 +170,7 @@ Your bot's memory lives in Supabase: conversation history, facts, goals, and sem
 **What you do:**
 1. Save `SUPABASE_URL` and `SUPABASE_ANON_KEY` to `.env`
 
-### Step 2: Connect Supabase MCP
-
-This lets Claude Code manage the database directly — run queries, deploy functions, apply migrations.
+#### Step 2: Connect Supabase MCP
 
 **What to tell them:**
 1. Go to supabase.com/dashboard/account/tokens
@@ -69,24 +181,16 @@ This lets Claude Code manage the database directly — run queries, deploy funct
 claude mcp add supabase -- npx -y @supabase/mcp-server-supabase@latest --access-token ACCESS_TOKEN
 ```
 
-### Step 3: Create Tables
+#### Step 3: Create Tables
 
-Use the Supabase MCP to run the schema:
 1. Read `db/schema.sql`
 2. Execute it via `execute_sql` (or tell the user to paste it in the SQL Editor)
 3. Run `bun run test:supabase` to verify tables exist
 
-### Step 4: Set Up Semantic Search
-
-This gives your bot real memory — it finds relevant past conversations automatically.
+#### Step 4: Set Up Semantic Search
 
 **You need from the user:**
 - An OpenAI API key (for generating text embeddings)
-
-**What to tell them:**
-1. Go to platform.openai.com, create an account
-2. Go to API keys, create a new key, copy it
-3. The key will be stored in Supabase, not on your computer. It stays with your database.
 
 **What you do:**
 1. Deploy the embed Edge Function via Supabase MCP (`deploy_edge_function` with `supabase/functions/embed/index.ts`)
@@ -98,170 +202,46 @@ This gives your bot real memory — it finds relevant past conversations automat
    - Go to Supabase dashboard > Database > Webhooks > Create webhook
    - Name: `embed_messages`, Table: `messages`, Events: INSERT
    - Type: Supabase Edge Function, Function: `embed`
-   - Create a second webhook: `embed_memory`, Table: `memory`, Events: INSERT
-   - Same Edge Function: `embed`
+   - Create a second webhook: `embed_memory`, Table: `memory`, Events: INSERT, Function: `embed`
 
-### Step 5: Verify
+#### Step 5: Verify
 
-Run `bun run test:supabase` to confirm:
-- Tables exist (messages, memory, logs)
-- Edge Functions respond
-- Embedding generation works
+Run `bun run test:supabase` to confirm tables exist, Edge Functions respond, and embeddings work.
 
-**Done when:** `bun run test:supabase` passes and a test insert into `messages` gets an embedding.
+### Phase 3: Personalize (~3 min)
 
----
-
-## Phase 3: Personalize (~3 min)
-
-**Ask the user:**
-- Their first name
-- Their timezone (e.g., America/New_York, Europe/Berlin)
-- What they do for work (one sentence)
-- Any time constraints (e.g., "I pick up my kid at 3pm on weekdays")
-- How they like to be communicated with (brief/detailed, casual/formal)
+**Ask the user:** first name, timezone, occupation, time constraints, communication style.
 
 **What you do:**
 1. Save `USER_NAME` and `USER_TIMEZONE` to `.env`
 2. Copy `config/profile.example.md` to `config/profile.md`
-3. Fill in `config/profile.md` with their answers — the bot loads this on every message
+3. Fill in `config/profile.md` with their answers
 
-**Done when:** `config/profile.md` exists with their details.
+### Phase 4: Test (~2 min)
 
----
-
-## Phase 4: Test (~2 min)
-
-**What you do:**
 1. Run `bun run start`
-2. Tell the user to open Telegram and send a test message to their bot
-3. Wait for confirmation it responded
-4. Press Ctrl+C to stop
+2. Tell the user to send a test message on Telegram
+3. Confirm it responded, then Ctrl+C to stop
 
-**Troubleshooting if it fails:**
-- Wrong bot token → re-check with BotFather
-- Wrong user ID → re-check with @userinfobot
-- Claude CLI not found → `npm install -g @anthropic-ai/claude-code`
-- Bun not installed → `curl -fsSL https://bun.sh/install | bash`
+### Phase 5: Always On (~5 min)
 
-**Done when:** User confirms their bot responded on Telegram.
+**macOS:** `bun run setup:launchd -- --service relay`
+**Linux:** `bun run setup:services -- --service relay` (uses PM2)
+**Verify:** `npx pm2 status` (Linux) or `launchctl list | grep com.claude` (macOS)
 
----
+### Phase 6: Proactive AI (Optional)
 
-## Phase 5: Always On (~5 min)
+- `examples/smart-checkin.ts` — Periodic intelligent check-ins
+- `examples/morning-briefing.ts` — Daily summary
 
-Make the bot run in the background, start on boot, restart on crash.
+Schedule: `bun run setup:services -- --service all`
 
-**macOS:**
-```
-bun run setup:launchd -- --service relay
-```
-This auto-generates a plist with correct paths and loads it into launchd.
+### Phase 7: Voice Transcription (Optional)
 
-**Linux/Windows:**
-```
-bun run setup:services -- --service relay
-```
-Uses PM2 for process management.
+**Option A: Groq (recommended)** — Set `VOICE_PROVIDER=groq` and `GROQ_API_KEY`
+**Option B: Local whisper** — Set `VOICE_PROVIDER=local`, `WHISPER_BINARY`, `WHISPER_MODEL_PATH`
+Verify: `bun run test:voice`
 
-**Verify:** `launchctl list | grep com.claude` (macOS) or `npx pm2 status` (Linux/Windows)
+### After Setup
 
-**Done when:** Bot runs in the background and survives a terminal close.
-
----
-
-## Phase 6: Proactive AI (Optional, ~5 min)
-
-Two features that turn a chatbot into an assistant.
-
-### Smart Check-ins
-`examples/smart-checkin.ts` — runs on a schedule, gathers context, asks Claude if it should reach out. If yes, sends a brief message. If no, stays silent.
-
-### Morning Briefing
-`examples/morning-briefing.ts` — sends a daily summary. Pattern file with placeholder data fetchers.
-
-**macOS — schedule both:**
-```
-bun run setup:launchd -- --service all
-```
-
-**Linux/Windows — schedule both:**
-```
-bun run setup:services -- --service all
-```
-
-**Done when:** User has scheduled services running, or explicitly skips this phase.
-
----
-
-## Phase 7: Voice Transcription (Optional, ~5 min)
-
-Lets the bot understand voice messages sent on Telegram.
-
-**Ask the user which option they prefer:**
-
-### Option A: Groq (Recommended — free cloud API)
-- State-of-the-art Whisper model, sub-second speed
-- Free: 2,000 transcriptions per day, no credit card
-- Requires internet connection
-
-**What to tell them:**
-1. Go to console.groq.com and create a free account
-2. Go to API Keys, create a new key, copy it
-
-**What you do:**
-1. Save `VOICE_PROVIDER=groq` and `GROQ_API_KEY` to `.env`
-2. Run `bun run test:voice` to verify
-
-### Option B: Local Whisper (offline, private)
-- Runs entirely on their computer, no account needed
-- Requires ffmpeg and whisper-cpp installed
-- First run downloads a 142MB model file
-
-**What you do:**
-1. Check ffmpeg: `ffmpeg -version` (install: `brew install ffmpeg` or `apt install ffmpeg`)
-2. Check whisper-cpp: `whisper-cpp --help` (install: `brew install whisper-cpp` or build from source)
-3. Download model: `curl -L -o ~/whisper-models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`
-4. Save `VOICE_PROVIDER=local`, `WHISPER_BINARY`, `WHISPER_MODEL_PATH` to `.env`
-5. Run `bun run test:voice` to verify
-
-**Done when:** `bun run test:voice` passes.
-
----
-
-## After Setup
-
-Run the full health check:
-```
-bun run setup:verify
-```
-
-Summarize what was set up and what is running. Remind the user:
-- Test by sending a message on Telegram
-- Their bot runs in the background (if Phase 5 was done)
-- Come back to this project folder and type `claude` anytime to make changes
-
----
-
-## What Comes Next — The Full Version
-
-This free relay covers the essentials. The full version unlocks:
-
-- **6 Specialized AI Agents** — Research, Content, Finance, Strategy, Critic + General orchestrator. Route messages through Telegram forum topics. Run board meetings where all six weigh in.
-- **VPS Deployment** — Your bot on a cloud server that never sleeps. Hybrid mode: free local processing when awake, paid API only when sleeping. $2-5/month.
-- **Real Integrations** — Gmail, Google Calendar, Notion tasks connected via MCP. Smart check-ins pull real data, not patterns.
-- **Human-in-the-Loop** — Claude takes actions (send email, update calendar) but asks first via inline Telegram buttons.
-- **Voice & Phone Calls** — Bot speaks back via ElevenLabs. Calls you when something is urgent.
-- **Fallback AI Models** — Auto-switch to OpenRouter or Ollama when Claude is down. Three layers of intelligence.
-- **Production Infrastructure** — Auto-deploy from GitHub, watchdog monitoring, uninstall scripts, full health checks.
-
-**Get the full course with video walkthroughs:**
-- YouTube: youtube.com/@GodaGo (subscribe for tutorials)
-- Community: skool.com/autonomee (full course, direct support, help personalizing for your business)
-
-We also help you personalize the full version for your specific business and workflow. Or package it as a product you sell to your own clients.
-
-The free version gives you a real, working AI assistant.
-The full version gives you a personal AI infrastructure.
-
-Build yours at the AI Productivity Hub.
+Run `bun run setup:verify` for full health check.

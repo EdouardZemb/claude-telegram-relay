@@ -68,8 +68,15 @@ The system improves itself through data-driven retrospectives:
 - Sprint metrics: completion rate, avg delivery time, first-pass rate
 - Multi-sprint pattern analysis across projects
 - Retro actions automatically propose workflow changes
+- Feedback loop: recurring retro patterns become permanent agent instructions
 - Cross-project voting: when 2+ projects suggest the same improvement, it promotes to reference template
+- Dynamic user profiling: learns communication style, activity patterns, autonomy level
 - Workflow config evolves based on evidence, not assumptions
+
+### Autonomous Pipelines
+- `/orchestrate` chains agents in configurable pipelines (DEFAULT, QUICK, REVIEW)
+- `/autopipeline` runs end-to-end without user intervention (PRD → dev → review → done)
+- `/planify` proactively analyzes backlog and suggests priority reordering
 
 ## Quick Start
 
@@ -114,6 +121,9 @@ bun run start          # Start the bot
 | Qualite | /retro [sprint] | Bob (SM) | Retrospective analysis |
 | Qualite | /patterns | Mary (Analyst) | Multi-sprint trend analysis |
 | Qualite | /alerts | Quinn (QA) | Proactive issue detection |
+| Orchestration | /orchestrate \<id\> | All agents | Multi-agent pipeline |
+| Orchestration | /autopipeline \<id\> | All agents | Autonomous end-to-end |
+| Planification | /planify | — | Proactive backlog analysis |
 | Process | /workflow | — | View full BMad process |
 | Process | /agents | — | List all agents and capabilities |
 
@@ -166,11 +176,17 @@ src/
   patterns.ts             # Multi-sprint pattern analysis
   alerts.ts               # Proactive issue detection
   memory.ts               # Facts, goals, semantic search (pgvector)
+  orchestrator.ts         # Multi-agent pipeline orchestrator
+  auto-pipeline.ts        # Autonomous end-to-end pipeline
+  story-files.ts          # Structured task specs (acceptance criteria, steps, tests)
+  feedback-loop.ts        # Retro-driven learning → agent prompt enrichment
+  proactive-planner.ts    # Daily backlog analysis + recommendations
   prd.ts                  # PRD generation and lifecycle
   notifications.ts        # Forum topic notifications
   profile-evolution.ts    # Dynamic user profiling
   transcribe.ts           # Voice transcription (Groq / local Whisper)
   tts.ts                  # Text-to-speech (Piper)
+  alert-cron.ts           # Hourly scheduled alert runner
 
 config/
   bmad-templates/         # BMad Method v6 templates
@@ -208,6 +224,7 @@ supabase/functions/
 | retros | Retrospective analyses and accepted actions |
 | workflow_logs | Transition tracking for workflow engine |
 | workflow_proposals | Cross-project improvement proposals |
+| feedback_rules | Learned patterns from retros → agent prompt enrichment |
 | logs | System logs |
 
 ### Edge Functions
@@ -216,13 +233,14 @@ supabase/functions/
 
 ## Process Management
 
-Three services managed by PM2:
+Four services managed by PM2:
 
 | Service | Description |
 |---------|-------------|
 | claude-relay | Main Telegram bot |
 | claude-dashboard | Kanban board (port 3456) |
 | claude-autodeploy | Auto-deploy watcher |
+| claude-alert-cron | Hourly anomaly detection |
 
 ```bash
 npx pm2 status                      # Check services

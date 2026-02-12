@@ -27,10 +27,11 @@ export async function processMemoryIntents(
 
   // [REMEMBER: fact to store]
   for (const match of response.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)) {
-    await supabase.from("memory").insert({
+    const { error } = await supabase.from("memory").insert({
       type: "fact",
       content: match[1],
     });
+    if (error) console.error("memory insert (fact) error:", error);
     clean = clean.replace(match[0], "");
   }
 
@@ -38,11 +39,12 @@ export async function processMemoryIntents(
   for (const match of response.matchAll(
     /\[GOAL:\s*(.+?)(?:\s*\|\s*DEADLINE:\s*(.+?))?\]/gi
   )) {
-    await supabase.from("memory").insert({
+    const { error } = await supabase.from("memory").insert({
       type: "goal",
       content: match[1],
       deadline: match[2] || null,
     });
+    if (error) console.error("memory insert (goal) error:", error);
     clean = clean.replace(match[0], "");
   }
 
@@ -56,13 +58,14 @@ export async function processMemoryIntents(
       .limit(1);
 
     if (data?.[0]) {
-      await supabase
+      const { error } = await supabase
         .from("memory")
         .update({
           type: "completed_goal",
           completed_at: new Date().toISOString(),
         })
         .eq("id", data[0].id);
+      if (error) console.error("memory update (complete goal) error:", error);
     }
     clean = clean.replace(match[0], "");
   }

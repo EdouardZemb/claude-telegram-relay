@@ -9,7 +9,6 @@ import { createMockSupabase } from "../fixtures/mock-supabase";
 import {
   createProject,
   getProject,
-  getProjectById,
   listProjects,
   updateProject,
   archiveProject,
@@ -126,27 +125,6 @@ describe("getProject", () => {
     const supabase = createMockSupabase({ projects: [] });
 
     const result = await getProject(supabase, "nonexistent");
-    expect(result).toBeNull();
-  });
-});
-
-describe("getProjectById", () => {
-  it("finds project by exact ID", async () => {
-    const supabase = createMockSupabase({
-      projects: [MOCK_PROJECT],
-    });
-
-    const result = await getProjectById(supabase, "proj-001-uuid");
-    expect(result).not.toBeNull();
-    expect(result!.name).toBe("Telegram Relay");
-  });
-
-  it("returns null for non-matching ID", async () => {
-    const supabase = createMockSupabase({
-      projects: [MOCK_PROJECT],
-    });
-
-    const result = await getProjectById(supabase, "nonexistent-id");
     expect(result).toBeNull();
   });
 });

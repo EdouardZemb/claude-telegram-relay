@@ -94,20 +94,6 @@ export async function getProject(
   return byId as Project | null;
 }
 
-export async function getProjectById(
-  supabase: SupabaseClient,
-  id: string
-): Promise<Project | null> {
-  const { data, error } = await supabase
-    .from("projects")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) return null;
-  return data as Project;
-}
-
 export async function listProjects(
   supabase: SupabaseClient,
   opts?: { status?: string }

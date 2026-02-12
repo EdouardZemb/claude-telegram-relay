@@ -358,23 +358,6 @@ export async function orchestrate(
   };
 }
 
-// ── Parallel Review ──────────────────────────────────────────
-
-/**
- * Run multiple review agents in parallel on the same task/diff.
- * Useful for Gate 3: get reviews from QA + Architect simultaneously.
- */
-export async function parallelReview(
-  task: Task,
-  reviewers: AgentRole[] = ["qa", "architect"],
-  shardedContext?: string
-): Promise<AgentStepResult[]> {
-  const promises = reviewers.map((agentId) =>
-    runAgentStep(agentId, task, [], shardedContext)
-  );
-  return Promise.all(promises);
-}
-
 // ── Helpers ──────────────────────────────────────────────────
 
 function buildOrchestrationSummary(
@@ -413,7 +396,7 @@ async function logOrchestrationResult(
   steps: AgentStepResult[],
   totalDurationMs: number
 ): Promise<void> {
-  await supabase.from("workflow_logs").insert({
+  const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
     step: "orchestration",
     from_step: "orchestration_start",
@@ -430,6 +413,7 @@ async function logOrchestrationResult(
       allPassed: steps.every((s) => s.success),
     },
   });
+  if (error) console.error("logOrchestrationResult error:", error);
 }
 
 // ── Format for Telegram ──────────────────────────────────────

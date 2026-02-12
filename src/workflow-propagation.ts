@@ -127,40 +127,6 @@ export async function getPendingProposals(
 }
 
 /**
- * Get promoted proposals that haven't been applied yet.
- */
-export async function getPromotedProposals(
-  supabase: SupabaseClient
-): Promise<WorkflowProposal[]> {
-  const { data, error } = await supabase
-    .from("workflow_proposals")
-    .select("*")
-    .eq("status", "promoted")
-    .order("promoted_at", { ascending: false });
-
-  if (error) {
-    console.error("getPromotedProposals error:", error);
-    return [];
-  }
-  return (data ?? []) as WorkflowProposal[];
-}
-
-/**
- * Reject a proposal.
- */
-export async function rejectProposal(
-  supabase: SupabaseClient,
-  proposalId: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from("workflow_proposals")
-    .update({ status: "rejected" })
-    .eq("id", proposalId);
-
-  return !error;
-}
-
-/**
  * Extract workflow change suggestions from a retro's actions.
  * Looks for patterns like "alleger gate X", "changer checkpoint Y".
  */
