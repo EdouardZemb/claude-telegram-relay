@@ -24,6 +24,11 @@ function matchFilter(row: Row, filters: Filter[]): boolean {
       case "neq":
         if (row[f.column] === f.value) return false;
         break;
+      case "like": {
+        const pattern = String(f.value).replace(/%/g, ".*");
+        if (!new RegExp(`^${pattern}$`).test(String(row[f.column] ?? ""))) return false;
+        break;
+      }
       case "ilike":
         if (!String(row[f.column] ?? "").toLowerCase().includes(
           String(f.value).replace(/%/g, "").toLowerCase()
@@ -114,6 +119,11 @@ class MockQueryBuilder {
 
   neq(column: string, value: any) {
     this.filters.push({ column, op: "neq", value });
+    return this;
+  }
+
+  like(column: string, value: string) {
+    this.filters.push({ column, op: "like", value });
     return this;
   }
 
