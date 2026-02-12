@@ -4,7 +4,15 @@
  * Maps BMad agents to Telegram commands and provides system prompts
  * for each agent persona. Agents are loaded from config/bmad-templates/
  * and used to enrich callClaude and executeTask with role-specific behavior.
+ *
+ * S15-03/04/05: Enhanced with YAML-loaded prompts, auto-routing, and isolation.
  */
+
+import {
+  buildFullAgentPrompt,
+  buildIsolationInstructions,
+  type AgentPromptContext,
+} from "./bmad-prompts.ts";
 
 // ── Agent Types ──────────────────────────────────────────────
 
@@ -246,7 +254,7 @@ export function enrichPromptWithAgent(
 
 /**
  * Build a prompt for sub-agent execution (/exec) enriched with BMad Dev agent.
- * Replaces the simple buildAgentPrompt in agent.ts.
+ * Now uses YAML-loaded prompts with full context (S15-03).
  */
 export function buildBmadExecPrompt(task: {
   title: string;
@@ -259,61 +267,53 @@ export function buildBmadExecPrompt(task: {
   architecture_ref?: string | null;
   subtasks?: Array<{ title: string; ac_mapping?: string; done?: boolean }> | null;
 }): string {
-  const devAgent = getAgent("dev")!;
-  const systemPrompt = buildAgentSystemPrompt(devAgent);
+  const context: AgentPromptContext = {
+    command: "exec",
+    taskTitle: task.title,
+    taskDescription: task.description || undefined,
+    priority: task.priority,
+    acceptanceCriteria: task.acceptance_criteria || undefined,
+    devNotes: task.dev_notes || undefined,
+    architectureRef: task.architecture_ref || undefined,
+    projectName: task.project,
+    subtasks: task.subtasks?.map((st) => ({
+      title: `${st.title}${st.ac_mapping ? ` (AC: ${st.ac_mapping})` : ""}`,
+      done: st.done,
+    })) || undefined,
+  };
 
-  const parts = [
-    systemPrompt,
-    "",
-    "---",
-    "",
-    `TACHE: ${task.title}`,
-  ];
+  // Build full prompt from YAML + context-specific instructions
+  const fullPrompt = buildFullAgentPrompt("dev", context);
 
-  if (task.description) {
-    parts.push(`DESCRIPTION: ${task.description}`);
-  }
-  if (task.project) {
-    parts.push(`PROJET: ${task.project}`);
-  }
-  if (task.priority) {
-    parts.push(`PRIORITE: P${task.priority}`);
-  }
-  if (task.notes) {
-    parts.push(`NOTES: ${task.notes}`);
-  }
-  if (task.acceptance_criteria) {
-    parts.push("", "CRITERES D'ACCEPTATION:", task.acceptance_criteria);
-  }
-  if (task.dev_notes) {
-    parts.push("", "NOTES DEV:", task.dev_notes);
-  }
-  if (task.architecture_ref) {
-    parts.push("", "REFERENCE ARCHITECTURE:", task.architecture_ref);
-  }
-  if (task.subtasks && task.subtasks.length > 0) {
-    parts.push("", "SOUS-TACHES (a executer dans l'ordre):");
-    for (const st of task.subtasks) {
-      const check = st.done ? "[x]" : "[ ]";
-      const ac = st.ac_mapping ? ` (AC: ${st.ac_mapping})` : "";
-      parts.push(`${check} ${st.title}${ac}`);
-    }
-  }
+  // Add isolation instructions
+  const isolation = buildIsolationInstructions("dev");
 
-  parts.push(
-    "",
-    "INSTRUCTIONS:",
-    "- Analyse le codebase existant avant de faire des modifications",
-    "- Ecris du code propre et coherent avec le style existant",
-    "- Ecris des tests pour chaque fonctionnalite implementee",
-    "- Ne marque une sous-tache comme terminee que quand les tests passent",
-    "- Fais un resume concis de ce que tu as fait a la fin",
-    "- Si tu es bloque, explique clairement pourquoi",
-    "",
-    "Commence maintenant."
-  );
+  return `${fullPrompt}\n\n${isolation}`;
+}
 
-  return parts.join("\n");
+/**
+ * Build an enriched prompt for any command using the appropriate agent.
+ * Uses YAML-loaded prompts with command-specific instructions (S15-04).
+ */
+export function buildAgentPromptForCommand(
+  command: string,
+  context: Partial<AgentPromptContext>
+): { prompt: string; agentId: string | undefined } {
+  const agentId = COMMAND_AGENT_MAP[command];
+  if (!agentId) return { prompt: "", agentId: undefined };
+
+  const fullContext: AgentPromptContext = {
+    command,
+    ...context,
+  };
+
+  const prompt = buildFullAgentPrompt(agentId, fullContext);
+  const isolation = buildIsolationInstructions(agentId);
+
+  return {
+    prompt: `${prompt}\n\n${isolation}`,
+    agentId,
+  };
 }
 
 /**

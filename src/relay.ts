@@ -64,6 +64,12 @@ import {
 import { analyzePatterns, formatPatterns, type WorkflowSuggestion } from "./patterns.ts";
 import { runAllChecks, formatAlerts } from "./alerts.ts";
 import {
+  proposeWorkflowChange,
+  extractProposalsFromRetro,
+  getPendingProposals,
+  formatProposals,
+} from "./workflow-propagation.ts";
+import {
   analyzeProfile,
   proposeProfileUpdates,
   applyProfileUpdates,
@@ -92,6 +98,14 @@ import {
   formatProjectList,
   formatProjectDetail,
 } from "./projects.ts";
+import {
+  shardDocument,
+  getRelevantShards,
+  buildShardedContext,
+  buildTaskContext,
+  findRelatedDocuments,
+  formatCrossRefs,
+} from "./document-sharding.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -618,33 +632,83 @@ async function callClaudeInternal(
 // /help — list all available commands
 bot.command("help", async (ctx) => {
   const help = [
-    "Commandes disponibles:",
+    "COMMANDES — Workflow BMad",
     "",
-    "/help -- Cette aide",
-    "/task <titre> -- Ajouter une tache au backlog",
-    "/backlog [projet] -- Voir le backlog",
-    "/sprint [id] -- Voir le sprint actif ou un sprint specifique",
-    "/start <id> -- Demarrer une tache",
-    "/done <id> -- Marquer une tache comme terminee",
-    "/exec <id> -- Executer une tache via un sous-agent Claude",
-    "/plan <description> -- Decomposer une demande en sous-taches",
-    "/prd [id|description] -- Lister, voir ou creer un PRD",
-    "/status -- Etat du serveur et des services",
-    "/remind <heure> <texte> -- Programmer un rappel",
-    "/speak [texte] -- Synthese vocale (TTS)",
-    "/metrics [sprint] -- Metriques du sprint (amelioration continue)",
-    "/retro [sprint] -- Retrospective automatique du sprint",
-    "/patterns -- Analyse de patterns multi-sprints",
-    "/alerts [sprint] -- Alertes proactives (taches bloquees, rework)",
-    "/profile -- Analyse et evolution du profil utilisateur",
-    "/projects -- Liste de tous les projets",
-    "/project [create|switch|archive|topic] -- Gerer les projets",
-    "/agents -- Voir les agents BMad et leurs commandes",
-    "/export -- Exporter conversations et memoire",
+    "ANALYSE & PLANIFICATION",
+    "  /prd <description> -- Creer un PRD (Product Manager John)",
+    "  /plan <description> -- Decomposer en sous-taches (PM John)",
+    "  /agents -- Agents BMad disponibles et leurs roles",
     "",
-    "Envoie un message texte ou vocal pour discuter librement.",
+    "BACKLOG & SPRINT",
+    "  /task <titre> -- Ajouter une tache",
+    "  /backlog [projet] -- Voir le backlog",
+    "  /sprint [id] -- Etat du sprint",
+    "  /start <id> -- Demarrer une tache",
+    "  /done <id> -- Terminer une tache",
+    "",
+    "EXECUTION",
+    "  /exec <id> -- Lancer l'agent Dev (Amelia)",
+    "  /workflow -- Voir le processus BMad complet",
+    "",
+    "QUALITE & AMELIORATION",
+    "  /metrics [sprint] -- Metriques (Scrum Master Bob)",
+    "  /retro [sprint] -- Retrospective (Bob)",
+    "  /patterns -- Analyse multi-sprints (Analyste Mary)",
+    "  /alerts -- Alertes proactives (QA Quinn)",
+    "",
+    "PROJETS",
+    "  /projects -- Tous les projets",
+    "  /project create|switch|archive -- Gerer",
+    "",
+    "UTILITAIRES",
+    "  /status -- Etat serveur",
+    "  /remind <heure> <texte> -- Rappel",
+    "  /speak [texte] -- Synthese vocale",
+    "  /profile -- Profil utilisateur",
+    "  /export -- Export donnees",
+    "",
+    "Envoie un texte ou vocal pour discuter librement.",
   ].join("\n");
   await ctx.reply(help, threadOpts(ctx));
+});
+
+// /workflow — show BMad workflow overview
+bot.command("workflow", async (ctx) => {
+  const workflow = [
+    "WORKFLOW BMad — Processus Complet",
+    "",
+    "1. ANALYSE (Analyste Mary)",
+    "   Research, domain expertise, competitive analysis",
+    "   -> Produit un brief ou une analyse",
+    "",
+    "2. PLANIFICATION (PM John)",
+    "   /prd pour creer le PRD",
+    "   /plan pour decomposer en taches",
+    "   -> Gate 1 : PRD approuve requis",
+    "",
+    "3. ARCHITECTURE (Architecte Winston)",
+    "   Design technique, decisions ADR",
+    "   -> Gate 2 : Architecture validee",
+    "",
+    "4. EXECUTION (Dev Amelia)",
+    "   /exec pour lancer l'implementation",
+    "   Tests obligatoires, story files atomiques",
+    "   -> Gate 3 : Code review avant merge",
+    "",
+    "5. QUALITE (QA Quinn)",
+    "   Tests automatises, review adversariale",
+    "   CI/CD : branche -> PR -> merge -> deploy",
+    "",
+    "6. RETROSPECTIVE (Scrum Master Bob)",
+    "   /retro pour analyser le sprint",
+    "   /metrics pour les donnees quantitatives",
+    "   /patterns pour les tendances multi-sprints",
+    "   -> Les retros decident des ajustements",
+    "",
+    "Chaque gate peut etre bypassee explicitement.",
+    "Le processus s'ameliore via les retros.",
+  ].join("\n");
+  await ctx.reply(workflow, threadOpts(ctx));
 });
 
 // /agents — list BMad agents and their capabilities
@@ -1011,6 +1075,15 @@ bot.command("exec", async (ctx) => {
     return;
   }
 
+  // Enrich task with sharded document context
+  const execProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  if (execProject?.id) {
+    const shardedContext = await buildTaskContext(supabase, task.title, execProject.id, 3000);
+    if (shardedContext) {
+      task.description = (task.description || "") + "\n\nCONTEXTE DOCUMENTS:\n" + shardedContext;
+    }
+  }
+
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   // Workflow tracking
@@ -1209,6 +1282,16 @@ bot.command("prd", async (ctx) => {
     return;
   }
 
+  // Auto-shard the PRD for efficient context loading
+  const currentProjectForShard = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  await shardDocument(supabase, {
+    id: prd.id,
+    title: prd.title,
+    content: prd.content,
+    type: "prd",
+    project_id: currentProjectForShard?.id,
+  });
+
   const detail = formatPRDDetail(prd);
   const keyboard = new InlineKeyboard()
     .text("Approuver", `prd_approve:${prd.id}`)
@@ -1291,9 +1374,36 @@ bot.on("callback_query:data", async (ctx) => {
         // Apply workflow suggestions (checkpoint mode changes) from accepted actions
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
 
+        // Cross-project propagation: extract and propose workflow changes
+        const currentProject = await resolveProjectContext(supabase, ctx.callbackQuery?.message?.message_thread_id);
+        if (currentProject?.id) {
+          const proposals = extractProposalsFromRetro(
+            { sprint: sprintId, actions: retro.actions_proposed },
+            currentProject.id
+          );
+          const propagationResults: string[] = [];
+          for (const p of proposals) {
+            const result = await proposeWorkflowChange(supabase, {
+              ...p,
+              projectId: currentProject.id,
+              sprint: sprintId,
+            });
+            if (result.promoted) {
+              propagationResults.push(`PROMU: ${p.target} — ${p.description} (${result.votes} votes)`);
+            } else if (!result.isNew) {
+              propagationResults.push(`Vote ajoute: ${p.target} (${result.votes} votes)`);
+            } else {
+              propagationResults.push(`Propose: ${p.target}`);
+            }
+          }
+          if (propagationResults.length > 0) {
+            workflowChanges.push(...propagationResults.map((r) => `[CROSS-PROJET] ${r}`));
+          }
+        }
+
         let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
         if (workflowChanges.length > 0) {
-          message += `\n\nModifications du workflow appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
+          message += `\n\nModifications appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
         } else {
           message += " Elles seront prises en compte dans le prochain sprint.";
         }
