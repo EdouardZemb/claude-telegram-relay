@@ -358,23 +358,6 @@ export async function orchestrate(
   };
 }
 
-// ── Parallel Review ──────────────────────────────────────────
-
-/**
- * Run multiple review agents in parallel on the same task/diff.
- * Useful for Gate 3: get reviews from QA + Architect simultaneously.
- */
-export async function parallelReview(
-  task: Task,
-  reviewers: AgentRole[] = ["qa", "architect"],
-  shardedContext?: string
-): Promise<AgentStepResult[]> {
-  const promises = reviewers.map((agentId) =>
-    runAgentStep(agentId, task, [], shardedContext)
-  );
-  return Promise.all(promises);
-}
-
 // ── Helpers ──────────────────────────────────────────────────
 
 function buildOrchestrationSummary(
