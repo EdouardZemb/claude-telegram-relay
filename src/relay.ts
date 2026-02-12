@@ -88,6 +88,14 @@ import {
   clearGateOverrides,
 } from "./gates.ts";
 import {
+  orchestrate,
+  formatOrchestrationResult,
+  DEFAULT_PIPELINE,
+  QUICK_PIPELINE,
+  REVIEW_PIPELINE,
+  type AgentRole,
+} from "./orchestrator.ts";
+import {
   listProjects,
   getProject,
   createProject,
@@ -648,6 +656,7 @@ bot.command("help", async (ctx) => {
     "",
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
+    "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
     "  /workflow -- Voir le processus BMad complet",
     "",
     "QUALITE & AMELIORATION",
@@ -1158,6 +1167,97 @@ bot.command("exec", async (ctx) => {
 
   // Clear gate overrides after execution
   clearGateOverrides(task.id);
+});
+
+// /orchestrate — run a task through a multi-agent pipeline
+bot.command("orchestrate", async (ctx) => {
+  const blocked = commandGuard(ctx, "orchestrate");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const args = ctx.match?.trim() || "";
+  // Parse: /orchestrate <taskId> [pipeline]
+  // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
+  const parts = args.split(/\s+/);
+  const idPrefix = parts[0];
+  const pipelineArg = parts[1] || "full";
+
+  if (!idPrefix) {
+    await ctx.reply(
+      "Usage: /orchestrate <id> [pipeline]\n\n" +
+      "Pipelines disponibles:\n" +
+      "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
+      "  quick — Dev -> QA\n" +
+      "  review — QA -> Architect\n" +
+      "  custom — ex: /orchestrate abc pm,dev,qa",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  // Find task
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("*")
+    .like("id", `${idPrefix}%`)
+    .in("status", ["backlog", "in_progress"])
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(
+      `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const task = matches[0];
+
+  // Resolve pipeline
+  let pipeline: AgentRole[];
+  const validAgents: AgentRole[] = ["analyst", "pm", "architect", "dev", "qa", "sm"];
+  if (pipelineArg === "full") {
+    pipeline = [...DEFAULT_PIPELINE];
+  } else if (pipelineArg === "quick") {
+    pipeline = [...QUICK_PIPELINE];
+  } else if (pipelineArg === "review") {
+    pipeline = [...REVIEW_PIPELINE];
+  } else {
+    // Custom: comma-separated agent IDs
+    const customAgents = pipelineArg.split(",").map((s) => s.trim().toLowerCase());
+    const invalid = customAgents.filter((a) => !validAgents.includes(a as AgentRole));
+    if (invalid.length > 0) {
+      await ctx.reply(
+        `Agents inconnus: ${invalid.join(", ")}\nAgents valides: ${validAgents.join(", ")}`,
+        threadOpts(ctx)
+      );
+      return;
+    }
+    pipeline = customAgents as AgentRole[];
+  }
+
+  await ctx.reply(
+    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}\nCa peut prendre plusieurs minutes...`,
+    threadOpts(ctx)
+  );
+
+  const result = await orchestrate(supabase, task, {
+    pipeline,
+    stopOnFailure: true,
+    onProgress: async (msg) => {
+      await ctx.reply(msg, threadOpts(ctx));
+    },
+  });
+
+  const formatted = formatOrchestrationResult(result);
+  await sendResponse(ctx, formatted);
 });
 
 // /plan — decompose a request into sub-tasks and add them to the backlog
