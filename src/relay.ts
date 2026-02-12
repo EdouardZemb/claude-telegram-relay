@@ -2279,6 +2279,15 @@ async function getDynamicProfile(): Promise<string> {
     if (insights.taskPreferences.avgTasksPerSprint > 0) {
       parts.push(`Moyenne: ${insights.taskPreferences.avgTasksPerSprint} taches/sprint`);
     }
+    if (insights.communicationStyle.prefersBrief) {
+      parts.push(`Style: concis`);
+    }
+    if (insights.activityPattern.activeDays.length > 0) {
+      parts.push(`Jours actifs: ${insights.activityPattern.activeDays.slice(0, 3).join(", ")}`);
+    }
+    if (insights.workflowPreferences.autonomyLevel) {
+      parts.push(`Autonomie: ${insights.workflowPreferences.autonomyLevel}`);
+    }
     dynamicProfileCache = parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
     dynamicProfileLastRefresh = Date.now();
   } catch {
