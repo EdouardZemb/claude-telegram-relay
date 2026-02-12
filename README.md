@@ -2,24 +2,30 @@
 
 A personal AI assistant on Telegram powered by Claude Code.
 
-You message it. Claude responds. Text, photos, documents, voice. It remembers across sessions, checks in proactively, and runs in the background.
+You message it. Claude responds. Text, photos, documents, voice. It remembers across sessions, manages tasks, executes code autonomously, and runs in the background.
 
 **Created by [Goda Go](https://youtube.com/@GodaGo)** | [AI Productivity Hub Community](https://skool.com/autonomee)
 
 ```
 You ──▶ Telegram ──▶ Relay ──▶ Claude Code CLI ──▶ Response
                                     │
-                              Supabase (memory)
+                              Supabase (memory, tasks, PRDs)
 ```
 
 ## What You Get
 
 - **Relay**: Send messages on Telegram, get Claude responses back
 - **Memory**: Semantic search over conversation history, persistent facts and goals via Supabase
+- **Task Management**: Full backlog with sprints, priorities, kanban dashboard
+- **Agentic Execution**: Claude sub-agents that create branches, write code, open PRs, wait for CI
+- **PRD Workflow**: Generate, validate, and track Product Requirements Documents
 - **Proactive**: Smart check-ins that know when to reach out (and when not to)
 - **Briefings**: Daily morning summary with goals and schedule
-- **Voice**: Transcribe voice messages (Groq cloud or local Whisper — your choice)
-- **Always On**: Runs in the background, starts on boot, restarts on crash
+- **Voice**: Transcribe voice messages (Groq cloud or local Whisper) + TTS responses (Piper)
+- **Forum Topics**: Route messages and notifications to dedicated Telegram group topics
+- **Dashboard**: Web-based kanban board for visual task management
+- **CI/CD**: GitHub Actions auto-deploy on merge to master
+- **Always On**: PM2 process management with auto-restart on crash
 - **Guided Setup**: Claude Code reads CLAUDE.md and walks you through everything
 
 ## Quick Start
@@ -38,15 +44,7 @@ cd claude-telegram-relay
 claude
 ```
 
-Claude Code reads `CLAUDE.md` and walks you through setup conversationally:
-
-1. Create a Telegram bot via BotFather
-2. Set up Supabase for persistent memory
-3. Personalize your profile
-4. Test the bot
-5. Configure always-on services
-6. Set up proactive check-ins and briefings
-7. Add voice transcription (optional)
+Claude Code reads `CLAUDE.md` and walks you through setup conversationally.
 
 ### Option B: Manual Setup
 
@@ -60,72 +58,143 @@ bun run test:supabase  # Verify database
 bun run start          # Start the bot
 ```
 
-## Commands
+## Telegram Commands
 
-```bash
-# Run
-bun run start              # Start the bot
-bun run dev                # Start with auto-reload
+### Task Management
+- `/task <title>` — Add a task to the backlog
+- `/backlog [project]` — View current backlog (optionally filter by project)
+- `/sprint [S01]` — View sprint status or a specific sprint
+- `/start <id>` — Mark a task as in_progress
+- `/done <id>` — Mark a task as done
 
-# Setup & Testing
-bun run setup              # Install dependencies, create .env
-bun run test:telegram      # Test Telegram connection
-bun run test:supabase      # Test Supabase connection
-bun run setup:verify       # Full health check
+### Agentic Execution
+- `/exec <id>` — Execute a task using a Claude sub-agent (creates branch, codes, opens PR)
+- `/plan <description>` — Decompose a request into sub-tasks and add to backlog
 
-# Always-On Services
-bun run setup:launchd      # Configure launchd (macOS)
-bun run setup:services     # Configure PM2 (Windows/Linux)
+### PRD Workflow
+- `/prd` — List all PRDs
+- `/prd <id>` — View a specific PRD with validation buttons (Approve/Reject/Modify)
+- `/prd <description>` — Generate a new PRD from a description
 
-# Use --service flag for specific services:
-# bun run setup:launchd -- --service relay
-# bun run setup:launchd -- --service all    (relay + checkin + briefing)
+### Utilities
+- `/status` — Server and bot health status (CPU, memory, PM2 services, message count)
+- `/remind <time> <text>` — Set a reminder (e.g., `/remind 14h30 Call client` or `/remind 2h Check logs`)
+- `/export` — Export all messages, memory, and tasks as JSON
+- `/speak [text]` — Synthesize text to voice (or re-read last response)
+
+## Architecture
+
 ```
-
-## Project Structure
-
-```
-CLAUDE.md                    # Guided setup (Claude Code reads this)
 src/
-  relay.ts                   # Core relay daemon
-  transcribe.ts              # Voice transcription (Groq / whisper.cpp)
-  memory.ts                  # Persistent memory (facts, goals, semantic search)
-examples/
-  smart-checkin.ts           # Proactive check-ins
-  morning-briefing.ts        # Daily briefing
-  memory.ts                  # Memory persistence patterns
-config/
-  profile.example.md         # Personalization template
+  relay.ts           # Main bot daemon — message handlers, commands, Claude CLI calls
+  agent.ts           # Sub-agent execution — branch/PR workflow, git integration
+  tasks.ts           # Task CRUD on Supabase — backlog, sprints, priorities
+  memory.ts          # Memory management — facts, goals, semantic search
+  prd.ts             # PRD generation and lifecycle — draft, approved, rejected
+  notifications.ts   # Proactive notifications to forum topics
+  transcribe.ts      # Voice transcription — Groq or local whisper
+  tts.ts             # Text-to-speech — Piper TTS
+
+dashboard/
+  server.ts          # HTTP server for kanban board (port 3456)
+  index.html         # Frontend kanban UI
+
 db/
-  schema.sql                 # Supabase database schema
-supabase/
-  functions/
-    embed/index.ts           # Auto-embedding Edge Function
-    search/index.ts          # Semantic search Edge Function
-setup/
-  install.ts                 # Prerequisites checker
-  test-telegram.ts           # Telegram connectivity test
-  test-supabase.ts           # Supabase connectivity test
-  test-voice.ts              # Voice transcription test
-  configure-launchd.ts       # macOS service setup
-  configure-services.ts      # Windows/Linux service setup
-  verify.ts                  # Full health check
-daemon/
-  launchagent.plist          # macOS daemon template
-  claude-relay.service       # Linux systemd template
-  README-WINDOWS.md          # Windows options
+  schema.sql         # Complete Supabase schema (tables, RLS, functions, pgvector)
+
+supabase/functions/
+  embed/index.ts     # Auto-embedding Edge Function (OpenAI text-embedding-3-small)
+  search/index.ts    # Semantic search Edge Function
+
+config/
+  profile.example.md # Personalization template
+  profile.md         # User profile (loaded on every message)
+
+scripts/
+  auto-deploy.sh     # Watches for deployments, restarts services
+  notify-deploy.sh   # Sends deploy status to Telegram
+  system-alerts.sh   # System health monitoring
+
+.github/workflows/
+  ci.yml             # CI on pull requests
+  deploy.yml         # Auto-deploy to production on merge to master
 ```
 
-## How It Works
+## Database (Supabase)
 
-The relay does three things:
-1. **Listen** for Telegram messages (via grammY)
-2. **Spawn** Claude Code CLI with context (your profile, memory, time)
-3. **Send** the response back on Telegram
+### Tables
+- **messages** — Conversation history with embeddings (pgvector 1536 dims)
+- **memory** — Facts and goals with embeddings
+- **tasks** — Backlog with status (backlog/in_progress/review/done/cancelled), priority, sprint
+- **prds** — Product Requirements Documents with status (draft/approved/rejected/superseded)
+- **logs** — System logs
 
-Claude Code gives you full power: tools, MCP servers, web search, file access. Not just a model — an AI with hands.
+### RPC Functions
+- `get_recent_messages` — Last N messages for context
+- `match_messages` — Semantic search over messages
+- `match_memory` — Semantic search over memory
+- `get_active_goals` — Active goals
+- `get_facts` — All stored facts
+- `get_sprint_summary` — Sprint progress (counts by status)
 
-Your bot remembers between sessions via Supabase. Every message gets an embedding (via OpenAI, stored in Supabase) so the bot can semantically search past conversations for relevant context. It also tracks facts and goals — Claude detects when you mention something worth remembering and stores it automatically.
+### Edge Functions
+- **embed** — Auto-generates embeddings on INSERT (triggered by DB webhooks)
+- **search** — Semantic search endpoint
+
+## Process Management (PM2)
+
+Three services managed by PM2 (`ecosystem.config.cjs`):
+
+| Service | Description | Logs |
+|---------|-------------|------|
+| `claude-relay` | Main Telegram bot | `~/.claude-relay/logs/relay-*.log` |
+| `claude-dashboard` | Kanban board (port 3456) | `~/.claude-relay/logs/dashboard-*.log` |
+| `claude-autodeploy` | Auto-deploy watcher | `~/.claude-relay/logs/autodeploy-*.log` |
+
+### Common PM2 Commands
+```bash
+npx pm2 status                    # Check all services
+npx pm2 logs claude-relay         # View relay logs
+npx pm2 restart claude-relay      # Restart the bot
+npx pm2 stop all                  # Stop all services
+npx pm2 start ecosystem.config.cjs  # Start all services
+```
+
+## Forum Topics
+
+The bot supports Telegram group forums with topic-specific behavior:
+
+| Topic | Label | Allowed Commands | Purpose |
+|-------|-------|-----------------|---------|
+| claude-relay | Dev | exec, plan, prd, task, backlog, sprint, done, start, status, export, remind, speak | Development discussions |
+| idees | Brainstorm | task, plan, prd, remind, speak | Idea exploration |
+| sprint | Sprint | task, backlog, sprint, done, start, plan, prd, exec, status, remind, speak | Sprint management |
+| serveur | Ops | status, exec, remind, speak | Server operations |
+
+Notifications are routed automatically:
+- PR created/merged → Dev topic
+- Task status changes → Sprint topic
+- Deploy events → Server topic
+
+## Resilience Features
+
+- **Offset management**: Pending Telegram updates are dropped on startup to prevent crash loops from re-processing failed messages
+- **Circuit breaker**: Messages that cause 3+ consecutive errors are automatically skipped
+- **Try/catch isolation**: Each message handler catches errors independently — one bad message won't crash the bot
+- **Lock file**: Prevents multiple bot instances from running simultaneously
+- **Rate limiting**: 30 messages/minute max to prevent abuse
+- **Uncaught exception handler**: Notifies via Telegram before PM2 restarts the process
+- **PM2 auto-restart**: max 10 restarts with 5s delay between attempts
+
+## CI/CD Workflow
+
+1. Create a feature branch: `git checkout -b feature/my-feature`
+2. Make changes, commit, push
+3. Open a PR on GitHub → CI runs tests
+4. Merge to master → GitHub Actions auto-deploys via SSH
+5. PM2 restarts services, deploy notification sent to Telegram
+
+The `/exec` command automates steps 1-3: it spawns a Claude sub-agent that creates a branch, makes changes, and opens a PR.
 
 ## Environment Variables
 
@@ -140,15 +209,34 @@ SUPABASE_ANON_KEY=      # From Supabase dashboard
 
 # Recommended
 USER_NAME=              # Your first name
-USER_TIMEZONE=          # e.g., America/New_York
+USER_TIMEZONE=          # e.g., Europe/Paris
 
-# Optional — Voice
+# Forum group (optional)
+TELEGRAM_GROUP_ID=      # Group ID for forum topics
+SPRINT_THREAD_ID=       # Thread ID of sprint topic
+DEV_THREAD_ID=          # Thread ID of dev topic
+OPS_THREAD_ID=          # Thread ID of ops topic
+
+# Voice (optional)
 VOICE_PROVIDER=         # "groq" or "local"
 GROQ_API_KEY=           # For Groq (free at console.groq.com)
+
+# TTS (optional)
+TTS_PROVIDER=           # "local" for Piper TTS
+PIPER_BINARY=           # Path to piper binary
+PIPER_MODEL=            # Path to piper voice model
+
+# Dashboard
+DASHBOARD_PORT=3456     # Kanban board port
+DASHBOARD_TOKEN=        # Auth token for dashboard access
 
 # Note: OpenAI key for embeddings is stored in Supabase
 # (Edge Function secrets), not in this .env file.
 ```
+
+## Troubleshooting
+
+See [RECOVERY.md](RECOVERY.md) for emergency procedures (bot not responding, SSH access, PM2 recovery).
 
 ## The Full Version
 
