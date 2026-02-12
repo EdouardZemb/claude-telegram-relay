@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // ── Types ────────────────────────────────────────────────────
 
 export interface Alert {
-  type: "stuck_task" | "high_rework" | "behind_schedule" | "long_running_step";
+  type: "stuck_task" | "high_rework" | "behind_schedule" | "long_running_step" | "review_score_drop" | "agent_failure_pattern" | "stale_task";
   severity: "info" | "warning" | "critical";
   message: string;
   data: Record<string, unknown>;
@@ -146,6 +146,141 @@ export async function checkSprintPace(
 }
 
 /**
+ * Check for declining review scores (S16-07).
+ * Alerts when the average review score drops below threshold
+ * over the last N reviews.
+ */
+export async function checkReviewScoreDrop(
+  supabase: SupabaseClient,
+  windowSize: number = 5
+): Promise<Alert[]> {
+  const alerts: Alert[] = [];
+
+  const { data: reviews } = await supabase
+    .from("workflow_logs")
+    .select("metadata, created_at")
+    .eq("step", "code_review")
+    .not("metadata", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(windowSize * 2);
+
+  if (!reviews || reviews.length < windowSize) return alerts;
+
+  const scores = reviews
+    .map((r: any) => r.metadata?.score)
+    .filter((s: any) => typeof s === "number");
+
+  if (scores.length < windowSize) return alerts;
+
+  const recentAvg = scores.slice(0, windowSize).reduce((a: number, b: number) => a + b, 0) / windowSize;
+  const olderScores = scores.slice(windowSize);
+
+  if (olderScores.length > 0) {
+    const olderAvg = olderScores.reduce((a: number, b: number) => a + b, 0) / olderScores.length;
+    const drop = olderAvg - recentAvg;
+
+    if (drop > 15) {
+      alerts.push({
+        type: "review_score_drop",
+        severity: drop > 25 ? "critical" : "warning",
+        message: `Score review en chute: ${Math.round(recentAvg)} (etait ${Math.round(olderAvg)}, -${Math.round(drop)} pts)`,
+        data: { recentAvg: Math.round(recentAvg), olderAvg: Math.round(olderAvg), drop: Math.round(drop) },
+      });
+    }
+  }
+
+  if (recentAvg < 50) {
+    alerts.push({
+      type: "review_score_drop",
+      severity: "critical",
+      message: `Score review moyen tres bas: ${Math.round(recentAvg)}/100 sur les ${windowSize} derniers reviews`,
+      data: { recentAvg: Math.round(recentAvg), windowSize },
+    });
+  }
+
+  return alerts;
+}
+
+/**
+ * Check for recurring agent failures in orchestration (S16-07).
+ */
+export async function checkAgentFailurePatterns(
+  supabase: SupabaseClient
+): Promise<Alert[]> {
+  const alerts: Alert[] = [];
+
+  const { data: logs } = await supabase
+    .from("workflow_logs")
+    .select("metadata, created_at")
+    .eq("step", "orchestration")
+    .not("metadata", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (!logs || logs.length < 3) return alerts;
+
+  // Count failures per agent
+  const agentFailures: Record<string, number> = {};
+  const agentRuns: Record<string, number> = {};
+
+  for (const log of logs) {
+    const results = log.metadata?.results;
+    if (!Array.isArray(results)) continue;
+    for (const r of results) {
+      if (!r.agent) continue;
+      agentRuns[r.agent] = (agentRuns[r.agent] || 0) + 1;
+      if (!r.success) {
+        agentFailures[r.agent] = (agentFailures[r.agent] || 0) + 1;
+      }
+    }
+  }
+
+  for (const [agent, failures] of Object.entries(agentFailures)) {
+    const runs = agentRuns[agent] || 0;
+    if (runs >= 3 && failures / runs > 0.5) {
+      alerts.push({
+        type: "agent_failure_pattern",
+        severity: failures / runs > 0.75 ? "critical" : "warning",
+        message: `Agent ${agent} echoue frequemment: ${failures}/${runs} echecs (${Math.round(failures / runs * 100)}%)`,
+        data: { agent, failures, runs, failureRate: Math.round(failures / runs * 100) },
+      });
+    }
+  }
+
+  return alerts;
+}
+
+/**
+ * Check for stale tasks in backlog > 48h without being picked up (S16-07).
+ */
+export async function checkStaleTasks(
+  supabase: SupabaseClient
+): Promise<Alert[]> {
+  const alerts: Alert[] = [];
+  const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const { data: staleTasks } = await supabase
+    .from("tasks")
+    .select("id, title, created_at, sprint")
+    .eq("status", "backlog")
+    .lt("created_at", cutoff48h)
+    .not("sprint", "is", null)
+    .limit(10);
+
+  for (const task of staleTasks || []) {
+    const hoursOld = Math.round((Date.now() - new Date(task.created_at).getTime()) / (60 * 60 * 1000));
+    alerts.push({
+      type: "stale_task",
+      severity: hoursOld > 96 ? "warning" : "info",
+      message: `Tache en backlog depuis ${hoursOld}h: "${task.title}" (${task.sprint})`,
+      data: { taskId: task.id, title: task.title, hoursOld, sprint: task.sprint },
+    });
+  }
+
+  return alerts;
+}
+
+/**
  * Run all alert checks and return combined results.
  */
 export async function runAllChecks(
@@ -168,6 +303,16 @@ export async function runAllChecks(
       alerts.push(...paceAlerts);
     }
   }
+
+  // S16-07: Enhanced proactive alerts
+  const reviewAlerts = await checkReviewScoreDrop(supabase);
+  alerts.push(...reviewAlerts);
+
+  const agentAlerts = await checkAgentFailurePatterns(supabase);
+  alerts.push(...agentAlerts);
+
+  const staleAlerts = await checkStaleTasks(supabase);
+  alerts.push(...staleAlerts);
 
   return alerts;
 }
