@@ -1614,6 +1614,19 @@ bot.on("callback_query:data", async (ctx) => {
     if (action === "gate_override" && taskId) {
       const gateName = parts.slice(2).join(":"); // gate name may contain colons
       overrideGate(taskId, gateName);
+
+      // Audit trail: log gate override
+      if (supabase) {
+        await supabase.from("workflow_audit").insert({
+          task_id: taskId,
+          action: "gate_override",
+          field: gateName,
+          from_value: "blocked",
+          to_value: "overridden",
+          reason: `User override via Telegram button`,
+        }).catch(() => {});
+      }
+
       await ctx.answerCallbackQuery({ text: "Gate bypassed." });
       await ctx.editMessageText(
         `Gate bypassed: ${gateName}\n\nRelance /exec ${taskId.substring(0, 8)} pour executer la tache.`
