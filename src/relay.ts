@@ -96,6 +96,10 @@ import {
   type AgentRole,
 } from "./orchestrator.ts";
 import {
+  runAutoPipeline,
+  formatPipelineResult,
+} from "./auto-pipeline.ts";
+import {
   listProjects,
   getProject,
   createProject,
@@ -657,6 +661,7 @@ bot.command("help", async (ctx) => {
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
     "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
+    "  /autopipeline <id> [fast|full] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
     "QUALITE & AMELIORATION",
@@ -1257,6 +1262,68 @@ bot.command("orchestrate", async (ctx) => {
   });
 
   const formatted = formatOrchestrationResult(result);
+  await sendResponse(ctx, formatted);
+});
+
+// /autopipeline — run a task through the full automated BMad pipeline
+bot.command("autopipeline", async (ctx) => {
+  const blocked = commandGuard(ctx, "autopipeline");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const args = ctx.match?.trim() || "";
+  const parts = args.split(/\s+/);
+  const idPrefix = parts[0];
+  const mode = parts[1] || "fast"; // "fast" (default) or "full" (with analysis)
+
+  if (!idPrefix) {
+    await ctx.reply(
+      "Usage: /autopipeline <id> [fast|full]\n\n" +
+      "Modes:\n" +
+      "  fast — Gate -> Story -> Dev -> Review (defaut)\n" +
+      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("*")
+    .like("id", `${idPrefix}%`)
+    .in("status", ["backlog", "in_progress"])
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(
+      `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const task = matches[0];
+
+  await ctx.reply(
+    `AUTO-PIPELINE lance pour: ${task.title}\nMode: ${mode}\nLe pipeline tourne en autonomie. Notifications a chaque phase.`,
+    threadOpts(ctx)
+  );
+
+  const result = await runAutoPipeline(supabase, task, {
+    includeAnalysis: mode === "full",
+    onProgress: async (msg) => {
+      await ctx.reply(msg, threadOpts(ctx));
+    },
+  });
+
+  const formatted = formatPipelineResult(result);
   await sendResponse(ctx, formatted);
 });
 
