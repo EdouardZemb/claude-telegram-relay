@@ -119,7 +119,33 @@ npx pm2 save
 3. Possible causes:
    - Claude CLI not authenticated: run `claude` in terminal to re-authenticate
    - Telegram API issue: check https://downdetector.com/status/telegram/
-   - Bot token revoked: check with @BotFather on Telegram
+   - Bot token revoked: see "Token Rotation" below
+
+### Telegram Token Rotation
+
+If the bot token is compromised or needs renewal:
+
+1. Open Telegram, go to @BotFather
+2. Send `/revoke` and select your bot
+3. Copy the new token
+4. Run the rotation script:
+
+```bash
+./scripts/rotate-token.sh <NEW_TOKEN>
+```
+
+The script validates the token format, updates `.env`, restarts PM2, and verifies the bot is back online. The old `.env` is backed up as `.env.bak`.
+
+**Manual method** (if the script fails):
+```bash
+# Edit .env and replace TELEGRAM_BOT_TOKEN
+nano /home/edouard/claude-telegram-relay/.env
+
+# Restart the relay
+npx pm2 restart claude-relay --update-env
+```
+
+**Important:** The bot will be offline between the `/revoke` and the restart (~5 seconds). This is normal.
 
 ### Lock file prevents startup
 
