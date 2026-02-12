@@ -7,7 +7,7 @@
  * Run: bun run src/relay.ts
  */
 
-import { Bot, Context, InputFile } from "grammy";
+import { Bot, Context, InputFile, InlineKeyboard } from "grammy";
 import { spawn } from "bun";
 import { writeFile, mkdir, readFile, unlink } from "fs/promises";
 import { join, dirname } from "path";
@@ -32,6 +32,15 @@ import {
   formatSprintSummary,
 } from "./tasks.ts";
 import { executeTask, decomposeTask } from "./agent.ts";
+import {
+  generatePRD,
+  savePRD,
+  getPRD,
+  getPRDs,
+  updatePRDStatus,
+  formatPRDList,
+  formatPRDDetail,
+} from "./prd.ts";
 import {
   initNotifications,
   notifyPRCreated,
@@ -263,7 +272,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Focus on technical discussions: code, architecture, bugs, deployments, CI/CD. " +
       "Be precise and technical. Refer to files, functions, and line numbers when relevant. " +
       "You can suggest code changes and execute tasks.",
-    allowedCommands: ["exec", "plan", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak"],
+    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak"],
   },
   "idees": {
     label: "Brainstorm",
@@ -272,7 +281,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Help explore ideas freely. Be creative, propose alternatives, play devil's advocate. " +
       "No need to be overly technical here — focus on concepts, possibilities, and strategy. " +
       "Ask follow-up questions to refine ideas.",
-    allowedCommands: ["task", "plan", "remind", "speak"],
+    allowedCommands: ["task", "plan", "prd", "remind", "speak"],
   },
   "sprint": {
     label: "Sprint",
@@ -280,7 +289,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "This is the sprint management topic. " +
       "Focus on task tracking, progress updates, priorities, and planning. " +
       "Keep messages short and actionable. Use task IDs when referencing work.",
-    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "exec", "status", "remind", "speak"],
+    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak"],
   },
   "serveur": {
     label: "Ops",
@@ -727,6 +736,134 @@ bot.command("plan", async (ctx) => {
 
   const lines = added.map((t, i) => `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]`);
   await sendResponse(ctx, `${added.length} taches ajoutees au backlog:\n\n${lines.join("\n")}\n\nUtilise /exec <id> pour lancer l'execution d'une tache.`);
+});
+
+// /prd — generate a PRD from a description, or list existing PRDs
+bot.command("prd", async (ctx) => {
+  const blocked = commandGuard(ctx, "prd");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+  const input = ctx.match?.trim();
+
+  // /prd without args → list PRDs
+  if (!input) {
+    const prds = await getPRDs(supabase);
+    await sendResponse(ctx, formatPRDList(prds));
+    return;
+  }
+
+  // /prd <id> (8 chars or less, looks like a UUID prefix) → show detail
+  if (input.length <= 8 && /^[a-f0-9]+$/.test(input)) {
+    const prd = await getPRD(supabase, input);
+    if (!prd) {
+      await ctx.reply(`Aucun PRD trouve avec l'ID "${input}".`, threadOpts(ctx));
+      return;
+    }
+    const detail = formatPRDDetail(prd);
+    // Send with validation buttons if still draft
+    if (prd.status === "draft") {
+      const keyboard = new InlineKeyboard()
+        .text("Approuver", `prd_approve:${prd.id}`)
+        .text("Rejeter", `prd_reject:${prd.id}`)
+        .row()
+        .text("Modifier", `prd_revise:${prd.id}`);
+      // Split if too long for a single message with keyboard
+      if (detail.length > 4000) {
+        await sendResponse(ctx, detail);
+        await ctx.reply("Actions:", { ...threadOpts(ctx), reply_markup: keyboard });
+      } else {
+        await ctx.reply(detail, { ...threadOpts(ctx), reply_markup: keyboard });
+      }
+    } else {
+      await sendResponse(ctx, detail);
+    }
+    return;
+  }
+
+  // /prd <description> → generate new PRD
+  await ctx.reply("Generation du PRD en cours...", threadOpts(ctx));
+
+  const generated = await generatePRD(input);
+  if (!generated) {
+    await ctx.reply("Impossible de generer le PRD. Reformule ou ajoute plus de details.", threadOpts(ctx));
+    return;
+  }
+
+  const prd = await savePRD(supabase, generated, {
+    requested_by: ctx.from?.first_name || "unknown",
+  });
+
+  if (!prd) {
+    await ctx.reply("Erreur lors de la sauvegarde du PRD.", threadOpts(ctx));
+    return;
+  }
+
+  const detail = formatPRDDetail(prd);
+  const keyboard = new InlineKeyboard()
+    .text("Approuver", `prd_approve:${prd.id}`)
+    .text("Rejeter", `prd_reject:${prd.id}`)
+    .row()
+    .text("Modifier", `prd_revise:${prd.id}`);
+
+  // Send PRD content then buttons
+  if (detail.length > 4000) {
+    await sendResponse(ctx, detail);
+    await ctx.reply("Actions:", { ...threadOpts(ctx), reply_markup: keyboard });
+  } else {
+    await ctx.reply(detail, { ...threadOpts(ctx), reply_markup: keyboard });
+  }
+});
+
+// Callback query handler for PRD validation buttons
+bot.on("callback_query:data", async (ctx) => {
+  const data = ctx.callbackQuery.data;
+
+  if (data.startsWith("prd_")) {
+    if (!supabase) {
+      await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+      return;
+    }
+
+    const [action, prdId] = data.split(":");
+    if (!prdId) {
+      await ctx.answerCallbackQuery({ text: "ID manquant." });
+      return;
+    }
+
+    if (action === "prd_approve") {
+      const updated = await updatePRDStatus(supabase, prdId, "approved");
+      if (updated) {
+        await ctx.answerCallbackQuery({ text: "PRD approuve !" });
+        await ctx.editMessageText(
+          `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
+        );
+      } else {
+        await ctx.answerCallbackQuery({ text: "Erreur." });
+      }
+    } else if (action === "prd_reject") {
+      const updated = await updatePRDStatus(supabase, prdId, "rejected");
+      if (updated) {
+        await ctx.answerCallbackQuery({ text: "PRD rejete." });
+        await ctx.editMessageText(
+          `PRD REJETE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nCree un nouveau PRD avec /prd si tu veux reprendre.`
+        );
+      } else {
+        await ctx.answerCallbackQuery({ text: "Erreur." });
+      }
+    } else if (action === "prd_revise") {
+      await ctx.answerCallbackQuery({ text: "Envoie tes modifications." });
+      await ctx.editMessageText(
+        `PRD en revision [${prdId.substring(0, 8)}]\n\nDecris les modifications souhaitees dans un message. Je regenererai le PRD avec tes retours.`
+      );
+    }
+    return;
+  }
+
+  // Unknown callback
+  await ctx.answerCallbackQuery();
 });
 
 // /status — server and bot status

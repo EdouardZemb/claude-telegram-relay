@@ -248,6 +248,118 @@
     .col-review .column-header { border-top: 3px solid var(--yellow); }
     .col-done .column-header { border-top: 3px solid var(--green); }
 
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* PRD view */
+    .prd-view { display: none; padding: 24px; }
+    .prd-view.visible { display: block; }
+
+    .prd-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .prd-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .prd-card:hover { border-color: var(--accent); }
+
+    .prd-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .prd-card-title { font-size: 16px; font-weight: 600; }
+
+    .prd-status {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .prd-status-draft { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    .prd-status-approved { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+    .prd-status-rejected { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+    .prd-status-superseded { background: rgba(210, 153, 34, 0.2); color: var(--yellow); }
+
+    .prd-card-summary {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .prd-card-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      gap: 12px;
+    }
+
+    .prd-detail {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-top: 16px;
+    }
+
+    .prd-detail.visible { display: block; }
+
+    .prd-detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .prd-detail-back {
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .prd-detail-content {
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      color: var(--text);
+    }
+
+    .prd-empty {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 48px 24px;
+      font-size: 14px;
+    }
+
     @media (max-width: 900px) {
       .board {
         grid-template-columns: 1fr;
@@ -261,6 +373,11 @@
     <h1>Claude Relay — Backlog</h1>
     <div class="sprint-info" id="sprint-info">Chargement...</div>
   </header>
+  <div class="tabs">
+    <div class="tab active" data-tab="kanban" onclick="switchTab('kanban')">Kanban</div>
+    <div class="tab" data-tab="prds" onclick="switchTab('prds')">PRDs</div>
+  </div>
+  <div id="kanban-view">
   <div class="filters" id="filters">
     <label>Sprint:</label>
     <button class="filter-btn active" data-sprint="all">Tous</button>
@@ -290,6 +407,18 @@
     </div>
   </div>
   <div class="status-bar" id="status-bar"></div>
+  </div>
+
+  <div class="prd-view" id="prd-view">
+    <div id="prd-list-container" class="prd-list"></div>
+    <div id="prd-detail-container" class="prd-detail">
+      <div class="prd-detail-header">
+        <span class="prd-detail-back" onclick="showPRDList()">&larr; Retour</span>
+        <span id="prd-detail-status" class="prd-status"></span>
+      </div>
+      <div id="prd-detail-content" class="prd-detail-content"></div>
+    </div>
+  </div>
 
   <script>
     const SUPABASE_URL = '__SUPABASE_URL__';
@@ -435,6 +564,95 @@
       } catch (err) {
         console.error('Load error:', err);
         document.getElementById('status-bar').textContent = `Erreur: ${err.message}`;
+      }
+    }
+
+    // ── Tabs ───────────────────────────────────────────────────
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+      document.getElementById('kanban-view').style.display = tab === 'kanban' ? '' : 'none';
+      const prdView = document.getElementById('prd-view');
+      prdView.style.display = tab === 'prds' ? 'block' : 'none';
+      if (tab === 'prds') loadPRDs();
+    }
+
+    // ── PRDs ──────────────────────────────────────────────────
+
+    let allPRDs = [];
+
+    const PRD_STATUS_LABELS = {
+      draft: 'Brouillon',
+      approved: 'Approuve',
+      rejected: 'Rejete',
+      superseded: 'Remplace',
+    };
+
+    function createPRDCard(prd) {
+      const card = document.createElement('div');
+      card.className = 'prd-card';
+      card.onclick = () => showPRDDetail(prd);
+
+      const date = new Date(prd.created_at).toLocaleDateString('fr-FR');
+      const statusLabel = PRD_STATUS_LABELS[prd.status] || prd.status;
+
+      card.innerHTML = `
+        <div class="prd-card-header">
+          <span class="prd-card-title">${escapeHtml(prd.title)}</span>
+          <span class="prd-status prd-status-${prd.status}">${statusLabel}</span>
+        </div>
+        ${prd.summary ? `<div class="prd-card-summary">${escapeHtml(prd.summary)}</div>` : ''}
+        <div class="prd-card-meta">
+          <span>${escapeHtml(prd.project)}</span>
+          <span>v${prd.version}</span>
+          <span>${date}</span>
+          <span style="font-family: monospace">${prd.id.substring(0, 8)}</span>
+        </div>
+      `;
+      return card;
+    }
+
+    function showPRDDetail(prd) {
+      document.getElementById('prd-list-container').style.display = 'none';
+      const detail = document.getElementById('prd-detail-container');
+      detail.classList.add('visible');
+
+      const statusLabel = PRD_STATUS_LABELS[prd.status] || prd.status;
+      document.getElementById('prd-detail-status').className = `prd-status prd-status-${prd.status}`;
+      document.getElementById('prd-detail-status').textContent = statusLabel;
+
+      const header = `${escapeHtml(prd.title)}\nProjet: ${escapeHtml(prd.project)} | v${prd.version} | ID: ${prd.id.substring(0, 8)}\n${'─'.repeat(60)}\n\n`;
+      document.getElementById('prd-detail-content').textContent = header + (prd.content || '');
+    }
+
+    function showPRDList() {
+      document.getElementById('prd-list-container').style.display = '';
+      document.getElementById('prd-detail-container').classList.remove('visible');
+    }
+
+    async function loadPRDs() {
+      try {
+        const res = await fetch(
+          `${API}/prds?order=created_at.desc`,
+          { headers: HEADERS }
+        );
+        allPRDs = await res.json();
+
+        const container = document.getElementById('prd-list-container');
+        container.innerHTML = '';
+
+        if (allPRDs.length === 0) {
+          container.innerHTML = '<div class="prd-empty">Aucun PRD. Utilise /prd dans Telegram pour en creer un.</div>';
+          return;
+        }
+
+        for (const prd of allPRDs) {
+          container.appendChild(createPRDCard(prd));
+        }
+      } catch (err) {
+        console.error('PRD load error:', err);
       }
     }
 
