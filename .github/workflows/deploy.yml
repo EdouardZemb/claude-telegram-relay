@@ -30,8 +30,20 @@ jobs:
             npx pm2 restart claude-relay --update-env
             npx pm2 restart claude-dashboard --update-env
 
+            # Smoke test: wait for services to start, then check health
+            sleep 5
+            RELAY_STATUS=$(npx pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="claude-relay") | .pm2_env.status')
+            DASHBOARD_STATUS=$(npx pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="claude-dashboard") | .pm2_env.status')
+            HEALTH=$(curl -sf http://localhost:3456/api/health | jq -r '.status' 2>/dev/null || echo "unreachable")
+
+            if [ "$RELAY_STATUS" != "online" ] || [ "$HEALTH" != "ok" ]; then
+              echo "SMOKE TEST FAILED: relay=$RELAY_STATUS dashboard=$DASHBOARD_STATUS health=$HEALTH"
+              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "failure" "Smoke test failed: relay=$RELAY_STATUS health=$HEALTH"
+              exit 1
+            fi
+
             COMMIT=$(git log --oneline -1)
-            echo "Deploy complete: $COMMIT"
+            echo "Deploy complete: $COMMIT (smoke test OK)"
 
             # Notify serveur topic
             bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"

@@ -23,6 +23,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || "";
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || "";
 
+if (!DASHBOARD_TOKEN) {
+  console.warn("WARNING: DASHBOARD_TOKEN not set. Dashboard is unprotected!");
+}
+
 const supabase = SUPABASE_URL && SUPABASE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
@@ -54,15 +58,64 @@ const server = Bun.serve({
     if (authError) return authError;
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      let html = await readFile(join(ROOT, "index.html"), "utf-8");
-      html = html.replace("__SUPABASE_URL__", SUPABASE_URL);
-      html = html.replace("__SUPABASE_KEY__", SUPABASE_KEY);
+      const html = await readFile(join(ROOT, "index.html"), "utf-8");
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    // API proxy — serve Supabase data without exposing keys to client
+    if (url.pathname === "/api/tasks") {
+      return handleProxyTasks();
+    }
+
+    if (url.pathname === "/api/prds") {
+      return handleProxyPRDs();
     }
 
     return new Response("Not found", { status: 404 });
   },
 });
+
+async function handleProxyTasks(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .neq("status", "cancelled")
+    .order("priority", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleProxyPRDs(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+  const { data, error } = await supabase
+    .from("prds")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 async function handleHealthCheck(): Promise<Response> {
   const health: Record<string, unknown> = {

@@ -18,6 +18,12 @@ const TTS_PROVIDER = process.env.TTS_PROVIDER || "";
 export async function synthesize(text: string): Promise<Buffer | null> {
   if (!TTS_PROVIDER) return null;
 
+  // Guard: empty or whitespace-only text would crash Piper
+  if (!text || !text.trim()) {
+    console.warn("TTS: skipping empty text");
+    return null;
+  }
+
   if (TTS_PROVIDER === "local") {
     return synthesizeLocal(text);
   }

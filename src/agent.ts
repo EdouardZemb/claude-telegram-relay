@@ -13,6 +13,7 @@ import { updateTaskStatus, type Task } from "./tasks.ts";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
+const AGENT_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 export interface AgentResult {
   success: boolean;
@@ -40,6 +41,17 @@ function sanitizeBranchName(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .substring(0, 50);
+}
+
+/**
+ * Sanitize a string for safe use in shell arguments.
+ * Removes characters that could be used for command injection.
+ */
+function sanitizeShellArg(input: string): string {
+  return input
+    .replace(/[`$\\!;|&(){}<>]/g, "")
+    .replace(/\n/g, " ")
+    .trim();
 }
 
 /**
@@ -193,9 +205,17 @@ export async function executeTask(
       env: { ...process.env },
     });
 
-    const output = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
+    // Race between process completion and timeout
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => {
+        proc.kill();
+        reject(new Error(`Agent timeout: tache non terminee apres ${AGENT_TIMEOUT_MS / 60000} minutes`));
+      }, AGENT_TIMEOUT_MS)
+    );
+
+    const output = await Promise.race([new Response(proc.stdout).text(), timeoutPromise]);
+    const stderr = await Promise.race([new Response(proc.stderr).text(), timeoutPromise]);
+    const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
     const durationMs = Date.now() - startTime;
 
@@ -222,12 +242,15 @@ export async function executeTask(
       // Push branch
       const pushResult = git("push", "-u", "origin", branchName);
       if (pushResult.ok) {
-        // Create PR via gh CLI
+        // Create PR via gh CLI (sanitize user-controlled strings)
+        const safeTitle = sanitizeShellArg(task.title);
+        const safeDesc = sanitizeShellArg(task.description || "");
+        const prBody = `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${safeDesc}`.trim();
         const prResult = spawnSync(
           ["gh", "pr", "create",
             "-R", GITHUB_REPO,
-            "--title", task.title,
-            "--body", `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${task.description || ""}`.trim(),
+            "--title", safeTitle,
+            "--body", prBody,
             "--base", "master",
             "--head", branchName,
           ],
