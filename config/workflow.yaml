@@ -1,0 +1,100 @@
+# Workflow configurable — S11 Amelioration Continue
+# Ce fichier definit les etapes du workflow agentique et leurs checkpoints.
+# Il est charge par src/workflow.ts et utilise par /exec, /plan, et les metriques.
+# Ce fichier est un objet vivant : il evolue en fonction des retros et des metriques.
+
+version: 1
+
+steps:
+  - id: request
+    label: Demande
+    description: Reception et comprehension de la demande
+    checkpoint:
+      enabled: false
+      mode: off
+
+  - id: decomposition
+    label: Decomposition
+    description: Analyse et decoupage en sous-taches
+    checkpoint:
+      enabled: true
+      mode: light
+      criteria:
+        - Le plan couvre bien la demande originale
+        - Les sous-taches sont claires et actionnables
+        - Pas d'oubli majeur ou de cas limite ignore
+
+  - id: validation
+    label: Validation
+    description: Validation du plan par l'utilisateur
+    checkpoint:
+      enabled: false
+      mode: off
+    skip_conditions:
+      - priority_lte: 2
+        description: Taches de priorite 1-2 peuvent etre auto-validees
+
+  - id: execution
+    label: Execution
+    description: Implementation du code par l'agent
+    checkpoint:
+      enabled: true
+      mode: strict
+      criteria:
+        - Le code est propre et suit les conventions du projet
+        - Pas de regression introduite
+        - Les tests passent
+        - Le diff est minimal et lisible
+
+  - id: review
+    label: Review
+    description: Verification du resultat (CI, tests, qualite)
+    checkpoint:
+      enabled: true
+      mode: light
+      criteria:
+        - La PR est claire et bien decrite
+        - Les checks CI passent
+        - Le changement fait bien ce qui a ete demande
+
+  - id: closure
+    label: Cloture
+    description: Merge, deploy, et mise a jour du backlog
+    checkpoint:
+      enabled: false
+      mode: off
+
+transitions:
+  - from: request
+    to: decomposition
+  - from: decomposition
+    to: validation
+  - from: decomposition
+    to: execution
+    condition: auto_validated
+  - from: validation
+    to: execution
+  - from: validation
+    to: decomposition
+    condition: rework
+  - from: execution
+    to: review
+  - from: execution
+    to: execution
+    condition: checkpoint_failed
+  - from: review
+    to: closure
+  - from: review
+    to: execution
+    condition: rework
+
+checkpoint_modes:
+  off:
+    description: Pas d'evaluation, passage direct
+    auto_pass: true
+  light:
+    description: Verification rapide des criteres principaux
+    max_retries: 1
+  strict:
+    description: Evaluation approfondie, potentiel retour en arriere
+    max_retries: 3
