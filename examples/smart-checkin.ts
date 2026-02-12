@@ -17,7 +17,8 @@ import { join } from "path";
 import { createClient } from "@supabase/supabase-js";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const CHAT_ID = process.env.TELEGRAM_USER_ID || "";
+const CHAT_ID = process.env.TELEGRAM_GROUP_ID || process.env.TELEGRAM_USER_ID || "";
+const SPRINT_THREAD_ID = process.env.SPRINT_THREAD_ID || "";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const STATE_FILE =
   process.env.CHECKIN_STATE_FILE || "/tmp/checkin-state.json";
@@ -118,15 +119,20 @@ async function getLastActivity(): Promise<string> {
 
 async function sendTelegram(message: string): Promise<boolean> {
   try {
+    const body: Record<string, unknown> = {
+      chat_id: CHAT_ID,
+      text: message,
+    };
+    if (SPRINT_THREAD_ID) {
+      body.message_thread_id = parseInt(SPRINT_THREAD_ID);
+    }
+
     const response = await fetch(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: CHAT_ID,
-          text: message,
-        }),
+        body: JSON.stringify(body),
       }
     );
     return response.ok;
