@@ -653,7 +653,8 @@ bot.command("exec", async (ctx) => {
     const summary = result.output.length > 3000
       ? result.output.substring(result.output.length - 3000)
       : result.output;
-    await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}\n\n${summary}`);
+    const prLine = result.prUrl ? `\n\nPR: ${result.prUrl}` : "";
+    await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}\n\n${summary}`);
   } else {
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
