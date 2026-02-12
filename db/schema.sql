@@ -62,16 +62,70 @@ CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
 
 -- ============================================================
+-- TASKS TABLE (Backlog & Sprint Management)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  title TEXT NOT NULL,
+  description TEXT,
+  project TEXT NOT NULL DEFAULT 'telegram-relay',
+  status TEXT NOT NULL DEFAULT 'backlog'
+    CHECK (status IN ('backlog', 'in_progress', 'review', 'done', 'cancelled')),
+  priority INTEGER DEFAULT 3 CHECK (priority >= 1 AND priority <= 5),
+  sprint TEXT,
+  tags TEXT[] DEFAULT '{}',
+  estimated_hours NUMERIC,
+  actual_hours NUMERIC,
+  blocked_by UUID REFERENCES tasks(id),
+  notes TEXT,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_sprint ON tasks(sprint);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_sprint ON tasks(status, sprint);
+
+-- ============================================================
+-- PRDS TABLE (Product Requirements Documents)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS prds (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  title TEXT NOT NULL,
+  summary TEXT,
+  content TEXT NOT NULL,
+  project TEXT NOT NULL DEFAULT 'telegram-relay',
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'approved', 'rejected', 'superseded')),
+  version INTEGER NOT NULL DEFAULT 1,
+  tags TEXT[] DEFAULT '{}',
+  requested_by TEXT,
+  metadata JSONB DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_prds_status ON prds(status);
+CREATE INDEX IF NOT EXISTS idx_prds_project ON prds(project);
+
+-- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory ENABLE ROW LEVEL SECURITY;
 ALTER TABLE logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE prds ENABLE ROW LEVEL SECURITY;
 
 -- Allow all for service role (your bot uses service key)
 CREATE POLICY "Allow all for service role" ON messages FOR ALL USING (true);
 CREATE POLICY "Allow all for service role" ON memory FOR ALL USING (true);
 CREATE POLICY "Allow all for service role" ON logs FOR ALL USING (true);
+CREATE POLICY "Allow all for service role" ON tasks FOR ALL USING (true);
+CREATE POLICY "Allow all for service role" ON prds FOR ALL USING (true);
 
 -- ============================================================
 -- HELPER FUNCTIONS
@@ -123,6 +177,25 @@ BEGIN
   FROM memory m
   WHERE m.type = 'fact'
   ORDER BY m.created_at DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Sprint summary: count tasks by status for a given sprint
+CREATE OR REPLACE FUNCTION get_sprint_summary(p_sprint TEXT)
+RETURNS JSON AS $$
+DECLARE
+  result JSON;
+BEGIN
+  SELECT json_build_object(
+    'total', COUNT(*),
+    'backlog', COUNT(*) FILTER (WHERE t.status = 'backlog'),
+    'in_progress', COUNT(*) FILTER (WHERE t.status = 'in_progress'),
+    'review', COUNT(*) FILTER (WHERE t.status = 'review'),
+    'done', COUNT(*) FILTER (WHERE t.status = 'done')
+  ) INTO result
+  FROM tasks t
+  WHERE t.sprint = p_sprint AND t.status != 'cancelled';
+  RETURN result;
 END;
 $$ LANGUAGE plpgsql;
 

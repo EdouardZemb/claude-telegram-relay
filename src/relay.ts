@@ -51,6 +51,35 @@ import {
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
 // ============================================================
+// CLAUDE CALL MUTEX (process one message at a time)
+// ============================================================
+
+let claudeBusy = false;
+const claudeQueue: Array<{
+  resolve: (value: string) => void;
+  reject: (reason: unknown) => void;
+  prompt: string;
+  options?: { resume?: boolean; imagePath?: string };
+}> = [];
+
+async function processClaudeQueue(): Promise<void> {
+  if (claudeBusy || claudeQueue.length === 0) return;
+  claudeBusy = true;
+  const { resolve, reject, prompt, options } = claudeQueue.shift()!;
+  try {
+    const result = await callClaudeInternal(prompt, options);
+    resolve(result);
+  } catch (error) {
+    reject(error);
+  } finally {
+    claudeBusy = false;
+    processClaudeQueue();
+  }
+}
+
+const CLAUDE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// ============================================================
 // CONFIGURATION
 // ============================================================
 
@@ -134,7 +163,14 @@ function clearError(messageId: number): void {
 }
 
 // Cleanup old entries every 5 minutes
-setInterval(() => errorCounts.clear(), 300_000);
+setInterval(() => {
+  errorCounts.clear();
+  // Also clean up old rate limit timestamps to prevent memory leak
+  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+  while (messageTimestamps.length > 0 && messageTimestamps[0] < cutoff) {
+    messageTimestamps.shift();
+  }
+}, 300_000);
 
 // ============================================================
 // REMINDERS
@@ -217,10 +253,14 @@ process.on("exit", () => {
   } catch {}
 });
 process.on("SIGINT", async () => {
+  console.log("SIGINT received, shutting down gracefully...");
+  try { bot?.stop(); } catch {}
   await releaseLock();
   process.exit(0);
 });
 process.on("SIGTERM", async () => {
+  console.log("SIGTERM received, shutting down gracefully...");
+  try { bot?.stop(); } catch {}
   await releaseLock();
   process.exit(0);
 });
@@ -418,6 +458,26 @@ async function callClaude(
   prompt: string,
   options?: { resume?: boolean; imagePath?: string }
 ): Promise<string> {
+  // If Claude is already busy, queue this call and notify caller
+  if (claudeBusy) {
+    return new Promise<string>((resolve, reject) => {
+      claudeQueue.push({ resolve, reject, prompt, options });
+    });
+  }
+  claudeBusy = true;
+  try {
+    const result = await callClaudeInternal(prompt, options);
+    return result;
+  } finally {
+    claudeBusy = false;
+    processClaudeQueue();
+  }
+}
+
+async function callClaudeInternal(
+  prompt: string,
+  options?: { resume?: boolean; imagePath?: string }
+): Promise<string> {
   const args = [CLAUDE_PATH, "-p", prompt];
 
   // Resume previous session if available and requested
@@ -444,10 +504,17 @@ async function callClaude(
       env: cleanEnv,
     });
 
-    const output = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
+    // Race between process completion and timeout
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => {
+        proc.kill();
+        reject(new Error("Claude timeout apres 5 minutes"));
+      }, CLAUDE_TIMEOUT_MS)
+    );
 
-    const exitCode = await proc.exited;
+    const output = await Promise.race([new Response(proc.stdout).text(), timeoutPromise]);
+    const stderr = await Promise.race([new Response(proc.stderr).text(), timeoutPromise]);
+    const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
     if (exitCode !== 0) {
       console.error("Claude error:", stderr);
@@ -464,6 +531,9 @@ async function callClaude(
 
     return output.trim();
   } catch (error) {
+    if (error instanceof Error && error.message.includes("timeout")) {
+      return "Desole, le traitement a pris trop de temps (> 5 minutes). Reessaie avec un message plus court.";
+    }
     console.error("Spawn error:", error);
     return `Error: Could not run Claude CLI`;
   }
@@ -472,6 +542,30 @@ async function callClaude(
 // ============================================================
 // MESSAGE HANDLERS
 // ============================================================
+
+// /help — list all available commands
+bot.command("help", async (ctx) => {
+  const help = [
+    "Commandes disponibles:",
+    "",
+    "/help -- Cette aide",
+    "/task <titre> -- Ajouter une tache au backlog",
+    "/backlog [projet] -- Voir le backlog",
+    "/sprint [id] -- Voir le sprint actif ou un sprint specifique",
+    "/start <id> -- Demarrer une tache",
+    "/done <id> -- Marquer une tache comme terminee",
+    "/exec <id> -- Executer une tache via un sous-agent Claude",
+    "/plan <description> -- Decomposer une demande en sous-taches",
+    "/prd [id|description] -- Lister, voir ou creer un PRD",
+    "/status -- Etat du serveur et des services",
+    "/remind <heure> <texte> -- Programmer un rappel",
+    "/speak [texte] -- Synthese vocale (TTS)",
+    "/export -- Exporter conversations et memoire",
+    "",
+    "Envoie un message texte ou vocal pour discuter librement.",
+  ].join("\n");
+  await ctx.reply(help, threadOpts(ctx));
+});
 
 // /speak command — synthesize text to voice
 bot.command("speak", async (ctx) => {
@@ -701,9 +795,21 @@ bot.command("exec", async (ctx) => {
   const task = matches[0];
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
+  // Periodic heartbeat so user knows the agent is still running
+  let heartbeatCount = 0;
+  const heartbeat = setInterval(async () => {
+    heartbeatCount++;
+    const elapsed = heartbeatCount * 2;
+    try {
+      await ctx.reply(`Agent en cours... (${elapsed} min)`, threadOpts(ctx));
+    } catch {}
+  }, 120_000); // Every 2 minutes
+
   const result = await executeTask(supabase, task, async (msg) => {
     await ctx.reply(msg, threadOpts(ctx));
   });
+
+  clearInterval(heartbeat);
 
   if (result.success) {
     const duration = Math.round(result.durationMs / 1000);
