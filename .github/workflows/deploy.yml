@@ -30,4 +30,8 @@ jobs:
             npx pm2 restart claude-relay --update-env
             npx pm2 restart claude-dashboard --update-env
 
-            echo "Deploy complete: $(git log --oneline -1)"
+            COMMIT=$(git log --oneline -1)
+            echo "Deploy complete: $COMMIT"
+
+            # Notify serveur topic
+            bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"

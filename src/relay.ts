@@ -32,6 +32,12 @@ import {
   formatSprintSummary,
 } from "./tasks.ts";
 import { executeTask, decomposeTask } from "./agent.ts";
+import {
+  initNotifications,
+  notifyPRCreated,
+  notifyTaskStarted,
+  notifyTaskDone,
+} from "./notifications.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -236,6 +242,7 @@ if (!(await acquireLock())) {
 }
 
 const bot = new Bot(BOT_TOKEN);
+initNotifications(bot);
 
 // ============================================================
 // TOPIC FORUM HELPERS
@@ -573,6 +580,12 @@ bot.command("done", async (ctx) => {
   const updated = await updateTaskStatus(supabase, matches[0].id, "done");
   if (updated) {
     await ctx.reply(`Fait: ${updated.title}`, threadOpts(ctx));
+    // Notify sprint topic if not already in it
+    const currentThread = getThreadId(ctx);
+    const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
+    if (currentThread !== sprintThread) {
+      await notifyTaskDone(updated.title, updated.id);
+    }
   } else {
     await ctx.reply("Erreur lors de la mise a jour.", threadOpts(ctx));
   }
@@ -606,6 +619,12 @@ bot.command("start", async (ctx) => {
   const updated = await updateTaskStatus(supabase, matches[0].id, "in_progress");
   if (updated) {
     await ctx.reply(`En cours: ${updated.title}`, threadOpts(ctx));
+    // Notify sprint topic if not already in it
+    const currentThread = getThreadId(ctx);
+    const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
+    if (currentThread !== sprintThread) {
+      await notifyTaskStarted(updated.title, updated.id);
+    }
   } else {
     await ctx.reply("Erreur lors de la mise a jour.", threadOpts(ctx));
   }
@@ -655,6 +674,13 @@ bot.command("exec", async (ctx) => {
       : result.output;
     const prLine = result.prUrl ? `\n\nPR: ${result.prUrl}` : "";
     await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}\n\n${summary}`);
+
+    // Proactive notifications to other topics
+    if (result.prUrl) {
+      const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
+      await notifyPRCreated(task.title, result.prUrl, branchName);
+    }
+    await notifyTaskDone(task.title, task.id);
   } else {
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
@@ -1172,18 +1198,16 @@ async function sendVoiceResponse(ctx: Context, response: string): Promise<void> 
     const audioBuffer = await synthesize(ttsText);
 
     if (audioBuffer) {
+      // Always send both: voice + text transcription
       await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), opts);
-      // If text was truncated, also send the full text version
-      if (wasTruncated) {
-        await sendResponse(ctx, response);
-      }
+      await sendResponse(ctx, response);
       return;
     }
   } catch (error) {
     console.error("TTS error:", error);
   }
 
-  // Fallback to text if TTS fails or is not configured
+  // Fallback to text only if TTS fails or is not configured
   await sendResponse(ctx, response);
 }
 
