@@ -810,9 +810,12 @@ bot.command("task", async (ctx) => {
     await ctx.reply("Usage: /task titre de la tache", threadOpts(ctx));
     return;
   }
-  const task = await addTask(supabase, input);
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+  const task = await addTask(supabase, input, { project: projectSlug, project_id: currentProject?.id });
   if (task) {
-    await ctx.reply(`Tache ajoutee: ${task.title}\nID: ${task.id.substring(0, 8)}`, threadOpts(ctx));
+    await ctx.reply(`Tache ajoutee: ${task.title}\nProjet: ${projectSlug}\nID: ${task.id.substring(0, 8)}`, threadOpts(ctx));
   } else {
     await ctx.reply("Erreur lors de l'ajout de la tache.", threadOpts(ctx));
   }
@@ -827,8 +830,17 @@ bot.command("backlog", async (ctx) => {
     return;
   }
   const filter = ctx.match?.trim();
-  const tasks = await getBacklog(supabase, filter ? { project: filter } : undefined);
-  await sendResponse(ctx, formatBacklog(tasks));
+  if (filter) {
+    // Explicit project filter
+    const tasks = await getBacklog(supabase, { project: filter });
+    await sendResponse(ctx, formatBacklog(tasks));
+  } else {
+    // Auto-scope to current project
+    const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+    const tasks = await getBacklog(supabase, currentProject ? { project_id: currentProject.id } : undefined);
+    const header = currentProject ? `Backlog — ${currentProject.name}\n\n` : "";
+    await sendResponse(ctx, header + formatBacklog(tasks));
+  }
 });
 
 // /sprint — view sprint status or assign tasks to a sprint
@@ -841,24 +853,30 @@ bot.command("sprint", async (ctx) => {
   }
   const arg = ctx.match?.trim();
 
+  // Resolve project context for scoping
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectFilter = currentProject ? { project_id: currentProject.id } : {};
+
   if (!arg) {
     // Show current sprint summary
-    const current = await getCurrentSprint(supabase);
+    const current = currentProject?.current_sprint || await getCurrentSprint(supabase);
     if (!current) {
       await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.", threadOpts(ctx));
       return;
     }
     const summary = await getSprintSummary(supabase, current);
-    const tasks = await getBacklog(supabase, { sprint: current });
-    const text = formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
+    const tasks = await getBacklog(supabase, { sprint: current, ...projectFilter });
+    const header = currentProject ? `${currentProject.name} — ` : "";
+    const text = header + formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
     await sendResponse(ctx, text);
     return;
   }
 
   // /sprint S01 — show that sprint
   const summary = await getSprintSummary(supabase, arg);
-  const tasks = await getBacklog(supabase, { sprint: arg });
-  const text = formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
+  const tasks = await getBacklog(supabase, { sprint: arg, ...projectFilter });
+  const header = currentProject ? `${currentProject.name} — ` : "";
+  const text = header + formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
   await sendResponse(ctx, text);
 });
 
@@ -1083,10 +1101,14 @@ bot.command("plan", async (ctx) => {
     return;
   }
 
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+
   await ctx.reply("Decomposition en cours...", threadOpts(ctx));
 
   // Workflow tracking for the decomposition step
-  const currentSprint = await getCurrentSprint(supabase);
+  const currentSprint = currentProject?.current_sprint || await getCurrentSprint(supabase);
   const tracker = new WorkflowTracker(supabase, {
     sprintId: currentSprint || undefined,
     startStep: "request",
@@ -1109,6 +1131,8 @@ bot.command("plan", async (ctx) => {
     const task = await addTask(supabase, st.title, {
       description: st.description,
       priority: st.priority,
+      project: projectSlug,
+      project_id: currentProject?.id,
     });
     if (task) added.push(task);
   }
@@ -1127,9 +1151,13 @@ bot.command("prd", async (ctx) => {
   }
   const input = ctx.match?.trim();
 
-  // /prd without args → list PRDs
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+
+  // /prd without args → list PRDs for current project
   if (!input) {
-    const prds = await getPRDs(supabase);
+    const prds = await getPRDs(supabase, { project: projectSlug });
     await sendResponse(ctx, formatPRDList(prds));
     return;
   }
@@ -1165,13 +1193,14 @@ bot.command("prd", async (ctx) => {
   // /prd <description> → generate new PRD
   await ctx.reply("Generation du PRD en cours...", threadOpts(ctx));
 
-  const generated = await generatePRD(input);
+  const generated = await generatePRD(input, projectSlug);
   if (!generated) {
     await ctx.reply("Impossible de generer le PRD. Reformule ou ajoute plus de details.", threadOpts(ctx));
     return;
   }
 
   const prd = await savePRD(supabase, generated, {
+    project: projectSlug,
     requested_by: ctx.from?.first_name || "unknown",
   });
 

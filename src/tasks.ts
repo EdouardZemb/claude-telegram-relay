@@ -44,6 +44,7 @@ export async function addTask(
   opts?: {
     description?: string;
     project?: string;
+    project_id?: string;
     priority?: number;
     sprint?: string;
     tags?: string[];
@@ -59,6 +60,7 @@ export async function addTask(
       title,
       description: opts?.description ?? null,
       project: opts?.project ?? "telegram-relay",
+      project_id: opts?.project_id ?? null,
       priority: opts?.priority ?? 3,
       sprint: opts?.sprint ?? null,
       tags: opts?.tags ?? [],
@@ -79,7 +81,7 @@ export async function addTask(
 
 export async function getBacklog(
   supabase: SupabaseClient,
-  opts?: { project?: string; sprint?: string; status?: string }
+  opts?: { project?: string; project_id?: string; sprint?: string; status?: string }
 ): Promise<Task[]> {
   let query = supabase
     .from("tasks")
@@ -88,7 +90,8 @@ export async function getBacklog(
     .order("priority", { ascending: true })
     .order("created_at", { ascending: true });
 
-  if (opts?.project) query = query.eq("project", opts.project);
+  if (opts?.project_id) query = query.eq("project_id", opts.project_id);
+  else if (opts?.project) query = query.eq("project", opts.project);
   if (opts?.sprint) query = query.eq("sprint", opts.sprint);
   if (opts?.status) query = query.eq("status", opts.status);
 
