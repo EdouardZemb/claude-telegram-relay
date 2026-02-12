@@ -40,3 +40,19 @@ jobs:
 
       - name: Run system tests
         run: bun test tests/system
+
+      - name: Verify test count (anti-regression)
+        run: |
+          RESULT=$(bun test 2>&1)
+          echo "$RESULT" | tail -3
+          PASS_COUNT=$(echo "$RESULT" | grep -oP '\d+ pass' | grep -oP '\d+')
+          FAIL_COUNT=$(echo "$RESULT" | grep -oP '\d+ fail' | grep -oP '\d+' || echo "0")
+          echo "Tests passed: $PASS_COUNT, failed: $FAIL_COUNT"
+          if [ "$FAIL_COUNT" != "0" ]; then
+            echo "ERROR: $FAIL_COUNT tests failed"
+            exit 1
+          fi
+          if [ "$PASS_COUNT" -lt 264 ]; then
+            echo "WARNING: Expected at least 264 tests, got $PASS_COUNT"
+            exit 1
+          fi
