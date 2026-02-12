@@ -14,6 +14,7 @@
 import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Task } from "./tasks.ts";
+import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import {
   buildFullAgentPrompt,
   buildIsolationInstructions,
@@ -232,6 +233,55 @@ function getOrchestrationInstructions(agentId: AgentRole): string {
   }
 }
 
+/**
+ * Persist agent output as a structured artifact on the task.
+ * PM → acceptance_criteria, Architect → architecture_ref, QA → dev_notes append
+ */
+async function persistAgentArtifact(
+  supabase: SupabaseClient,
+  taskId: string,
+  agentId: AgentRole,
+  output: string
+): Promise<void> {
+  const updates: Record<string, any> = {};
+
+  switch (agentId) {
+    case "pm":
+      // PM produces acceptance criteria and subtask decomposition
+      updates.acceptance_criteria = output.substring(0, 10000);
+      break;
+    case "architect":
+      // Architect produces technical design and file impact analysis
+      updates.architecture_ref = output.substring(0, 10000);
+      break;
+    case "qa":
+      // QA produces review findings — append to dev_notes
+      updates.dev_notes_qa = output.substring(0, 5000);
+      break;
+    default:
+      // Other agents: log only (already in workflow_logs)
+      return;
+  }
+
+  if (agentId === "qa") {
+    // Append QA review to existing dev_notes
+    const { data: current } = await supabase
+      .from("tasks")
+      .select("dev_notes")
+      .eq("id", taskId)
+      .single();
+    const existingNotes = current?.dev_notes || "";
+    updates.dev_notes = existingNotes + "\n\n--- QA REVIEW ---\n" + output.substring(0, 5000);
+    delete updates.dev_notes_qa;
+  }
+
+  const { error } = await supabase
+    .from("tasks")
+    .update(updates)
+    .eq("id", taskId);
+  if (error) console.error(`persistAgentArtifact(${agentId}) error:`, error);
+}
+
 // ── Main Orchestrate Function ────────────────────────────────
 
 export interface OrchestrateOptions {
@@ -270,6 +320,21 @@ export async function orchestrate(
       );
     } catch {
       // Sharding not available, proceed without
+    }
+  }
+
+  // Enrich task with story file before orchestration
+  if (supabase) {
+    const story = buildStoryFile(task);
+    await enrichTaskWithStory(supabase, task.id, story);
+    // Reload task with persisted story data
+    const { data: refreshed } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("id", task.id)
+      .single();
+    if (refreshed) {
+      Object.assign(task, refreshed);
     }
   }
 
@@ -312,6 +377,11 @@ export async function orchestrate(
 
     const result = await runAgentStep(agentId, task, steps, shardedContext);
     steps.push(result);
+
+    // Persist agent artifacts to the task in Supabase
+    if (result.success && supabase) {
+      await persistAgentArtifact(supabase, task.id, agentId, result.output);
+    }
 
     if (options.onProgress) {
       const status = result.success ? "OK" : "ECHEC";
