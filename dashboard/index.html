@@ -419,6 +419,7 @@
     <div class="tab active" data-tab="kanban" onclick="switchTab('kanban')">Kanban</div>
     <div class="tab" data-tab="prds" onclick="switchTab('prds')">PRDs</div>
     <div class="tab" data-tab="metrics" onclick="switchTab('metrics')">Metriques</div>
+    <div class="tab" data-tab="reviews" onclick="switchTab('reviews')">Code Reviews</div>
   </div>
   <div id="sprint-live-bar" class="sprint-live-bar" style="display:none;">
     <span class="live-dot"></span>
@@ -475,6 +476,10 @@
     <div id="metrics-chart" style="margin-bottom: 24px;"></div>
     <div id="metrics-details" style="display: flex; gap: 16px; flex-wrap: wrap;"></div>
     <div id="retros-section" style="margin-top: 24px;"></div>
+  </div>
+
+  <div class="prd-view" id="reviews-view">
+    <div id="reviews-content"></div>
   </div>
 
   <script>
@@ -651,8 +656,10 @@
       document.getElementById('kanban-view').style.display = tab === 'kanban' ? '' : 'none';
       document.getElementById('prd-view').style.display = tab === 'prds' ? 'block' : 'none';
       document.getElementById('metrics-view').style.display = tab === 'metrics' ? 'block' : 'none';
+      document.getElementById('reviews-view').style.display = tab === 'reviews' ? 'block' : 'none';
       if (tab === 'prds') loadPRDs();
       if (tab === 'metrics') loadMetrics();
+      if (tab === 'reviews') loadReviews();
     }
 
     // ── PRDs ──────────────────────────────────────────────────
@@ -828,6 +835,70 @@
       } else {
         retrosSection.innerHTML = '';
       }
+    }
+
+    // ── Code Reviews ──────────────────────────────────────────
+
+    async function loadReviews() {
+      try {
+        const tokenParam = new URLSearchParams(window.location.search).get('token');
+        const qs = tokenParam ? '?token=' + tokenParam : '';
+        const res = await fetch('/api/code-reviews' + qs);
+        const reviews = await res.json();
+        renderReviews(reviews);
+      } catch (err) {
+        console.error('Reviews load error:', err);
+        document.getElementById('reviews-content').innerHTML = '<div class="prd-empty">Erreur de chargement des reviews.</div>';
+      }
+    }
+
+    function renderReviews(reviews) {
+      const container = document.getElementById('reviews-content');
+      if (!reviews || reviews.length === 0) {
+        container.innerHTML = '<div class="prd-empty">Aucune code review enregistree.</div>';
+        return;
+      }
+
+      // Summary stats
+      const total = reviews.length;
+      const passed = reviews.filter(r => r.passes_gate).length;
+      const avgScore = Math.round(reviews.reduce((a, r) => a + (r.score || 0), 0) / total);
+      const totalFindings = reviews.reduce((a, r) => a + (r.findings_count || 0), 0);
+      const totalCritical = reviews.reduce((a, r) => a + (r.critical_count || 0), 0);
+
+      let html = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">';
+      html += `<div class="prd-card" style="flex:1;min-width:150px;text-align:center;"><div style="font-size:2em;font-weight:bold;">${total}</div><div>Reviews</div></div>`;
+      html += `<div class="prd-card" style="flex:1;min-width:150px;text-align:center;"><div style="font-size:2em;font-weight:bold;color:${avgScore >= 70 ? '#4caf50' : avgScore >= 50 ? '#ff9800' : '#f44336'}">${avgScore}</div><div>Score moyen</div></div>`;
+      html += `<div class="prd-card" style="flex:1;min-width:150px;text-align:center;"><div style="font-size:2em;font-weight:bold;color:#4caf50">${passed}</div><div>Gate passee</div></div>`;
+      html += `<div class="prd-card" style="flex:1;min-width:150px;text-align:center;"><div style="font-size:2em;font-weight:bold;color:${totalCritical > 0 ? '#f44336' : '#888'}">${totalCritical}</div><div>Critiques</div></div>`;
+      html += '</div>';
+
+      // Review list
+      html += '<div style="display:flex;flex-direction:column;gap:12px;">';
+      for (const r of reviews) {
+        const date = new Date(r.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const scoreColor = (r.score || 0) >= 70 ? '#4caf50' : (r.score || 0) >= 50 ? '#ff9800' : '#f44336';
+        const gateLabel = r.passes_gate ? 'PASSE' : 'BLOQUE';
+        const gateColor = r.passes_gate ? '#4caf50' : '#f44336';
+
+        html += '<div class="prd-card">';
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">`;
+        html += `<strong>${r.task_title}</strong>`;
+        html += `<span style="color:${scoreColor};font-weight:bold;font-size:1.2em;">${r.score || '?'}/100</span>`;
+        html += '</div>';
+        html += `<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.9em;color:#888;">`;
+        html += `<span>${date}</span>`;
+        html += `<span style="color:${gateColor};font-weight:bold;">Gate: ${gateLabel}</span>`;
+        html += `<span>${r.findings_count || 0} findings</span>`;
+        if (r.critical_count > 0) html += `<span style="color:#f44336;">${r.critical_count} critiques</span>`;
+        if (r.branch) html += `<span>${r.branch}</span>`;
+        html += '</div>';
+        if (r.summary) html += `<div style="margin-top:8px;font-size:0.9em;">${r.summary}</div>`;
+        html += '</div>';
+      }
+      html += '</div>';
+
+      container.innerHTML = html;
     }
 
     // Sprint live bar

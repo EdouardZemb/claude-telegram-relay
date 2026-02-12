@@ -98,6 +98,10 @@ const server = Bun.serve({
       return handleSprintLive();
     }
 
+    if (url.pathname === "/api/code-reviews") {
+      return handleCodeReviews();
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
@@ -472,6 +476,56 @@ async function handleSprintLive(): Promise<Response> {
   };
 
   return new Response(JSON.stringify(response, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleCodeReviews(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+
+  // Fetch code review entries from workflow_logs
+  const { data, error } = await supabase
+    .from("workflow_logs")
+    .select("task_id, metadata, created_at, duration_seconds")
+    .eq("step", "code_review")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Enrich with task titles
+  const taskIds = [...new Set((data || []).map((d: any) => d.task_id).filter(Boolean))];
+  let taskMap: Record<string, string> = {};
+  if (taskIds.length > 0) {
+    const { data: tasks } = await supabase
+      .from("tasks")
+      .select("id, title")
+      .in("id", taskIds);
+    if (tasks) {
+      taskMap = Object.fromEntries(tasks.map((t: any) => [t.id, t.title]));
+    }
+  }
+
+  const reviews = (data || []).map((r: any) => ({
+    task_id: r.task_id,
+    task_title: taskMap[r.task_id] || "Unknown",
+    created_at: r.created_at,
+    score: r.metadata?.score ?? null,
+    passes_gate: r.metadata?.passes_gate ?? null,
+    findings_count: r.metadata?.findings_count ?? 0,
+    critical_count: r.metadata?.critical_count ?? 0,
+    branch: r.metadata?.branch ?? null,
+    summary: r.metadata?.summary ?? null,
+  }));
+
+  return new Response(JSON.stringify(reviews, null, 2), {
     headers: { "Content-Type": "application/json" },
   });
 }

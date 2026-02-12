@@ -1200,7 +1200,7 @@ bot.command("exec", async (ctx) => {
   }
 
   // Clear gate overrides after execution
-  clearGateOverrides(task.id);
+  await clearGateOverrides(supabase, task.id);
 });
 
 // /orchestrate — run a task through a multi-agent pipeline
@@ -1649,21 +1649,9 @@ bot.on("callback_query:data", async (ctx) => {
     const action = parts[0]; // gate_override or gate_cancel
     const taskId = parts[1];
 
-    if (action === "gate_override" && taskId) {
+    if (action === "gate_override" && taskId && supabase) {
       const gateName = parts.slice(2).join(":"); // gate name may contain colons
-      overrideGate(taskId, gateName);
-
-      // Audit trail: log gate override
-      if (supabase) {
-        await supabase.from("workflow_audit").insert({
-          task_id: taskId,
-          action: "gate_override",
-          field: gateName,
-          from_value: "blocked",
-          to_value: "overridden",
-          reason: `User override via Telegram button`,
-        }).catch(() => {});
-      }
+      await overrideGate(supabase, taskId, gateName);
 
       await ctx.answerCallbackQuery({ text: "Gate bypassed." });
       await ctx.editMessageText(

@@ -77,31 +77,54 @@ export async function checkGate1_PRD(
 /**
  * Check Gate 2: Architecture readiness.
  *
- * For now, checks if the task has dev_notes or architecture_ref populated
- * (story file enrichment). In a full BMad implementation, this would
- * check for a validated architecture document.
+ * Validates that the task has real BMad artefacts:
+ * - acceptance_criteria (from story file or /plan)
+ * - architecture_ref (from architect agent or manual)
+ * - dev_notes (from story enrichment)
+ *
+ * A task passes if it has at least acceptance_criteria OR architecture_ref.
+ * A description alone is not sufficient.
  */
 export async function checkGate2_Architecture(
   supabase: SupabaseClient,
   task: { id: string; title: string; description: string | null }
 ): Promise<GateResult> {
-  // A task with sufficient description/notes is considered architecture-ready
-  // This gate becomes stricter as we add story files (S14-04)
-  const hasDescription = task.description && task.description.length > 20;
+  // Fetch full task data to check BMad artefacts
+  const { data: fullTask } = await supabase
+    .from("tasks")
+    .select("acceptance_criteria, architecture_ref, dev_notes, subtasks")
+    .eq("id", task.id)
+    .single();
 
-  if (hasDescription) {
+  const hasAcceptanceCriteria = fullTask?.acceptance_criteria && fullTask.acceptance_criteria.trim().length > 0;
+  const hasArchitectureRef = fullTask?.architecture_ref && fullTask.architecture_ref.trim().length > 0;
+  const hasDevNotes = fullTask?.dev_notes && fullTask.dev_notes.trim().length > 0;
+  const hasSubtasks = Array.isArray(fullTask?.subtasks) && fullTask.subtasks.length > 0;
+
+  // Pass if task has at least acceptance criteria or architecture ref
+  if (hasAcceptanceCriteria || hasArchitectureRef) {
+    const artefacts: string[] = [];
+    if (hasAcceptanceCriteria) artefacts.push("acceptance criteria");
+    if (hasArchitectureRef) artefacts.push("architecture ref");
+    if (hasDevNotes) artefacts.push("dev notes");
+    if (hasSubtasks) artefacts.push(`${fullTask.subtasks.length} subtasks`);
     return {
       passed: true,
       gate: "GATE 2 — Architecture",
-      reason: "Tache documentee, prete pour l'implementation.",
+      reason: `Artefacts BMad valides: ${artefacts.join(", ")}.`,
       overridable: false,
     };
   }
 
+  // Build helpful message about what's missing
+  const missing: string[] = [];
+  if (!hasAcceptanceCriteria) missing.push("acceptance criteria (Given/When/Then)");
+  if (!hasArchitectureRef) missing.push("architecture ref");
+
   return {
     passed: false,
     gate: "GATE 2 — Architecture",
-    reason: `La tache "${task.title}" manque de contexte technique. Ajoute une description detaillee ou utilise /plan pour structurer.`,
+    reason: `La tache "${task.title}" n'a pas d'artefacts BMad suffisants.\nManquant: ${missing.join(", ")}.\n\nUtilise /plan pour generer des story files, ou /orchestrate pour le pipeline complet.`,
     overridable: true,
   };
 }
@@ -123,33 +146,56 @@ export async function checkAllGates(
   return null; // All gates passed
 }
 
-// ── Gate Override Tracking ────────────────────────────────────
+// ── Gate Override Tracking (persisted in workflow_audit) ──────
 
 /**
- * Track active gate overrides.
- * Key: taskId, Value: set of gate names that were overridden.
+ * Record that a user explicitly overrode a gate for a task.
+ * Persisted in workflow_audit table so overrides survive restarts.
  */
-const gateOverrides = new Map<string, Set<string>>();
-
-/** Record that a user explicitly overrode a gate for a task */
-export function overrideGate(taskId: string, gateName: string): void {
-  const overrides = gateOverrides.get(taskId) || new Set();
-  overrides.add(gateName);
-  gateOverrides.set(taskId, overrides);
-}
-
-/** Check if a gate was overridden for a task */
-export function isGateOverridden(taskId: string, gateName: string): boolean {
-  return gateOverrides.get(taskId)?.has(gateName) || false;
-}
-
-/** Clear all overrides for a task (after exec completes) */
-export function clearGateOverrides(taskId: string): void {
-  gateOverrides.delete(taskId);
+export async function overrideGate(supabase: SupabaseClient, taskId: string, gateName: string): Promise<void> {
+  const { error } = await supabase.from("workflow_audit").insert({
+    task_id: taskId,
+    action: "gate_override",
+    field: gateName,
+    from_value: "blocked",
+    to_value: "overridden",
+    reason: "User override via Telegram button",
+  });
+  if (error) console.error("overrideGate error:", error);
 }
 
 /**
- * Run all gates, respecting overrides.
+ * Check if a gate was overridden for a task.
+ * Reads from workflow_audit table.
+ */
+export async function isGateOverridden(supabase: SupabaseClient, taskId: string, gateName: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("workflow_audit")
+    .select("id")
+    .eq("task_id", taskId)
+    .eq("action", "gate_override")
+    .eq("field", gateName)
+    .eq("to_value", "overridden")
+    .limit(1);
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * Clear all overrides for a task (after exec completes).
+ * Marks them as consumed in workflow_audit.
+ */
+export async function clearGateOverrides(supabase: SupabaseClient, taskId: string): Promise<void> {
+  const { error } = await supabase
+    .from("workflow_audit")
+    .update({ to_value: "consumed" })
+    .eq("task_id", taskId)
+    .eq("action", "gate_override")
+    .eq("to_value", "overridden");
+  if (error) console.error("clearGateOverrides error:", error);
+}
+
+/**
+ * Run all gates, respecting overrides (persisted in DB).
  * Returns the first non-overridden failing gate, or null if all pass/overridden.
  */
 export async function checkGatesWithOverrides(
@@ -157,10 +203,10 @@ export async function checkGatesWithOverrides(
   task: { id: string; title: string; description: string | null; project: string; sprint: string | null }
 ): Promise<GateResult | null> {
   const gate1 = await checkGate1_PRD(supabase, task);
-  if (!gate1.passed && !isGateOverridden(task.id, gate1.gate)) return gate1;
+  if (!gate1.passed && !(await isGateOverridden(supabase, task.id, gate1.gate))) return gate1;
 
   const gate2 = await checkGate2_Architecture(supabase, task);
-  if (!gate2.passed && !isGateOverridden(task.id, gate2.gate)) return gate2;
+  if (!gate2.passed && !(await isGateOverridden(supabase, task.id, gate2.gate))) return gate2;
 
   return null;
 }
