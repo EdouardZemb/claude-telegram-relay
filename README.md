@@ -1,32 +1,75 @@
 # Claude Telegram Relay
 
-A personal AI assistant on Telegram powered by Claude Code.
+A self-improving agentic framework powered by Claude Code, piloted via Telegram.
 
-You message it. Claude responds. Text, photos, documents, voice. It remembers across sessions, manages tasks, executes code autonomously, and runs in the background.
+Not just a chatbot. A structured AI workflow system with BMad methodology, multi-project management, autonomous code execution, adversarial code review, and continuous improvement through retrospectives.
 
 **Created by [Goda Go](https://youtube.com/@GodaGo)** | [AI Productivity Hub Community](https://skool.com/autonomee)
 
 ```
-You ──▶ Telegram ──▶ Relay ──▶ Claude Code CLI ──▶ Response
-                                    │
-                              Supabase (memory, tasks, PRDs)
+                        ┌─────────────────────────────────────┐
+                        │         BMad Workflow Engine         │
+                        │                                     │
+  Telegram ──────────▶  │  Analyse ─▶ PRD ─▶ Architecture     │
+  (text, voice, docs)   │     │        │        │              │
+                        │  Gate 1   Gate 2   Gate 3            │
+                        │     │        │        │              │
+                        │  Execution ─▶ Review ─▶ Merge        │
+                        │     │                                │
+                        │  Retrospective ──▶ Self-Improvement  │
+                        └──────────────┬──────────────────────┘
+                                       │
+                              Supabase (memory, tasks,
+                              PRDs, metrics, proposals)
 ```
 
-## What You Get
+## Core Capabilities
 
-- **Relay**: Send messages on Telegram, get Claude responses back
-- **Memory**: Semantic search over conversation history, persistent facts and goals via Supabase
-- **Task Management**: Full backlog with sprints, priorities, kanban dashboard
-- **Agentic Execution**: Claude sub-agents that create branches, write code, open PRs, wait for CI
-- **PRD Workflow**: Generate, validate, and track Product Requirements Documents
-- **Proactive**: Smart check-ins that know when to reach out (and when not to)
-- **Briefings**: Daily morning summary with goals and schedule
-- **Voice**: Transcribe voice messages (Groq cloud or local Whisper) + TTS responses (Piper)
-- **Forum Topics**: Route messages and notifications to dedicated Telegram group topics
-- **Dashboard**: Web-based kanban board for visual task management
-- **CI/CD**: GitHub Actions auto-deploy on merge to master
-- **Always On**: PM2 process management with auto-restart on crash
-- **Guided Setup**: Claude Code reads CLAUDE.md and walks you through everything
+### BMad Method Integration
+6 specialized AI agents, each with a distinct persona, loaded from YAML templates:
+
+| Agent | Role | Trigger |
+|-------|------|---------|
+| Mary (Analyst) | Market research, competitive analysis, domain expertise | /patterns |
+| John (PM) | PRD creation, task decomposition, requirement discovery | /plan, /prd |
+| Winston (Architect) | Technical design, architecture decisions | via /plan |
+| Bob (Scrum Master) | Sprint planning, retrospectives, metrics analysis | /sprint, /retro, /metrics |
+| Amelia (Dev) | Code execution, test-driven implementation | /exec |
+| Quinn (QA) | Test automation, proactive alerts, code review | /alerts |
+
+### 3-Gate Workflow
+Strict validation enforced before code reaches production:
+
+- **Gate 1 — PRD**: No execution without an approved Product Requirements Document
+- **Gate 2 — Architecture**: Tasks must have sufficient technical context
+- **Gate 3 — Code Review**: Adversarial review (minimum 3 findings, score 0-100, blocks merge if < 50)
+
+Gates can be bypassed with explicit user override via inline Telegram buttons.
+
+### Multi-Project Management
+Manage multiple projects from a single Telegram bot:
+
+- `/project create <name>` to create a new project
+- Topic-based routing: each Telegram forum topic maps to a project
+- All commands auto-scope to the active project
+- Separate workflows, metrics, and retrospectives per project
+- Cross-project improvement propagation via voting mechanism
+
+### Document Sharding
+Large documents (PRDs, architecture) are split into indexed sections:
+
+- Only relevant sections loaded into agent context (saves tokens)
+- Cross-references between document sections
+- Task execution automatically enriched with relevant document shards
+
+### Continuous Improvement
+The system improves itself through data-driven retrospectives:
+
+- Sprint metrics: completion rate, avg delivery time, first-pass rate
+- Multi-sprint pattern analysis across projects
+- Retro actions automatically propose workflow changes
+- Cross-project voting: when 2+ projects suggest the same improvement, it promotes to reference template
+- Workflow config evolves based on evidence, not assumptions
 
 ## Quick Start
 
@@ -36,7 +79,7 @@ You ──▶ Telegram ──▶ Relay ──▶ Claude Code CLI ──▶ Respo
 - **[Claude Code](https://claude.ai/claude-code)** CLI installed and authenticated
 - A **Telegram** account
 
-### Option A: Guided Setup (Recommended)
+### Guided Setup (Recommended)
 
 ```bash
 git clone https://github.com/godagoo/claude-telegram-relay.git
@@ -44,9 +87,9 @@ cd claude-telegram-relay
 claude
 ```
 
-Claude Code reads `CLAUDE.md` and walks you through setup conversationally.
+Claude Code reads `CLAUDE.md` and walks you through setup phase by phase.
 
-### Option B: Manual Setup
+### Manual Setup
 
 ```bash
 git clone https://github.com/godagoo/claude-telegram-relay.git
@@ -60,204 +103,174 @@ bun run start          # Start the bot
 
 ## Telegram Commands
 
-### Task Management
-- `/task <title>` — Add a task to the backlog
-- `/backlog [project]` — View current backlog (optionally filter by project)
-- `/sprint [S01]` — View sprint status or a specific sprint
-- `/start <id>` — Mark a task as in_progress
-- `/done <id>` — Mark a task as done
+### Workflow BMad
 
-### Agentic Execution
-- `/exec <id>` — Execute a task using a Claude sub-agent (creates branch, codes, opens PR)
-- `/plan <description>` — Decompose a request into sub-tasks and add to backlog
+| Phase | Command | Agent | Description |
+|-------|---------|-------|-------------|
+| Analyse | /prd \<description\> | John (PM) | Create a Product Requirements Document |
+| Planification | /plan \<description\> | John (PM) | Decompose into sub-tasks |
+| Execution | /exec \<id\> | Amelia (Dev) | Launch autonomous code agent |
+| Qualite | /metrics [sprint] | Bob (SM) | Sprint metrics |
+| Qualite | /retro [sprint] | Bob (SM) | Retrospective analysis |
+| Qualite | /patterns | Mary (Analyst) | Multi-sprint trend analysis |
+| Qualite | /alerts | Quinn (QA) | Proactive issue detection |
+| Process | /workflow | — | View full BMad process |
+| Process | /agents | — | List all agents and capabilities |
 
-### PRD Workflow
-- `/prd` — List all PRDs
-- `/prd <id>` — View a specific PRD with validation buttons (Approve/Reject/Modify)
-- `/prd <description>` — Generate a new PRD from a description
+### Backlog & Sprint
+
+| Command | Description |
+|---------|-------------|
+| /task \<title\> | Add a task to backlog |
+| /backlog [project] | View backlog |
+| /sprint [id] | Sprint status |
+| /start \<id\> | Start a task |
+| /done \<id\> | Complete a task |
+
+### Projects
+
+| Command | Description |
+|---------|-------------|
+| /projects | List all projects |
+| /project create \<name\> | Create new project |
+| /project switch \<slug\> | Switch active project |
+| /project archive \<slug\> | Archive a project |
+| /project topic \<slug\> | Link topic to project |
 
 ### Utilities
-- `/status` — Server and bot health status (CPU, memory, PM2 services, message count)
-- `/remind <time> <text>` — Set a reminder (e.g., `/remind 14h30 Call client` or `/remind 2h Check logs`)
-- `/export` — Export all messages, memory, and tasks as JSON
-- `/speak [text]` — Synthesize text to voice (or re-read last response)
+
+| Command | Description |
+|---------|-------------|
+| /status | Server health (CPU, RAM, PM2, messages) |
+| /remind \<time\> \<text\> | Set a reminder |
+| /speak [text] | Text-to-speech |
+| /profile | User profile insights |
+| /export | Export all data as JSON |
+| /help | Command reference |
 
 ## Architecture
 
 ```
 src/
-  relay.ts           # Main bot daemon — message handlers, commands, Claude CLI calls
-  agent.ts           # Sub-agent execution — branch/PR workflow, git integration
-  tasks.ts           # Task CRUD on Supabase — backlog, sprints, priorities
-  memory.ts          # Memory management — facts, goals, semantic search
-  prd.ts             # PRD generation and lifecycle — draft, approved, rejected
-  notifications.ts   # Proactive notifications to forum topics
-  transcribe.ts      # Voice transcription — Groq or local whisper
-  tts.ts             # Text-to-speech — Piper TTS
-
-dashboard/
-  server.ts          # HTTP server for kanban board (port 3456)
-  index.html         # Frontend kanban UI
-
-db/
-  schema.sql         # Complete Supabase schema (tables, RLS, functions, pgvector)
-
-supabase/functions/
-  embed/index.ts     # Auto-embedding Edge Function (OpenAI text-embedding-3-small)
-  search/index.ts    # Semantic search Edge Function
+  relay.ts                # Main bot — commands, handlers, Claude CLI integration
+  bmad-agents.ts          # Agent registry — 6 BMad agents mapped to commands
+  bmad-prompts.ts         # YAML-powered system prompts with context-aware instructions
+  gates.ts                # Gate enforcement — PRD, Architecture, Code Review
+  code-review.ts          # Adversarial code review with scoring
+  agent.ts                # Sub-agent execution — branch/PR/CI workflow
+  tasks.ts                # Task CRUD — backlog, sprints, priorities
+  projects.ts             # Multi-project management with topic routing
+  document-sharding.ts    # Document splitting, indexing, context loading
+  workflow.ts             # Configurable workflow engine (workflow.yaml)
+  workflow-propagation.ts # Cross-project improvement proposals + voting
+  patterns.ts             # Multi-sprint pattern analysis
+  alerts.ts               # Proactive issue detection
+  memory.ts               # Facts, goals, semantic search (pgvector)
+  prd.ts                  # PRD generation and lifecycle
+  notifications.ts        # Forum topic notifications
+  profile-evolution.ts    # Dynamic user profiling
+  transcribe.ts           # Voice transcription (Groq / local Whisper)
+  tts.ts                  # Text-to-speech (Piper)
 
 config/
-  profile.example.md # Personalization template
-  profile.md         # User profile (loaded on every message)
+  bmad-templates/         # BMad Method v6 templates
+    agents/               # Agent YAML definitions (persona, capabilities, menus)
+    workflows/            # Step-file workflows (analysis, planning, solutioning)
+    tasks/                # Reusable task templates
+    data/                 # Reference data
+  workflow.yaml           # Configurable workflow (steps, transitions, checkpoints)
+  profile.md              # User personalization
 
-scripts/
-  auto-deploy.sh     # Watches for deployments, restarts services
-  notify-deploy.sh   # Sends deploy status to Telegram
-  system-alerts.sh   # System health monitoring
+dashboard/
+  server.ts               # HTTP server (port 3456) with API proxy
+  index.html              # Kanban board + PRDs + metrics + retros
 
-.github/workflows/
-  ci.yml             # CI on pull requests
-  deploy.yml         # Auto-deploy to production on merge to master
+db/
+  schema.sql              # Complete Supabase schema
+
+supabase/functions/
+  embed/index.ts          # Auto-embedding Edge Function
+  search/index.ts         # Semantic search Edge Function
 ```
 
-## Database (Supabase)
+## Database
 
 ### Tables
-- **messages** — Conversation history with embeddings (pgvector 1536 dims)
-- **memory** — Facts and goals with embeddings
-- **tasks** — Backlog with status (backlog/in_progress/review/done/cancelled), priority, sprint
-- **prds** — Product Requirements Documents with status (draft/approved/rejected/superseded)
-- **logs** — System logs
-
-### RPC Functions
-- `get_recent_messages` — Last N messages for context
-- `match_messages` — Semantic search over messages
-- `match_memory` — Semantic search over memory
-- `get_active_goals` — Active goals
-- `get_facts` — All stored facts
-- `get_sprint_summary` — Sprint progress (counts by status)
+| Table | Purpose |
+|-------|---------|
+| messages | Conversation history with pgvector embeddings |
+| memory | Facts and goals with embeddings |
+| tasks | Backlog with BMad story fields (AC, subtasks, dev notes) |
+| prds | Product Requirements Documents with status lifecycle |
+| projects | Multi-project registry with topic mapping |
+| document_shards | Indexed document sections for efficient context |
+| sprint_metrics | Quantitative sprint data |
+| retros | Retrospective analyses and accepted actions |
+| workflow_logs | Transition tracking for workflow engine |
+| workflow_proposals | Cross-project improvement proposals |
+| logs | System logs |
 
 ### Edge Functions
-- **embed** — Auto-generates embeddings on INSERT (triggered by DB webhooks)
+- **embed** — Auto-generates embeddings on INSERT (DB webhooks)
 - **search** — Semantic search endpoint
 
-## Process Management (PM2)
+## Process Management
 
-Three services managed by PM2 (`ecosystem.config.cjs`):
+Three services managed by PM2:
 
-| Service | Description | Logs |
-|---------|-------------|------|
-| `claude-relay` | Main Telegram bot | `~/.claude-relay/logs/relay-*.log` |
-| `claude-dashboard` | Kanban board (port 3456) | `~/.claude-relay/logs/dashboard-*.log` |
-| `claude-autodeploy` | Auto-deploy watcher | `~/.claude-relay/logs/autodeploy-*.log` |
-
-### Common PM2 Commands
-```bash
-npx pm2 status                    # Check all services
-npx pm2 logs claude-relay         # View relay logs
-npx pm2 restart claude-relay      # Restart the bot
-npx pm2 stop all                  # Stop all services
-npx pm2 start ecosystem.config.cjs  # Start all services
-```
-
-## Forum Topics
-
-The bot supports Telegram group forums with topic-specific behavior:
-
-| Topic | Label | Allowed Commands | Purpose |
-|-------|-------|-----------------|---------|
-| claude-relay | Dev | exec, plan, prd, task, backlog, sprint, done, start, status, export, remind, speak | Development discussions |
-| idees | Brainstorm | task, plan, prd, remind, speak | Idea exploration |
-| sprint | Sprint | task, backlog, sprint, done, start, plan, prd, exec, status, remind, speak | Sprint management |
-| serveur | Ops | status, exec, remind, speak | Server operations |
-
-Notifications are routed automatically:
-- PR created/merged → Dev topic
-- Task status changes → Sprint topic
-- Deploy events → Server topic
-
-## Resilience Features
-
-- **Offset management**: Pending Telegram updates are dropped on startup to prevent crash loops from re-processing failed messages
-- **Circuit breaker**: Messages that cause 3+ consecutive errors are automatically skipped
-- **Try/catch isolation**: Each message handler catches errors independently — one bad message won't crash the bot
-- **Lock file**: Prevents multiple bot instances from running simultaneously
-- **Rate limiting**: 30 messages/minute max to prevent abuse
-- **Uncaught exception handler**: Notifies via Telegram before PM2 restarts the process
-- **PM2 auto-restart**: max 10 restarts with 5s delay between attempts
-
-## CI/CD Workflow
-
-1. Create a feature branch: `git checkout -b feature/my-feature`
-2. Make changes, commit, push
-3. Open a PR on GitHub → CI runs tests
-4. Merge to master → GitHub Actions auto-deploys via SSH
-5. PM2 restarts services, deploy notification sent to Telegram
-
-The `/exec` command automates steps 1-3: it spawns a Claude sub-agent that creates a branch, makes changes, and opens a PR.
-
-## Environment Variables
-
-See `.env.example` for all options. The essentials:
+| Service | Description |
+|---------|-------------|
+| claude-relay | Main Telegram bot |
+| claude-dashboard | Kanban board (port 3456) |
+| claude-autodeploy | Auto-deploy watcher |
 
 ```bash
-# Required
-TELEGRAM_BOT_TOKEN=     # From @BotFather
-TELEGRAM_USER_ID=       # From @userinfobot
-SUPABASE_URL=           # From Supabase dashboard
-SUPABASE_ANON_KEY=      # From Supabase dashboard
-
-# Recommended
-USER_NAME=              # Your first name
-USER_TIMEZONE=          # e.g., Europe/Paris
-
-# Forum group (optional)
-TELEGRAM_GROUP_ID=      # Group ID for forum topics
-SPRINT_THREAD_ID=       # Thread ID of sprint topic
-DEV_THREAD_ID=          # Thread ID of dev topic
-OPS_THREAD_ID=          # Thread ID of ops topic
-
-# Voice (optional)
-VOICE_PROVIDER=         # "groq" or "local"
-GROQ_API_KEY=           # For Groq (free at console.groq.com)
-
-# TTS (optional)
-TTS_PROVIDER=           # "local" for Piper TTS
-PIPER_BINARY=           # Path to piper binary
-PIPER_MODEL=            # Path to piper voice model
-
-# Dashboard
-DASHBOARD_PORT=3456     # Kanban board port
-DASHBOARD_TOKEN=        # Auth token for dashboard access
-
-# Note: OpenAI key for embeddings is stored in Supabase
-# (Edge Function secrets), not in this .env file.
+npx pm2 status                      # Check services
+npx pm2 logs claude-relay           # View logs
+npx pm2 restart claude-relay        # Restart bot
+npx pm2 start ecosystem.config.cjs  # Start all
 ```
 
-## Troubleshooting
+## CI/CD
 
-See [RECOVERY.md](RECOVERY.md) for emergency procedures (bot not responding, SSH access, PM2 recovery).
+Feature branch workflow enforced at all levels:
+
+1. `/exec` creates a feature branch
+2. Agent writes code + tests
+3. Adversarial code review (Gate 3)
+4. Push + PR creation
+5. CI checks on GitHub Actions
+6. Merge to master triggers auto-deploy via SSH
+7. PM2 restarts, deploy notification sent to Telegram
+
+## Resilience
+
+- Rate limiting (30 msg/min)
+- Circuit breaker (3 consecutive errors = skip)
+- Lock file prevents duplicate instances
+- Graceful shutdown with Supabase session cleanup
+- PM2 auto-restart (max 10 with 5s delay)
+- Heartbeat during long agent operations
+- Offset management prevents crash loops on startup
 
 ## The Full Version
 
-This free relay covers the essentials. The full version in the [AI Productivity Hub](https://skool.com/autonomee) community unlocks:
+This free relay covers the essentials. The full version in the [AI Productivity Hub](https://skool.com/autonomee) unlocks:
 
-- **6 Specialized AI Agents** — Research, Content, Finance, Strategy, Critic + General orchestrator via Telegram forum topics
-- **VPS Deployment** — Always-on cloud server with hybrid mode ($2-5/month)
-- **Real Integrations** — Gmail, Calendar, Notion connected via MCP
-- **Human-in-the-Loop** — Claude asks before taking actions via inline buttons
-- **Voice & Phone Calls** — Bot speaks back via ElevenLabs, calls when urgent
-- **Fallback AI Models** — Auto-switch to OpenRouter or Ollama when Claude is down
-- **Production Infrastructure** — Auto-deploy, watchdog, uninstall scripts
+- 6 Specialized AI Agents via Telegram forum topics
+- VPS Deployment with hybrid mode ($2-5/month)
+- Real Integrations (Gmail, Calendar, Notion via MCP)
+- Human-in-the-Loop actions via inline buttons
+- Voice & Phone Calls (ElevenLabs)
+- Fallback AI Models (OpenRouter, Ollama)
+- Production Infrastructure (watchdog, auto-deploy)
 
-We also help you personalize it for your business, or package it as a product for your clients.
-
-**Subscribe on YouTube:** [youtube.com/@GodaGo](https://youtube.com/@GodaGo)
-**Join the community:** [skool.com/autonomee](https://skool.com/autonomee)
+**YouTube:** [youtube.com/@GodaGo](https://youtube.com/@GodaGo)
+**Community:** [skool.com/autonomee](https://skool.com/autonomee)
 
 ## License
 
-MIT — Take it, customize it, make it yours.
+MIT
 
 ---
 
