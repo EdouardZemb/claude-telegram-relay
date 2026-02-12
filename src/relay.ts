@@ -92,6 +92,14 @@ import {
   formatProjectList,
   formatProjectDetail,
 } from "./projects.ts";
+import {
+  shardDocument,
+  getRelevantShards,
+  buildShardedContext,
+  buildTaskContext,
+  findRelatedDocuments,
+  formatCrossRefs,
+} from "./document-sharding.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -1011,6 +1019,15 @@ bot.command("exec", async (ctx) => {
     return;
   }
 
+  // Enrich task with sharded document context
+  const execProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  if (execProject?.id) {
+    const shardedContext = await buildTaskContext(supabase, task.title, execProject.id, 3000);
+    if (shardedContext) {
+      task.description = (task.description || "") + "\n\nCONTEXTE DOCUMENTS:\n" + shardedContext;
+    }
+  }
+
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   // Workflow tracking
@@ -1208,6 +1225,16 @@ bot.command("prd", async (ctx) => {
     await ctx.reply("Erreur lors de la sauvegarde du PRD.", threadOpts(ctx));
     return;
   }
+
+  // Auto-shard the PRD for efficient context loading
+  const currentProjectForShard = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  await shardDocument(supabase, {
+    id: prd.id,
+    title: prd.title,
+    content: prd.content,
+    type: "prd",
+    project_id: currentProjectForShard?.id,
+  });
 
   const detail = formatPRDDetail(prd);
   const keyboard = new InlineKeyboard()
