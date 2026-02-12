@@ -112,6 +112,31 @@ function isRateLimited(): boolean {
 }
 
 // ============================================================
+// CIRCUIT BREAKER (skip messages that cause repeated errors)
+// ============================================================
+
+const errorCounts = new Map<number, number>(); // message_id → error count
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+
+function recordError(messageId: number): boolean {
+  const count = (errorCounts.get(messageId) || 0) + 1;
+  errorCounts.set(messageId, count);
+  if (count >= CIRCUIT_BREAKER_THRESHOLD) {
+    console.error(`Circuit breaker: skipping message ${messageId} after ${count} errors`);
+    errorCounts.delete(messageId);
+    return true; // tripped
+  }
+  return false;
+}
+
+function clearError(messageId: number): void {
+  errorCounts.delete(messageId);
+}
+
+// Cleanup old entries every 5 minutes
+setInterval(() => errorCounts.clear(), 300_000);
+
+// ============================================================
 // REMINDERS
 // ============================================================
 
@@ -405,14 +430,18 @@ async function callClaude(
   console.log(`Calling Claude: ${prompt.substring(0, 50)}...`);
 
   try {
+    // Filter out Claude Code env vars to prevent nested session detection
+    const cleanEnv = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([k]) => !["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"].includes(k)
+      )
+    );
+
     const proc = spawn(args, {
       stdout: "pipe",
       stderr: "pipe",
       cwd: PROJECT_DIR || undefined,
-      env: {
-        ...process.env,
-        // Pass through any env vars Claude might need
-      },
+      env: cleanEnv,
     });
 
     const output = await new Response(proc.stdout).text();
@@ -1016,61 +1045,73 @@ bot.command("export", async (ctx) => {
 // Text messages
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
+  const messageId = ctx.message.message_id;
+
   const threadId = getThreadId(ctx);
   const topicName = getTopicName(ctx);
   console.log(`Message: ${text.substring(0, 50)}...${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
 
-  await ctx.replyWithChatAction("typing");
+  try {
+    await ctx.replyWithChatAction("typing");
 
-  const meta: Record<string, unknown> = {};
-  if (threadId) {
-    meta.thread_id = threadId;
-    if (topicName) meta.topic = topicName;
+    const meta: Record<string, unknown> = {};
+    if (threadId) {
+      meta.thread_id = threadId;
+      if (topicName) meta.topic = topicName;
+    }
+
+    await saveMessage("user", text, meta);
+
+    // Gather context: semantic search + facts/goals + recent messages
+    const [relevantContext, memoryContext, recentMessages] = await Promise.all([
+      getRelevantContext(supabase, text),
+      getMemoryContext(supabase),
+      getRecentMessages(supabase),
+    ]);
+
+    const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName);
+    const rawResponse = await callClaude(enrichedPrompt, { resume: true });
+
+    // Parse and save any memory intents, strip tags from response
+    const response = await processMemoryIntents(supabase, rawResponse);
+
+    await saveMessage("assistant", response, meta);
+    await sendResponse(ctx, response);
+    clearError(messageId);
+  } catch (error) {
+    console.error("Text handler error:", error);
+    if (!recordError(messageId)) {
+      await ctx.reply("Erreur lors du traitement du message. Reessaie.", threadOpts(ctx)).catch(() => {});
+    }
   }
-
-  await saveMessage("user", text, meta);
-
-  // Gather context: semantic search + facts/goals + recent messages
-  const [relevantContext, memoryContext, recentMessages] = await Promise.all([
-    getRelevantContext(supabase, text),
-    getMemoryContext(supabase),
-    getRecentMessages(supabase),
-  ]);
-
-  const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName);
-  const rawResponse = await callClaude(enrichedPrompt, { resume: true });
-
-  // Parse and save any memory intents, strip tags from response
-  const response = await processMemoryIntents(supabase, rawResponse);
-
-  await saveMessage("assistant", response, meta);
-  await sendResponse(ctx, response);
 });
 
 // Voice messages
 bot.on("message:voice", async (ctx) => {
   const voice = ctx.message.voice;
+  const messageId = ctx.message.message_id;
   const threadId = getThreadId(ctx);
   const topicName = getTopicName(ctx);
   console.log(`Voice message: ${voice.duration}s${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
-  await ctx.replyWithChatAction("typing");
-
-  if (!process.env.VOICE_PROVIDER) {
-    await ctx.reply(
-      "Voice transcription is not set up yet. " +
-        "Run the setup again and choose a voice provider (Groq or local Whisper).",
-      threadOpts(ctx)
-    );
-    return;
-  }
-
-  const meta: Record<string, unknown> = {};
-  if (threadId) {
-    meta.thread_id = threadId;
-    if (topicName) meta.topic = topicName;
-  }
 
   try {
+    await ctx.replyWithChatAction("typing");
+
+    if (!process.env.VOICE_PROVIDER) {
+      await ctx.reply(
+        "Voice transcription is not set up yet. " +
+          "Run the setup again and choose a voice provider (Groq or local Whisper).",
+        threadOpts(ctx)
+      );
+      return;
+    }
+
+    const meta: Record<string, unknown> = {};
+    if (threadId) {
+      meta.thread_id = threadId;
+      if (topicName) meta.topic = topicName;
+    }
+
     const file = await ctx.getFile();
     const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
     const response = await fetch(url);
@@ -1102,26 +1143,31 @@ bot.on("message:voice", async (ctx) => {
 
     await saveMessage("assistant", claudeResponse, meta);
     await sendVoiceResponse(ctx, claudeResponse);
+    clearError(messageId);
   } catch (error) {
     console.error("Voice error:", error);
-    await ctx.reply("Could not process voice message. Check logs for details.", threadOpts(ctx));
+    if (!recordError(messageId)) {
+      await ctx.reply("Erreur lors du traitement du vocal. Reessaie.", threadOpts(ctx)).catch(() => {});
+    }
   }
 });
 
 // Photos/Images
 bot.on("message:photo", async (ctx) => {
+  const messageId = ctx.message.message_id;
   const threadId = getThreadId(ctx);
   const topicName = getTopicName(ctx);
   console.log(`Image received${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
-  await ctx.replyWithChatAction("typing");
-
-  const meta: Record<string, unknown> = {};
-  if (threadId) {
-    meta.thread_id = threadId;
-    if (topicName) meta.topic = topicName;
-  }
 
   try {
+    await ctx.replyWithChatAction("typing");
+
+    const meta: Record<string, unknown> = {};
+    if (threadId) {
+      meta.thread_id = threadId;
+      if (topicName) meta.topic = topicName;
+    }
+
     // Get highest resolution photo
     const photos = ctx.message.photo;
     const photo = photos[photos.length - 1];
@@ -1151,27 +1197,32 @@ bot.on("message:photo", async (ctx) => {
     const cleanResponse = await processMemoryIntents(supabase, claudeResponse);
     await saveMessage("assistant", cleanResponse, meta);
     await sendResponse(ctx, cleanResponse);
+    clearError(messageId);
   } catch (error) {
     console.error("Image error:", error);
-    await ctx.reply("Could not process image.", threadOpts(ctx));
+    if (!recordError(messageId)) {
+      await ctx.reply("Erreur lors du traitement de l'image. Reessaie.", threadOpts(ctx)).catch(() => {});
+    }
   }
 });
 
 // Documents
 bot.on("message:document", async (ctx) => {
   const doc = ctx.message.document;
+  const messageId = ctx.message.message_id;
   const threadId = getThreadId(ctx);
   const topicName = getTopicName(ctx);
   console.log(`Document: ${doc.file_name}${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
-  await ctx.replyWithChatAction("typing");
-
-  const meta: Record<string, unknown> = {};
-  if (threadId) {
-    meta.thread_id = threadId;
-    if (topicName) meta.topic = topicName;
-  }
 
   try {
+    await ctx.replyWithChatAction("typing");
+
+    const meta: Record<string, unknown> = {};
+    if (threadId) {
+      meta.thread_id = threadId;
+      if (topicName) meta.topic = topicName;
+    }
+
     const file = await ctx.getFile();
     const timestamp = Date.now();
     const fileName = doc.file_name || `file_${timestamp}`;
@@ -1195,9 +1246,12 @@ bot.on("message:document", async (ctx) => {
     const cleanResponse = await processMemoryIntents(supabase, claudeResponse);
     await saveMessage("assistant", cleanResponse, meta);
     await sendResponse(ctx, cleanResponse);
+    clearError(messageId);
   } catch (error) {
     console.error("Document error:", error);
-    await ctx.reply("Could not process document.", threadOpts(ctx));
+    if (!recordError(messageId)) {
+      await ctx.reply("Erreur lors du traitement du document. Reessaie.", threadOpts(ctx)).catch(() => {});
+    }
   }
 });
 
@@ -1428,8 +1482,12 @@ console.log("Starting Claude Telegram Relay...");
 console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
 console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
 
+// Drop pending updates on startup to avoid re-processing old messages
+await bot.api.deleteWebhook({ drop_pending_updates: true });
+
 bot.start({
+  drop_pending_updates: true,
   onStart: () => {
-    console.log("Bot is running!");
+    console.log("Bot is running! (pending updates dropped)");
   },
 });
