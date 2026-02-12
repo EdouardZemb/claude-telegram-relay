@@ -2,10 +2,11 @@
  * Agentic Task Execution
  *
  * Launches Claude Code as a sub-agent to execute tasks autonomously.
- * Reports progress back via Telegram.
+ * Uses branch-PR workflow: creates a feature branch, makes changes,
+ * then creates a PR for review before merging to master.
  */
 
-import { spawn } from "bun";
+import { spawn, spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { updateTaskStatus, type Task } from "./tasks.ts";
 
@@ -17,13 +18,32 @@ export interface AgentResult {
   output: string;
   error?: string;
   durationMs: number;
+  prUrl?: string;
+}
+
+function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
+  const result = spawnSync(["git", ...args], { cwd: PROJECT_DIR });
+  return {
+    ok: result.exitCode === 0,
+    stdout: new TextDecoder().decode(result.stdout).trim(),
+    stderr: new TextDecoder().decode(result.stderr).trim(),
+  };
+}
+
+function sanitizeBranchName(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .substring(0, 50);
 }
 
 /**
  * Execute a task using Claude Code as a sub-agent.
  *
- * Claude runs with --dangerously-skip-permissions in the project directory,
- * receives a structured prompt with the task details, and returns the result.
+ * Workflow: create feature branch -> run Claude -> commit -> push -> create PR.
+ * If the task involves no file changes, no PR is created.
  */
 export async function executeTask(
   supabase: SupabaseClient | null,
@@ -39,6 +59,20 @@ export async function executeTask(
 
   if (onProgress) {
     await onProgress(`Demarrage de la tache: ${task.title}`);
+  }
+
+  // Create feature branch
+  const branchName = `feature/${sanitizeBranchName(task.title)}`;
+  git("checkout", "master");
+  git("pull", "origin", "master");
+  const branchResult = git("checkout", "-b", branchName);
+  if (!branchResult.ok) {
+    // Branch may already exist, try switching to it
+    git("checkout", branchName);
+  }
+
+  if (onProgress) {
+    await onProgress(`Branche ${branchName} creee. Agent en cours d'execution...`);
   }
 
   const prompt = buildAgentPrompt(task);
@@ -67,7 +101,8 @@ export async function executeTask(
     const durationMs = Date.now() - startTime;
 
     if (exitCode !== 0) {
-      // Task failed — keep as in_progress so we can retry
+      // Task failed — go back to master
+      git("checkout", "master");
       return {
         success: false,
         output: output.trim(),
@@ -75,6 +110,38 @@ export async function executeTask(
         durationMs,
       };
     }
+
+    // Check if there are any changes to commit
+    const status = git("status", "--porcelain");
+    let prUrl: string | undefined;
+
+    if (status.stdout) {
+      // Stage and commit all changes
+      git("add", "-A");
+      git("commit", "-m", `feat: ${task.title}`);
+
+      // Push branch
+      const pushResult = git("push", "-u", "origin", branchName);
+      if (pushResult.ok) {
+        // Create PR via gh CLI
+        const prResult = spawnSync(
+          ["gh", "pr", "create",
+            "--title", task.title,
+            "--body", `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${task.description || ""}`.trim(),
+            "--base", "master",
+            "--head", branchName,
+          ],
+          { cwd: PROJECT_DIR }
+        );
+        const prOutput = new TextDecoder().decode(prResult.stdout).trim();
+        if (prResult.exitCode === 0 && prOutput.startsWith("http")) {
+          prUrl = prOutput;
+        }
+      }
+    }
+
+    // Go back to master
+    git("checkout", "master");
 
     // Mark task as done
     if (supabase) {
@@ -85,8 +152,10 @@ export async function executeTask(
       success: true,
       output: output.trim(),
       durationMs,
+      prUrl,
     };
   } catch (error) {
+    git("checkout", "master");
     const durationMs = Date.now() - startTime;
     return {
       success: false,
