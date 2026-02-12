@@ -7,6 +7,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+export interface Subtask {
+  title: string;
+  ac_mapping?: string;
+  done?: boolean;
+}
+
 export interface Task {
   id: string;
   created_at: string;
@@ -23,6 +29,11 @@ export interface Task {
   blocked_by: string | null;
   notes: string | null;
   completed_at: string | null;
+  // BMad Story File fields
+  acceptance_criteria: string | null;
+  dev_notes: string | null;
+  architecture_ref: string | null;
+  subtasks: Subtask[];
 }
 
 // ── Queries ──────────────────────────────────────────────────
@@ -30,7 +41,17 @@ export interface Task {
 export async function addTask(
   supabase: SupabaseClient,
   title: string,
-  opts?: { description?: string; project?: string; priority?: number; sprint?: string; tags?: string[] }
+  opts?: {
+    description?: string;
+    project?: string;
+    priority?: number;
+    sprint?: string;
+    tags?: string[];
+    acceptance_criteria?: string;
+    dev_notes?: string;
+    architecture_ref?: string;
+    subtasks?: Subtask[];
+  }
 ): Promise<Task | null> {
   const { data, error } = await supabase
     .from("tasks")
@@ -41,6 +62,10 @@ export async function addTask(
       priority: opts?.priority ?? 3,
       sprint: opts?.sprint ?? null,
       tags: opts?.tags ?? [],
+      acceptance_criteria: opts?.acceptance_criteria ?? null,
+      dev_notes: opts?.dev_notes ?? null,
+      architecture_ref: opts?.architecture_ref ?? null,
+      subtasks: opts?.subtasks ?? [],
     })
     .select()
     .single();
