@@ -43,6 +43,51 @@ interface Section {
   level: number;
 }
 
+// ── Context Cache ────────────────────────────────────────────
+
+interface CacheEntry {
+  value: string;
+  expiresAt: number;
+}
+
+const contextCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_MAX_SIZE = 50;
+
+function getCached(key: string): string | null {
+  const entry = contextCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    contextCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCache(key: string, value: string): void {
+  // Evict oldest entries if cache is full
+  if (contextCache.size >= CACHE_MAX_SIZE) {
+    const oldest = [...contextCache.entries()]
+      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
+    if (oldest) contextCache.delete(oldest[0]);
+  }
+  contextCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
+/** Clear cache entries for a specific project (call after document updates) */
+export function invalidateProjectCache(projectId: string): void {
+  for (const [key] of contextCache) {
+    if (key.startsWith(`ctx:${projectId}:`)) {
+      contextCache.delete(key);
+    }
+  }
+}
+
+/** Clear all cache */
+export function clearContextCache(): void {
+  contextCache.clear();
+}
+
 // ── Sharding Logic ───────────────────────────────────────────
 
 /**
@@ -169,6 +214,11 @@ export async function shardDocument(
   if (error) {
     console.error("shardDocument error:", error);
     return null;
+  }
+
+  // Invalidate cache for this project since document content changed
+  if (doc.project_id) {
+    invalidateProjectCache(doc.project_id);
   }
 
   const totalTokens = shardsToInsert.reduce(
@@ -408,6 +458,11 @@ export async function buildTaskContext(
   projectId: string,
   tokenBudget: number = 3000
 ): Promise<string> {
+  // Check cache first
+  const cacheKey = `ctx:${projectId}:${taskTitle.substring(0, 50)}:${tokenBudget}`;
+  const cached = getCached(cacheKey);
+  if (cached !== null) return cached;
+
   // Find all sharded documents for this project
   const { data: allShards } = await supabase
     .from("document_shards")
@@ -436,7 +491,9 @@ export async function buildTaskContext(
     }
   }
 
-  return contextParts.join("\n\n");
+  const result = contextParts.join("\n\n");
+  setCache(cacheKey, result);
+  return result;
 }
 
 // ── Formatting ───────────────────────────────────────────────
