@@ -41,6 +41,7 @@ const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const ALLOWED_USER_ID = process.env.TELEGRAM_USER_ID || "";
+const GROUP_ID = process.env.TELEGRAM_GROUP_ID || "";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || "";
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -104,6 +105,7 @@ interface Reminder {
   text: string;
   triggerAt: number; // epoch ms
   chatId: number;
+  threadId?: number; // forum topic thread ID
 }
 
 const REMINDERS_FILE = join(RELAY_DIR, "reminders.json");
@@ -236,22 +238,67 @@ if (!(await acquireLock())) {
 const bot = new Bot(BOT_TOKEN);
 
 // ============================================================
+// TOPIC FORUM HELPERS
+// ============================================================
+
+// Known topic names by thread ID (populated at runtime)
+const TOPIC_NAMES: Record<number, string> = {};
+
+function getThreadId(ctx: Context): number | undefined {
+  return (ctx.message as any)?.message_thread_id;
+}
+
+function isGroupForum(ctx: Context): boolean {
+  return GROUP_ID !== "" && ctx.chat?.id.toString() === GROUP_ID;
+}
+
+function threadOpts(ctx: Context): { message_thread_id?: number } {
+  const threadId = getThreadId(ctx);
+  return threadId ? { message_thread_id: threadId } : {};
+}
+
+function getTopicName(ctx: Context): string | undefined {
+  const threadId = getThreadId(ctx);
+  if (!threadId) return undefined;
+  // Try to detect topic name from forum_topic_created or cached names
+  const topicCreated = (ctx.message as any)?.reply_to_message?.forum_topic_created;
+  if (topicCreated?.name) {
+    TOPIC_NAMES[threadId] = topicCreated.name;
+  }
+  return TOPIC_NAMES[threadId];
+}
+
+// ============================================================
 // SECURITY: Only respond to authorized user
 // ============================================================
 
 bot.use(async (ctx, next) => {
   const userId = ctx.from?.id.toString();
+  const chatId = ctx.chat?.id.toString();
 
-  // If ALLOWED_USER_ID is set, enforce it
+  // Log chat info for debugging (helps discover group IDs)
+  if (ctx.chat && ctx.chat.type !== "private") {
+    console.log(`Group message: chat_id=${chatId} thread=${getThreadId(ctx)} from=${userId}`);
+  }
+
+  // Accept messages from: private chat with allowed user OR the configured group forum (from allowed user)
   if (ALLOWED_USER_ID && userId !== ALLOWED_USER_ID) {
     console.log(`Unauthorized: ${userId}`);
-    await ctx.reply("This bot is private.");
+    if (ctx.chat?.type === "private") {
+      await ctx.reply("This bot is private.");
+    }
+    return;
+  }
+
+  // If it's a group but not our configured group, ignore
+  if (ctx.chat && ctx.chat.type !== "private" && GROUP_ID && chatId !== GROUP_ID) {
+    console.log(`Ignored group: ${chatId}`);
     return;
   }
 
   // Rate limiting
   if (isRateLimited()) {
-    await ctx.reply("Trop de messages. Attends un peu avant de renvoyer.");
+    await ctx.reply("Trop de messages. Attends un peu avant de renvoyer.", threadOpts(ctx));
     return;
   }
 
@@ -327,16 +374,16 @@ bot.command("speak", async (ctx) => {
     // /speak <text> → synthesize the given text
     const audioBuffer = await synthesize(text);
     if (audioBuffer) {
-      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), threadOpts(ctx));
     } else {
-      await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.");
+      await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.", threadOpts(ctx));
     }
     return;
   }
 
   // /speak alone → re-synthesize last assistant message from Supabase
   if (!supabase) {
-    await ctx.reply("Supabase not configured — cannot retrieve last message.");
+    await ctx.reply("Supabase not configured — cannot retrieve last message.", threadOpts(ctx));
     return;
   }
 
@@ -349,41 +396,41 @@ bot.command("speak", async (ctx) => {
     .single();
 
   if (!data?.content) {
-    await ctx.reply("No previous assistant message found.");
+    await ctx.reply("No previous assistant message found.", threadOpts(ctx));
     return;
   }
 
   const audioBuffer = await synthesize(data.content.substring(0, 4000));
   if (audioBuffer) {
-    await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+    await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), threadOpts(ctx));
   } else {
-    await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.");
+    await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.", threadOpts(ctx));
   }
 });
 
 // /task — add a task to the backlog
 bot.command("task", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const input = ctx.match?.trim();
   if (!input) {
-    await ctx.reply("Usage: /task titre de la tache");
+    await ctx.reply("Usage: /task titre de la tache", threadOpts(ctx));
     return;
   }
   const task = await addTask(supabase, input);
   if (task) {
-    await ctx.reply(`Tache ajoutee: ${task.title}\nID: ${task.id.substring(0, 8)}`);
+    await ctx.reply(`Tache ajoutee: ${task.title}\nID: ${task.id.substring(0, 8)}`, threadOpts(ctx));
   } else {
-    await ctx.reply("Erreur lors de l'ajout de la tache.");
+    await ctx.reply("Erreur lors de l'ajout de la tache.", threadOpts(ctx));
   }
 });
 
 // /backlog — view current backlog
 bot.command("backlog", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const filter = ctx.match?.trim();
@@ -394,7 +441,7 @@ bot.command("backlog", async (ctx) => {
 // /sprint — view sprint status or assign tasks to a sprint
 bot.command("sprint", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const arg = ctx.match?.trim();
@@ -403,7 +450,7 @@ bot.command("sprint", async (ctx) => {
     // Show current sprint summary
     const current = await getCurrentSprint(supabase);
     if (!current) {
-      await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.");
+      await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.", threadOpts(ctx));
       return;
     }
     const summary = await getSprintSummary(supabase, current);
@@ -423,12 +470,12 @@ bot.command("sprint", async (ctx) => {
 // /done — mark a task as done by ID prefix
 bot.command("done", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const idPrefix = ctx.match?.trim();
   if (!idPrefix) {
-    await ctx.reply("Usage: /done <id> (premiers caracteres de l'ID)");
+    await ctx.reply("Usage: /done <id> (premiers caracteres de l'ID)", threadOpts(ctx));
     return;
   }
 
@@ -441,19 +488,19 @@ bot.command("done", async (ctx) => {
     .limit(2);
 
   if (!matches || matches.length === 0) {
-    await ctx.reply(`Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`);
+    await ctx.reply(`Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`, threadOpts(ctx));
     return;
   }
   if (matches.length > 1) {
-    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, threadOpts(ctx));
     return;
   }
 
   const updated = await updateTaskStatus(supabase, matches[0].id, "done");
   if (updated) {
-    await ctx.reply(`Fait: ${updated.title}`);
+    await ctx.reply(`Fait: ${updated.title}`, threadOpts(ctx));
   } else {
-    await ctx.reply("Erreur lors de la mise a jour.");
+    await ctx.reply("Erreur lors de la mise a jour.", threadOpts(ctx));
   }
 });
 
@@ -472,31 +519,31 @@ bot.command("start", async (ctx) => {
     .limit(2);
 
   if (!matches || matches.length === 0) {
-    await ctx.reply(`Aucune tache backlog trouvee avec l'ID "${idPrefix}".`);
+    await ctx.reply(`Aucune tache backlog trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
     return;
   }
   if (matches.length > 1) {
-    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, threadOpts(ctx));
     return;
   }
 
   const updated = await updateTaskStatus(supabase, matches[0].id, "in_progress");
   if (updated) {
-    await ctx.reply(`En cours: ${updated.title}`);
+    await ctx.reply(`En cours: ${updated.title}`, threadOpts(ctx));
   } else {
-    await ctx.reply("Erreur lors de la mise a jour.");
+    await ctx.reply("Erreur lors de la mise a jour.", threadOpts(ctx));
   }
 });
 
 // /exec — execute a task from the backlog using a sub-agent
 bot.command("exec", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const idPrefix = ctx.match?.trim();
   if (!idPrefix) {
-    await ctx.reply("Usage: /exec <id> (premiers caracteres de l'ID de la tache)");
+    await ctx.reply("Usage: /exec <id> (premiers caracteres de l'ID de la tache)", threadOpts(ctx));
     return;
   }
 
@@ -508,19 +555,19 @@ bot.command("exec", async (ctx) => {
     .limit(2);
 
   if (!matches || matches.length === 0) {
-    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`);
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
     return;
   }
   if (matches.length > 1) {
-    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, threadOpts(ctx));
     return;
   }
 
   const task = matches[0];
-  await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`);
+  await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   const result = await executeTask(supabase, task, async (msg) => {
-    await ctx.reply(msg);
+    await ctx.reply(msg, threadOpts(ctx));
   });
 
   if (result.success) {
@@ -538,20 +585,20 @@ bot.command("exec", async (ctx) => {
 // /plan — decompose a request into sub-tasks and add them to the backlog
 bot.command("plan", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
   const request = ctx.match?.trim();
   if (!request) {
-    await ctx.reply("Usage: /plan description de ce que tu veux realiser");
+    await ctx.reply("Usage: /plan description de ce que tu veux realiser", threadOpts(ctx));
     return;
   }
 
-  await ctx.reply("Decomposition en cours...");
+  await ctx.reply("Decomposition en cours...", threadOpts(ctx));
   const subtasks = await decomposeTask(request);
 
   if (subtasks.length === 0) {
-    await ctx.reply("Impossible de decomposer cette demande. Reformule ou ajoute plus de details.");
+    await ctx.reply("Impossible de decomposer cette demande. Reformule ou ajoute plus de details.", threadOpts(ctx));
     return;
   }
 
@@ -614,7 +661,7 @@ bot.command("status", async (ctx) => {
     await sendResponse(ctx, parts.join("\n"));
   } catch (error) {
     console.error("Status error:", error);
-    await ctx.reply("Erreur lors de la recuperation du statut.");
+    await ctx.reply("Erreur lors de la recuperation du statut.", threadOpts(ctx));
   }
 });
 
@@ -622,7 +669,7 @@ bot.command("status", async (ctx) => {
 bot.command("remind", async (ctx) => {
   const input = ctx.match?.trim();
   if (!input) {
-    await ctx.reply("Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs");
+    await ctx.reply("Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs", threadOpts(ctx));
     return;
   }
 
@@ -654,7 +701,7 @@ bot.command("remind", async (ctx) => {
     triggerAt = target.getTime();
     timeLabel = `a ${hours}h${minutes.toString().padStart(2, "0")}`;
   } else {
-    await ctx.reply("Format non reconnu. Exemples:\n/remind 14h30 Appeler le client\n/remind 2h Verifier les logs\n/remind 30m Pause cafe");
+    await ctx.reply("Format non reconnu. Exemples:\n/remind 14h30 Appeler le client\n/remind 2h Verifier les logs\n/remind 30m Pause cafe", threadOpts(ctx));
     return;
   }
 
@@ -663,18 +710,19 @@ bot.command("remind", async (ctx) => {
     text,
     triggerAt,
     chatId: ctx.chat.id,
+    threadId: getThreadId(ctx),
   };
 
   reminders.push(reminder);
   await saveReminders();
 
-  await ctx.reply(`Rappel programme ${timeLabel}: ${text}`);
+  await ctx.reply(`Rappel programme ${timeLabel}: ${text}`, threadOpts(ctx));
 });
 
 // /export — export conversations and memory
 bot.command("export", async (ctx) => {
   if (!supabase) {
-    await ctx.reply("Supabase non configure.");
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
   }
 
@@ -700,21 +748,30 @@ bot.command("export", async (ctx) => {
 
     await ctx.replyWithDocument(new InputFile(buffer, filename), {
       caption: `Export: ${exportData.messages.length} messages, ${exportData.memory.length} memories, ${exportData.tasks.length} taches`,
+      ...threadOpts(ctx),
     });
   } catch (error) {
     console.error("Export error:", error);
-    await ctx.reply("Erreur lors de l'export.");
+    await ctx.reply("Erreur lors de l'export.", threadOpts(ctx));
   }
 });
 
 // Text messages
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
-  console.log(`Message: ${text.substring(0, 50)}...`);
+  const threadId = getThreadId(ctx);
+  const topicName = getTopicName(ctx);
+  console.log(`Message: ${text.substring(0, 50)}...${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
 
   await ctx.replyWithChatAction("typing");
 
-  await saveMessage("user", text);
+  const meta: Record<string, unknown> = {};
+  if (threadId) {
+    meta.thread_id = threadId;
+    if (topicName) meta.topic = topicName;
+  }
+
+  await saveMessage("user", text, meta);
 
   // Gather context: semantic search + facts/goals + recent messages
   const [relevantContext, memoryContext, recentMessages] = await Promise.all([
@@ -723,28 +780,37 @@ bot.on("message:text", async (ctx) => {
     getRecentMessages(supabase),
   ]);
 
-  const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages);
+  const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName);
   const rawResponse = await callClaude(enrichedPrompt, { resume: true });
 
   // Parse and save any memory intents, strip tags from response
   const response = await processMemoryIntents(supabase, rawResponse);
 
-  await saveMessage("assistant", response);
+  await saveMessage("assistant", response, meta);
   await sendResponse(ctx, response);
 });
 
 // Voice messages
 bot.on("message:voice", async (ctx) => {
   const voice = ctx.message.voice;
-  console.log(`Voice message: ${voice.duration}s`);
+  const threadId = getThreadId(ctx);
+  const topicName = getTopicName(ctx);
+  console.log(`Voice message: ${voice.duration}s${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
   await ctx.replyWithChatAction("typing");
 
   if (!process.env.VOICE_PROVIDER) {
     await ctx.reply(
       "Voice transcription is not set up yet. " +
-        "Run the setup again and choose a voice provider (Groq or local Whisper)."
+        "Run the setup again and choose a voice provider (Groq or local Whisper).",
+      threadOpts(ctx)
     );
     return;
+  }
+
+  const meta: Record<string, unknown> = {};
+  if (threadId) {
+    meta.thread_id = threadId;
+    if (topicName) meta.topic = topicName;
   }
 
   try {
@@ -755,11 +821,11 @@ bot.on("message:voice", async (ctx) => {
 
     const transcription = await transcribe(buffer);
     if (!transcription) {
-      await ctx.reply("Could not transcribe voice message.");
+      await ctx.reply("Could not transcribe voice message.", threadOpts(ctx));
       return;
     }
 
-    await saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`);
+    await saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`, meta);
 
     const [relevantContext, memoryContext, recentMessages] = await Promise.all([
       getRelevantContext(supabase, transcription),
@@ -771,23 +837,32 @@ bot.on("message:voice", async (ctx) => {
       `[Voice message transcribed]: ${transcription}`,
       relevantContext,
       memoryContext,
-      recentMessages
+      recentMessages,
+      topicName
     );
     const rawResponse = await callClaude(enrichedPrompt, { resume: true });
     const claudeResponse = await processMemoryIntents(supabase, rawResponse);
 
-    await saveMessage("assistant", claudeResponse);
+    await saveMessage("assistant", claudeResponse, meta);
     await sendVoiceResponse(ctx, claudeResponse);
   } catch (error) {
     console.error("Voice error:", error);
-    await ctx.reply("Could not process voice message. Check logs for details.");
+    await ctx.reply("Could not process voice message. Check logs for details.", threadOpts(ctx));
   }
 });
 
 // Photos/Images
 bot.on("message:photo", async (ctx) => {
-  console.log("Image received");
+  const threadId = getThreadId(ctx);
+  const topicName = getTopicName(ctx);
+  console.log(`Image received${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
   await ctx.replyWithChatAction("typing");
+
+  const meta: Record<string, unknown> = {};
+  if (threadId) {
+    meta.thread_id = threadId;
+    if (topicName) meta.topic = topicName;
+  }
 
   try {
     // Get highest resolution photo
@@ -809,7 +884,7 @@ bot.on("message:photo", async (ctx) => {
     const caption = ctx.message.caption || "Analyze this image.";
     const prompt = `[Image: ${filePath}]\n\n${caption}`;
 
-    await saveMessage("user", `[Image]: ${caption}`);
+    await saveMessage("user", `[Image]: ${caption}`, meta);
 
     const claudeResponse = await callClaude(prompt, { resume: true });
 
@@ -817,19 +892,27 @@ bot.on("message:photo", async (ctx) => {
     await unlink(filePath).catch(() => {});
 
     const cleanResponse = await processMemoryIntents(supabase, claudeResponse);
-    await saveMessage("assistant", cleanResponse);
+    await saveMessage("assistant", cleanResponse, meta);
     await sendResponse(ctx, cleanResponse);
   } catch (error) {
     console.error("Image error:", error);
-    await ctx.reply("Could not process image.");
+    await ctx.reply("Could not process image.", threadOpts(ctx));
   }
 });
 
 // Documents
 bot.on("message:document", async (ctx) => {
   const doc = ctx.message.document;
-  console.log(`Document: ${doc.file_name}`);
+  const threadId = getThreadId(ctx);
+  const topicName = getTopicName(ctx);
+  console.log(`Document: ${doc.file_name}${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
   await ctx.replyWithChatAction("typing");
+
+  const meta: Record<string, unknown> = {};
+  if (threadId) {
+    meta.thread_id = threadId;
+    if (topicName) meta.topic = topicName;
+  }
 
   try {
     const file = await ctx.getFile();
@@ -846,18 +929,18 @@ bot.on("message:document", async (ctx) => {
     const caption = ctx.message.caption || `Analyze: ${doc.file_name}`;
     const prompt = `[File: ${filePath}]\n\n${caption}`;
 
-    await saveMessage("user", `[Document: ${doc.file_name}]: ${caption}`);
+    await saveMessage("user", `[Document: ${doc.file_name}]: ${caption}`, meta);
 
     const claudeResponse = await callClaude(prompt, { resume: true });
 
     await unlink(filePath).catch(() => {});
 
     const cleanResponse = await processMemoryIntents(supabase, claudeResponse);
-    await saveMessage("assistant", cleanResponse);
+    await saveMessage("assistant", cleanResponse, meta);
     await sendResponse(ctx, cleanResponse);
   } catch (error) {
     console.error("Document error:", error);
-    await ctx.reply("Could not process document.");
+    await ctx.reply("Could not process document.", threadOpts(ctx));
   }
 });
 
@@ -880,7 +963,8 @@ function buildPrompt(
   userMessage: string,
   relevantContext?: string,
   memoryContext?: string,
-  recentMessages?: string
+  recentMessages?: string,
+  topicName?: string
 ): string {
   const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
@@ -900,6 +984,11 @@ function buildPrompt(
 
   if (USER_NAME) parts.push(`You are speaking with ${USER_NAME}.`);
   parts.push(`Current time: ${timeStr}`);
+
+  if (topicName) {
+    parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic of a Telegram forum group. Stay focused on the topic's subject. If the topic is a project name, keep responses relevant to that project.`);
+  }
+
   if (profileContext) parts.push(`\nProfile:\n${profileContext}`);
   if (memoryContext) parts.push(`\n${memoryContext}`);
   if (relevantContext) parts.push(`\n${relevantContext}`);
@@ -938,9 +1027,10 @@ function buildPrompt(
 async function sendResponse(ctx: Context, response: string): Promise<void> {
   // Telegram has a 4096 character limit
   const MAX_LENGTH = 4000;
+  const opts = threadOpts(ctx);
 
   if (response.length <= MAX_LENGTH) {
-    await ctx.reply(response);
+    await ctx.reply(response, opts);
     return;
   }
 
@@ -965,7 +1055,7 @@ async function sendResponse(ctx: Context, response: string): Promise<void> {
   }
 
   for (const chunk of chunks) {
-    await ctx.reply(chunk);
+    await ctx.reply(chunk, opts);
   }
 }
 
@@ -984,12 +1074,13 @@ async function sendVoiceResponse(ctx: Context, response: string): Promise<void> 
   const TTS_MAX = 4000;
   const ttsText = clean.length > TTS_MAX ? clean.substring(0, TTS_MAX) : clean;
   const wasTruncated = response.length > TTS_MAX;
+  const opts = threadOpts(ctx);
 
   try {
     const audioBuffer = await synthesize(ttsText);
 
     if (audioBuffer) {
-      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), opts);
       // If text was truncated, also send the full text version
       if (wasTruncated) {
         await sendResponse(ctx, response);
@@ -1015,7 +1106,9 @@ setInterval(async () => {
 
   for (const r of due) {
     try {
-      await bot.api.sendMessage(r.chatId, `Rappel: ${r.text}`);
+      const opts: Record<string, unknown> = {};
+      if (r.threadId) opts.message_thread_id = r.threadId;
+      await bot.api.sendMessage(r.chatId, `Rappel: ${r.text}`, opts);
     } catch (error) {
       console.error("Reminder send error:", error);
     }
