@@ -81,6 +81,17 @@ import {
   overrideGate,
   clearGateOverrides,
 } from "./gates.ts";
+import {
+  listProjects,
+  getProject,
+  createProject,
+  archiveProject,
+  updateProject,
+  resolveProjectContext,
+  setActiveProjectSlug,
+  formatProjectList,
+  formatProjectDetail,
+} from "./projects.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -626,6 +637,8 @@ bot.command("help", async (ctx) => {
     "/patterns -- Analyse de patterns multi-sprints",
     "/alerts [sprint] -- Alertes proactives (taches bloquees, rework)",
     "/profile -- Analyse et evolution du profil utilisateur",
+    "/projects -- Liste de tous les projets",
+    "/project [create|switch|archive|topic] -- Gerer les projets",
     "/agents -- Voir les agents BMad et leurs commandes",
     "/export -- Exporter conversations et memoire",
     "",
@@ -639,6 +652,103 @@ bot.command("agents", async (ctx) => {
   const blocked = commandGuard(ctx, "agents");
   if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   await ctx.reply(formatAgentList(), threadOpts(ctx));
+});
+
+// /projects — list all projects
+bot.command("projects", async (ctx) => {
+  const blocked = commandGuard(ctx, "projects");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) { await ctx.reply("Supabase non configure.", threadOpts(ctx)); return; }
+
+  const projects = await listProjects(supabase);
+  await sendResponse(ctx, formatProjectList(projects));
+});
+
+// /project — manage projects (create, switch, info, archive)
+bot.command("project", async (ctx) => {
+  const blocked = commandGuard(ctx, "project");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) { await ctx.reply("Supabase non configure.", threadOpts(ctx)); return; }
+
+  const args = ctx.match?.trim() || "";
+
+  // /project (no args) → show current project info
+  if (!args) {
+    const current = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+    if (current) {
+      await sendResponse(ctx, formatProjectDetail(current));
+    } else {
+      await ctx.reply("Aucun projet actif. Utilise /projects pour voir la liste.", threadOpts(ctx));
+    }
+    return;
+  }
+
+  const [subcommand, ...rest] = args.split(" ");
+  const argument = rest.join(" ").trim();
+
+  if (subcommand === "create") {
+    if (!argument) {
+      await ctx.reply("Usage: /project create <nom du projet>", threadOpts(ctx));
+      return;
+    }
+    const slug = argument
+      .toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const project = await createProject(supabase, { name: argument, slug });
+    if (project) {
+      await ctx.reply(`Projet cree: ${project.name} (${project.slug})\nID: ${project.id.substring(0, 8)}`, threadOpts(ctx));
+    } else {
+      await ctx.reply("Erreur lors de la creation du projet. Le nom existe peut-etre deja.", threadOpts(ctx));
+    }
+  } else if (subcommand === "switch") {
+    if (!argument) {
+      await ctx.reply("Usage: /project switch <slug>", threadOpts(ctx));
+      return;
+    }
+    const project = await getProject(supabase, argument);
+    if (project) {
+      setActiveProjectSlug(project.slug);
+      await ctx.reply(`Projet actif: ${project.name} (${project.slug})`, threadOpts(ctx));
+    } else {
+      await ctx.reply(`Projet "${argument}" introuvable.`, threadOpts(ctx));
+    }
+  } else if (subcommand === "archive") {
+    if (!argument) {
+      await ctx.reply("Usage: /project archive <slug>", threadOpts(ctx));
+      return;
+    }
+    const project = await getProject(supabase, argument);
+    if (project) {
+      await archiveProject(supabase, project.id);
+      await ctx.reply(`Projet archive: ${project.name}`, threadOpts(ctx));
+    } else {
+      await ctx.reply(`Projet "${argument}" introuvable.`, threadOpts(ctx));
+    }
+  } else if (subcommand === "topic") {
+    // /project topic <topic_id> — link current project to a Telegram topic
+    const topicId = parseInt(argument);
+    if (isNaN(topicId)) {
+      await ctx.reply("Usage: /project topic <topic_thread_id>", threadOpts(ctx));
+      return;
+    }
+    const current = await resolveProjectContext(supabase);
+    if (current) {
+      await updateProject(supabase, current.id, { telegram_topic_id: topicId });
+      await ctx.reply(`Projet ${current.name} lie au topic ${topicId}`, threadOpts(ctx));
+    } else {
+      await ctx.reply("Aucun projet actif.", threadOpts(ctx));
+    }
+  } else {
+    // /project <slug> — show project info
+    const project = await getProject(supabase, subcommand);
+    if (project) {
+      await sendResponse(ctx, formatProjectDetail(project));
+    } else {
+      await ctx.reply(`Projet "${subcommand}" introuvable. Commandes: create, switch, archive, topic`, threadOpts(ctx));
+    }
+  }
 });
 
 // /speak command — synthesize text to voice
