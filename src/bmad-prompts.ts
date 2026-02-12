@@ -12,6 +12,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
+import { buildFeedbackContext } from "./feedback-loop.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const AGENTS_DIR = join(PROJECT_ROOT, "config", "bmad-templates", "agents");
@@ -190,6 +191,12 @@ export function buildFullAgentPrompt(
     parts.push("");
     parts.push("CONTEXTE DOCUMENTS:");
     parts.push(context.shardedContext);
+  }
+
+  // Feedback from retros (S16-03)
+  const feedback = buildFeedbackContext(agentId as any);
+  if (feedback) {
+    parts.push(feedback);
   }
 
   return parts.join("\n");
