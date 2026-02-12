@@ -76,6 +76,11 @@ import {
   formatAgentList,
   getAgentForCommand,
 } from "./bmad-agents.ts";
+import {
+  checkGatesWithOverrides,
+  overrideGate,
+  clearGateOverrides,
+} from "./gates.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -862,6 +867,22 @@ bot.command("exec", async (ctx) => {
   }
 
   const task = matches[0];
+
+  // BMad Gate Check — enforce gates before execution
+  const gateFailure = await checkGatesWithOverrides(supabase, task);
+  if (gateFailure) {
+    const keyboard = gateFailure.overridable
+      ? new InlineKeyboard()
+          .text("Forcer le bypass", `gate_override:${task.id}:${gateFailure.gate}`)
+          .text("Annuler", `gate_cancel:${task.id}`)
+      : undefined;
+    await ctx.reply(
+      `GATE BLOQUEE\n\n${gateFailure.gate}\n${gateFailure.reason}`,
+      { ...threadOpts(ctx), reply_markup: keyboard }
+    );
+    return;
+  }
+
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   // Workflow tracking
@@ -933,6 +954,9 @@ bot.command("exec", async (ctx) => {
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
   }
+
+  // Clear gate overrides after execution
+  clearGateOverrides(task.id);
 });
 
 // /plan — decompose a request into sub-tasks and add them to the backlog
@@ -1142,6 +1166,28 @@ bot.on("callback_query:data", async (ctx) => {
       await ctx.answerCallbackQuery({ text: "Actions rejetees." });
       await ctx.editMessageText(
         `Retro ${sprintId} : actions rejetees. Tu peux relancer /retro ${sprintId} pour regenerer.`
+      );
+    }
+    return;
+  }
+
+  // Gate override callbacks (BMad gates)
+  if (data.startsWith("gate_")) {
+    const parts = data.split(":");
+    const action = parts[0]; // gate_override or gate_cancel
+    const taskId = parts[1];
+
+    if (action === "gate_override" && taskId) {
+      const gateName = parts.slice(2).join(":"); // gate name may contain colons
+      overrideGate(taskId, gateName);
+      await ctx.answerCallbackQuery({ text: "Gate bypassed." });
+      await ctx.editMessageText(
+        `Gate bypassed: ${gateName}\n\nRelance /exec ${taskId.substring(0, 8)} pour executer la tache.`
+      );
+    } else if (action === "gate_cancel" && taskId) {
+      await ctx.answerCallbackQuery({ text: "Execution annulee." });
+      await ctx.editMessageText(
+        `Execution annulee. Resous la gate avant de relancer /exec.`
       );
     }
     return;
