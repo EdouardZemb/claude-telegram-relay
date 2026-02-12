@@ -47,6 +47,7 @@ export interface AgentPromptContext {
   command: string;
   taskTitle?: string;
   taskDescription?: string;
+  priority?: number;
   acceptanceCriteria?: string;
   devNotes?: string;
   architectureRef?: string;
@@ -145,6 +146,9 @@ export function buildFullAgentPrompt(
     }
     if (context.projectName) {
       parts.push(`PROJET: ${context.projectName}`);
+    }
+    if (context.priority != null) {
+      parts.push(`PRIORITE: P${context.priority}`);
     }
     if (context.sprintId) {
       parts.push(`SPRINT: ${context.sprintId}`);

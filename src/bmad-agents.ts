@@ -271,6 +271,7 @@ export function buildBmadExecPrompt(task: {
     command: "exec",
     taskTitle: task.title,
     taskDescription: task.description || undefined,
+    priority: task.priority,
     acceptanceCriteria: task.acceptance_criteria || undefined,
     devNotes: task.dev_notes || undefined,
     architectureRef: task.architecture_ref || undefined,
