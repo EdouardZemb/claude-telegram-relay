@@ -100,6 +100,10 @@ import {
   formatPipelineResult,
 } from "./auto-pipeline.ts";
 import {
+  loadFeedbackRules,
+  processRetroFeedback,
+} from "./feedback-loop.ts";
+import {
   analyzeBacklog as analyzeBacklogProactive,
   formatPlannerResult as formatPlannerResultTg,
 } from "./proactive-planner.ts";
@@ -1543,6 +1547,15 @@ bot.on("callback_query:data", async (ctx) => {
       if (retro?.actions_proposed) {
         await acceptRetroActions(supabase, sprintId, retro.actions_proposed);
 
+        // Process feedback rules from retro (S17-01: activate feedback loop)
+        const feedbackResult = await processRetroFeedback(supabase, {
+          sprint_id: sprintId,
+          what_didnt: retro.what_didnt || [],
+          patterns_detected: retro.patterns_detected || [],
+          actions_proposed: retro.actions_proposed,
+        });
+        console.log(`Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`);
+
         // Apply workflow suggestions (checkpoint mode changes) from accepted actions
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
 
@@ -2474,6 +2487,13 @@ process.on("unhandledRejection", async (reason) => {
 console.log("Starting Claude Telegram Relay...");
 console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
 console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
+
+// Load feedback rules from retros on startup
+if (supabase) {
+  loadFeedbackRules(supabase).then((rules) => {
+    console.log(`Loaded ${rules.length} feedback rules (${rules.filter(r => r.active).length} active)`);
+  }).catch((e) => console.error("Failed to load feedback rules:", e));
+}
 
 // Drop pending updates on startup to avoid re-processing old messages
 await bot.api.deleteWebhook({ drop_pending_updates: true });
