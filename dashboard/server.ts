@@ -71,6 +71,14 @@ const server = Bun.serve({
       return handleProxyPRDs();
     }
 
+    if (url.pathname === "/api/metrics") {
+      return handleProxyMetrics();
+    }
+
+    if (url.pathname === "/api/retros") {
+      return handleProxyRetros();
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
@@ -183,6 +191,46 @@ async function handleHealthCheck(): Promise<Response> {
   }
 
   return new Response(JSON.stringify(health, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleProxyMetrics(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+  const { data, error } = await supabase
+    .from("sprint_metrics")
+    .select("*")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleProxyRetros(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+  const { data, error } = await supabase
+    .from("retros")
+    .select("sprint_id, what_worked, what_didnt, patterns_detected, actions_proposed, actions_accepted, validated_at, created_at")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
     headers: { "Content-Type": "application/json" },
   });
 }
