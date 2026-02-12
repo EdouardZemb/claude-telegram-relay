@@ -376,6 +376,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="kanban" onclick="switchTab('kanban')">Kanban</div>
     <div class="tab" data-tab="prds" onclick="switchTab('prds')">PRDs</div>
+    <div class="tab" data-tab="metrics" onclick="switchTab('metrics')">Metriques</div>
   </div>
   <div id="kanban-view">
   <div class="filters" id="filters">
@@ -418,6 +419,12 @@
       </div>
       <div id="prd-detail-content" class="prd-detail-content"></div>
     </div>
+  </div>
+
+  <div class="prd-view" id="metrics-view">
+    <div id="metrics-chart" style="margin-bottom: 24px;"></div>
+    <div id="metrics-details" style="display: flex; gap: 16px; flex-wrap: wrap;"></div>
+    <div id="retros-section" style="margin-top: 24px;"></div>
   </div>
 
   <script>
@@ -563,9 +570,10 @@
         t.classList.toggle('active', t.dataset.tab === tab);
       });
       document.getElementById('kanban-view').style.display = tab === 'kanban' ? '' : 'none';
-      const prdView = document.getElementById('prd-view');
-      prdView.style.display = tab === 'prds' ? 'block' : 'none';
+      document.getElementById('prd-view').style.display = tab === 'prds' ? 'block' : 'none';
+      document.getElementById('metrics-view').style.display = tab === 'metrics' ? 'block' : 'none';
       if (tab === 'prds') loadPRDs();
+      if (tab === 'metrics') loadMetrics();
     }
 
     // ── PRDs ──────────────────────────────────────────────────
@@ -641,6 +649,105 @@
         }
       } catch (err) {
         console.error('PRD load error:', err);
+      }
+    }
+
+    // ── Metriques ──────────────────────────────────────────────
+
+    async function loadMetrics() {
+      try {
+        const tokenParam = new URLSearchParams(window.location.search).get('token');
+        const qs = tokenParam ? '?token=' + tokenParam : '';
+        const [metricsRes, retrosRes] = await Promise.all([
+          fetch('/api/metrics' + qs),
+          fetch('/api/retros' + qs),
+        ]);
+        const metrics = await metricsRes.json();
+        const retros = await retrosRes.json();
+        renderMetrics(metrics, retros);
+      } catch (err) {
+        console.error('Metrics load error:', err);
+        document.getElementById('metrics-chart').innerHTML = '<div class="prd-empty">Erreur de chargement des metriques.</div>';
+      }
+    }
+
+    function renderMetrics(metrics, retros) {
+      const chart = document.getElementById('metrics-chart');
+      const details = document.getElementById('metrics-details');
+      const retrosSection = document.getElementById('retros-section');
+
+      if (!metrics || metrics.length === 0) {
+        chart.innerHTML = '<div class="prd-empty">Aucune metrique de sprint disponible. Utilise /metrics dans Telegram pour collecter les donnees.</div>';
+        details.innerHTML = '';
+        retrosSection.innerHTML = '';
+        return;
+      }
+
+      // Bar chart (CSS-based)
+      const maxPlanned = Math.max(...metrics.map(m => m.tasks_planned || 0), 1);
+      let chartHtml = '<div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px;"><h3 style="margin-bottom: 16px; font-size: 16px;">Evolution des sprints</h3>';
+      for (const m of metrics) {
+        const pct = m.tasks_planned > 0 ? Math.round((m.tasks_completed / m.tasks_planned) * 100) : 0;
+        const barWidth = Math.round((m.tasks_planned / maxPlanned) * 100);
+        const doneWidth = m.tasks_planned > 0 ? Math.round((m.tasks_completed / m.tasks_planned) * barWidth) : 0;
+        const color = pct >= 90 ? 'var(--green)' : pct >= 70 ? 'var(--yellow)' : 'var(--red)';
+        chartHtml += `<div style="display: flex; align-items: center; margin-bottom: 8px; gap: 12px;">`;
+        chartHtml += `<span style="min-width: 40px; font-size: 13px; font-weight: 600; color: var(--purple);">${escapeHtml(m.sprint_id)}</span>`;
+        chartHtml += `<div style="flex: 1; height: 24px; background: var(--border); border-radius: 4px; position: relative; overflow: hidden;">`;
+        chartHtml += `<div style="height: 100%; width: ${doneWidth}%; background: ${color}; border-radius: 4px; transition: width 0.3s;"></div>`;
+        chartHtml += `</div>`;
+        chartHtml += `<span style="min-width: 80px; text-align: right; font-size: 13px; color: var(--text-muted);">${m.tasks_completed}/${m.tasks_planned} (${pct}%)</span>`;
+        chartHtml += `</div>`;
+      }
+      chartHtml += '</div>';
+      chart.innerHTML = chartHtml;
+
+      // Detail cards for most recent sprint
+      const latest = metrics[metrics.length - 1];
+      let detailsHtml = '';
+      const cards = [
+        { label: 'Completion', value: latest.completion_rate ? Math.round(latest.completion_rate) + '%' : 'N/A', color: 'green' },
+        { label: 'Temps moyen', value: latest.avg_delivery_hours ? latest.avg_delivery_hours + 'h' : 'N/A', color: 'blue' },
+        { label: '1er passage', value: latest.first_pass_rate ? Math.round(latest.first_pass_rate) + '%' : 'N/A', color: 'yellow' },
+        { label: 'Retouches', value: String(latest.rework_count || 0), color: latest.rework_count > 3 ? 'red' : 'muted' },
+      ];
+      for (const c of cards) {
+        detailsHtml += `<div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; flex: 1; min-width: 120px; text-align: center;">`;
+        detailsHtml += `<div style="font-size: 28px; font-weight: 700; color: var(--${c.color});">${c.value}</div>`;
+        detailsHtml += `<div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;">${c.label}</div>`;
+        detailsHtml += `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${escapeHtml(latest.sprint_id)}</div>`;
+        detailsHtml += `</div>`;
+      }
+      details.innerHTML = detailsHtml;
+
+      // Retros section
+      if (retros && retros.length > 0) {
+        let retroHtml = '<div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px;"><h3 style="margin-bottom: 16px; font-size: 16px;">Retrospectives</h3>';
+        for (const r of retros) {
+          retroHtml += `<div style="border-bottom: 1px solid var(--border); padding: 12px 0;">`;
+          retroHtml += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">`;
+          retroHtml += `<span style="font-weight: 600; color: var(--purple);">${escapeHtml(r.sprint_id)}</span>`;
+          retroHtml += `<span style="font-size: 12px; color: var(--text-muted);">${r.validated_at ? 'Validee' : 'En attente'}</span>`;
+          retroHtml += `</div>`;
+          if (r.what_worked && r.what_worked.length > 0) {
+            retroHtml += `<div style="margin-bottom: 6px;"><span style="color: var(--green); font-size: 12px;">Ce qui a marche :</span> <span style="font-size: 13px; color: var(--text-muted);">${r.what_worked.map(escapeHtml).join(', ')}</span></div>`;
+          }
+          if (r.what_didnt && r.what_didnt.length > 0) {
+            retroHtml += `<div style="margin-bottom: 6px;"><span style="color: var(--red); font-size: 12px;">Ce qui a coince :</span> <span style="font-size: 13px; color: var(--text-muted);">${r.what_didnt.map(escapeHtml).join(', ')}</span></div>`;
+          }
+          if (r.actions_proposed && r.actions_proposed.length > 0) {
+            const actions = r.actions_proposed.map(a => {
+              const accepted = r.actions_accepted && r.actions_accepted.some(ac => ac.action === a.action);
+              return `<span style="color: ${accepted ? 'var(--green)' : 'var(--text-muted)'};">${accepted ? '[OK]' : '[ ]'} ${escapeHtml(a.action)}</span>`;
+            });
+            retroHtml += `<div style="font-size: 13px;">${actions.join('<br>')}</div>`;
+          }
+          retroHtml += `</div>`;
+        }
+        retroHtml += '</div>';
+        retrosSection.innerHTML = retroHtml;
+      } else {
+        retrosSection.innerHTML = '';
       }
     }
 

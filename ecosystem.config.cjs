@@ -43,5 +43,17 @@ module.exports = {
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
     },
+    {
+      name: "claude-alert-cron",
+      script: "bun",
+      args: "run src/alert-cron.ts",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: false,
+      cron_restart: "0 * * * *",
+      error_file: "/home/edouard/.claude-relay/logs/alert-cron-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/alert-cron-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
   ],
 };

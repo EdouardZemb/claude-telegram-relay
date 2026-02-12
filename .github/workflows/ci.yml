@@ -37,3 +37,6 @@ jobs:
 
       - name: Run integration tests
         run: bun test tests/integration
+
+      - name: Run system tests
+        run: bun test tests/system

@@ -59,8 +59,9 @@ import {
   getRetro,
   formatRetro,
   WorkflowTracker,
+  applyWorkflowSuggestions,
 } from "./workflow.ts";
-import { analyzePatterns, formatPatterns } from "./patterns.ts";
+import { analyzePatterns, formatPatterns, type WorkflowSuggestion } from "./patterns.ts";
 import { runAllChecks, formatAlerts } from "./alerts.ts";
 import {
   analyzeProfile,
@@ -1109,10 +1110,19 @@ bot.on("callback_query:data", async (ctx) => {
       const retro = await getRetro(supabase, sprintId);
       if (retro?.actions_proposed) {
         await acceptRetroActions(supabase, sprintId, retro.actions_proposed);
+
+        // Apply workflow suggestions (checkpoint mode changes) from accepted actions
+        const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
+
+        let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
+        if (workflowChanges.length > 0) {
+          message += `\n\nModifications du workflow appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
+        } else {
+          message += " Elles seront prises en compte dans le prochain sprint.";
+        }
+
         await ctx.answerCallbackQuery({ text: "Actions validees !" });
-        await ctx.editMessageText(
-          `Retro ${sprintId} : toutes les actions ont ete validees. Elles seront prises en compte dans le prochain sprint.`
-        );
+        await ctx.editMessageText(message);
       }
     } else if (action === "retro_reject") {
       await ctx.answerCallbackQuery({ text: "Actions rejetees." });
@@ -1392,6 +1402,9 @@ bot.command("retro", async (ctx) => {
     return;
   }
 
+  // Also run pattern analysis to feed into the retro
+  const patternAnalysis = await analyzePatterns(supabase);
+
   // Use Claude to analyze and generate the retro
   const retroPrompt = [
     "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
@@ -1401,9 +1414,16 @@ bot.command("retro", async (ctx) => {
     `Metriques: ${JSON.stringify(retroData.metrics)}`,
     `Stats workflow: ${JSON.stringify(retroData.workflowStats)}`,
     `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t: any) => ({ title: t.title, status: t.status, priority: t.priority })))}`,
+    patternAnalysis.patterns.length > 0
+      ? `Patterns detectes automatiquement: ${JSON.stringify(patternAnalysis.patterns.map(p => p.description))}`
+      : "",
+    patternAnalysis.suggestions.length > 0
+      ? `Suggestions workflow automatiques: ${JSON.stringify(patternAnalysis.suggestions.map(s => ({ action: s.action, priority: s.priority, target_step: s.target_step, suggested_change: s.suggested_change })))}`
+      : "",
     "",
     'Format JSON attendu:',
-    '{"what_worked": ["..."], "what_didnt": ["..."], "patterns_detected": ["..."], "actions_proposed": [{"action": "...", "priority": "high|medium|low"}]}',
+    '{"what_worked": ["..."], "what_didnt": ["..."], "patterns_detected": ["..."], "actions_proposed": [{"action": "...", "priority": "high|medium|low", "target_step": "optional_step_id", "suggested_change": "optional_change"}]}',
+    "Inclus les suggestions workflow automatiques dans actions_proposed en conservant target_step et suggested_change.",
   ].join("\n");
 
   try {
@@ -1498,14 +1518,15 @@ bot.on("message:text", async (ctx) => {
 
     await saveMessage("user", text, meta);
 
-    // Gather context: semantic search + facts/goals + recent messages
-    const [relevantContext, memoryContext, recentMessages] = await Promise.all([
+    // Gather context: semantic search + facts/goals + recent messages + dynamic profile
+    const [relevantContext, memoryContext, recentMessages, dynProfile] = await Promise.all([
       getRelevantContext(supabase, text),
       getMemoryContext(supabase),
       getRecentMessages(supabase),
+      getDynamicProfile(),
     ]);
 
-    const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName);
+    const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName, dynProfile);
     const rawResponse = await callClaude(enrichedPrompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
 
     // Parse and save any memory intents, strip tags from response
@@ -1561,10 +1582,11 @@ bot.on("message:voice", async (ctx) => {
 
     await saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`, meta);
 
-    const [relevantContext, memoryContext, recentMessages] = await Promise.all([
+    const [relevantContext, memoryContext, recentMessages, dynProfile] = await Promise.all([
       getRelevantContext(supabase, transcription),
       getMemoryContext(supabase),
       getRecentMessages(supabase),
+      getDynamicProfile(),
     ]);
 
     const enrichedPrompt = buildPrompt(
@@ -1572,7 +1594,8 @@ bot.on("message:voice", async (ctx) => {
       relevantContext,
       memoryContext,
       recentMessages,
-      topicName
+      topicName,
+      dynProfile
     );
     const rawResponse = await callClaude(enrichedPrompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
     const claudeResponse = await processMemoryIntents(supabase, rawResponse);
@@ -1703,6 +1726,36 @@ try {
   // No profile yet — that's fine
 }
 
+// Dynamic profile: cached insights refreshed every 6 hours
+let dynamicProfileCache: string = "";
+let dynamicProfileLastRefresh = 0;
+const PROFILE_REFRESH_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+
+async function getDynamicProfile(): Promise<string> {
+  if (!supabase) return "";
+  if (Date.now() - dynamicProfileLastRefresh < PROFILE_REFRESH_INTERVAL && dynamicProfileCache) {
+    return dynamicProfileCache;
+  }
+  try {
+    const insights = await analyzeProfile(supabase);
+    const parts: string[] = [];
+    if (insights.activityPattern.peakHour) {
+      parts.push(`Pic d'activite: ${insights.activityPattern.peakHour}h`);
+    }
+    if (insights.taskPreferences.topTaskTypes.length > 0) {
+      parts.push(`Types de taches frequents: ${insights.taskPreferences.topTaskTypes.slice(0, 3).map(t => t.type).join(", ")}`);
+    }
+    if (insights.taskPreferences.avgTasksPerSprint > 0) {
+      parts.push(`Moyenne: ${insights.taskPreferences.avgTasksPerSprint} taches/sprint`);
+    }
+    dynamicProfileCache = parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
+    dynamicProfileLastRefresh = Date.now();
+  } catch {
+    // Silent fail — dynamic profile is a nice-to-have
+  }
+  return dynamicProfileCache;
+}
+
 const USER_NAME = process.env.USER_NAME || "";
 const USER_TIMEZONE = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -1711,7 +1764,8 @@ function buildPrompt(
   relevantContext?: string,
   memoryContext?: string,
   recentMessages?: string,
-  topicName?: string
+  topicName?: string,
+  dynamicProfile?: string
 ): string {
   const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
@@ -1742,6 +1796,7 @@ function buildPrompt(
   }
 
   if (profileContext) parts.push(`\nProfile:\n${profileContext}`);
+  if (dynamicProfile) parts.push(dynamicProfile);
   if (memoryContext) parts.push(`\n${memoryContext}`);
   if (relevantContext) parts.push(`\n${relevantContext}`);
 

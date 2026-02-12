@@ -6,8 +6,8 @@
  * et log chaque transition dans workflow_logs.
  */
 
-import { parse } from "yaml";
-import { readFileSync } from "fs";
+import { parse, stringify } from "yaml";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -533,4 +533,54 @@ export function formatRetro(retro: any): string {
   }
 
   return lines.join("\n");
+}
+
+// ── Workflow Auto-Update ──────────────────────────────────────
+
+/**
+ * Applique des suggestions de patterns au workflow.yaml.
+ * Retourne les modifications effectuees.
+ */
+export function applyWorkflowSuggestions(
+  suggestions: Array<{ action: string; target_step?: string; suggested_change?: string }>
+): string[] {
+  const configPath = join(
+    process.env.PROJECT_DIR || join(import.meta.dir, ".."),
+    "config",
+    "workflow.yaml"
+  );
+  if (!existsSync(configPath)) return [];
+
+  const raw = readFileSync(configPath, "utf-8");
+  const config = parse(raw) as WorkflowConfig;
+  const applied: string[] = [];
+
+  for (const suggestion of suggestions) {
+    if (!suggestion.target_step || !suggestion.suggested_change) continue;
+
+    const step = config.steps.find((s) => s.id === suggestion.target_step);
+    if (!step) continue;
+
+    // Parse the suggested_change (format: "checkpoint.mode: light")
+    const match = suggestion.suggested_change.match(/^checkpoint\.mode:\s*(off|light|strict)$/);
+    if (!match) continue;
+
+    const newMode = match[1] as "off" | "light" | "strict";
+    const oldMode = step.checkpoint.mode;
+    if (oldMode === newMode) continue;
+
+    step.checkpoint.mode = newMode;
+    step.checkpoint.enabled = newMode !== "off";
+    applied.push(`${suggestion.target_step}: checkpoint ${oldMode} -> ${newMode}`);
+  }
+
+  if (applied.length > 0) {
+    // Bump version
+    config.version = (config.version || 1) + 1;
+    writeFileSync(configPath, stringify(config, { lineWidth: 120 }));
+    // Reload cached config
+    reloadWorkflowConfig();
+  }
+
+  return applied;
 }
