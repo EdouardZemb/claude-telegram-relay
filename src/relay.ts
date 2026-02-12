@@ -100,6 +100,10 @@ import {
   formatPipelineResult,
 } from "./auto-pipeline.ts";
 import {
+  loadFeedbackRules,
+  processRetroFeedback,
+} from "./feedback-loop.ts";
+import {
   analyzeBacklog as analyzeBacklogProactive,
   formatPlannerResult as formatPlannerResultTg,
 } from "./proactive-planner.ts";
@@ -1543,6 +1547,18 @@ bot.on("callback_query:data", async (ctx) => {
       if (retro?.actions_proposed) {
         await acceptRetroActions(supabase, sprintId, retro.actions_proposed);
 
+        // Process feedback rules from retro (S17-01: activate feedback loop)
+        const feedbackResult = await processRetroFeedback(supabase, {
+          sprint_id: sprintId,
+          what_didnt: retro.what_didnt || [],
+          patterns_detected: retro.patterns_detected || [],
+          actions_proposed: retro.actions_proposed,
+        });
+        console.log(`Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`);
+
+        // Reload feedback rules into memory so buildFeedbackContext uses fresh data
+        await loadFeedbackRules(supabase);
+
         // Apply workflow suggestions (checkpoint mode changes) from accepted actions
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
 
@@ -1601,6 +1617,19 @@ bot.on("callback_query:data", async (ctx) => {
     if (action === "gate_override" && taskId) {
       const gateName = parts.slice(2).join(":"); // gate name may contain colons
       overrideGate(taskId, gateName);
+
+      // Audit trail: log gate override
+      if (supabase) {
+        await supabase.from("workflow_audit").insert({
+          task_id: taskId,
+          action: "gate_override",
+          field: gateName,
+          from_value: "blocked",
+          to_value: "overridden",
+          reason: `User override via Telegram button`,
+        }).catch(() => {});
+      }
+
       await ctx.answerCallbackQuery({ text: "Gate bypassed." });
       await ctx.editMessageText(
         `Gate bypassed: ${gateName}\n\nRelance /exec ${taskId.substring(0, 8)} pour executer la tache.`
@@ -2250,6 +2279,15 @@ async function getDynamicProfile(): Promise<string> {
     if (insights.taskPreferences.avgTasksPerSprint > 0) {
       parts.push(`Moyenne: ${insights.taskPreferences.avgTasksPerSprint} taches/sprint`);
     }
+    if (insights.communicationStyle.prefersBrief) {
+      parts.push(`Style: concis`);
+    }
+    if (insights.activityPattern.activeDays.length > 0) {
+      parts.push(`Jours actifs: ${insights.activityPattern.activeDays.slice(0, 3).join(", ")}`);
+    }
+    if (insights.workflowPreferences.autonomyLevel) {
+      parts.push(`Autonomie: ${insights.workflowPreferences.autonomyLevel}`);
+    }
     dynamicProfileCache = parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
     dynamicProfileLastRefresh = Date.now();
   } catch {
@@ -2474,6 +2512,13 @@ process.on("unhandledRejection", async (reason) => {
 console.log("Starting Claude Telegram Relay...");
 console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
 console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
+
+// Load feedback rules from retros on startup
+if (supabase) {
+  loadFeedbackRules(supabase).then((rules) => {
+    console.log(`Loaded ${rules.length} feedback rules (${rules.filter(r => r.active).length} active)`);
+  }).catch((e) => console.error("Failed to load feedback rules:", e));
+}
 
 // Drop pending updates on startup to avoid re-processing old messages
 await bot.api.deleteWebhook({ drop_pending_updates: true });

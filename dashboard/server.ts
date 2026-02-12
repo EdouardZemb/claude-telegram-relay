@@ -94,6 +94,10 @@ const server = Bun.serve({
       return handleWorkflowAudit();
     }
 
+    if (url.pathname === "/api/sprint-live") {
+      return handleSprintLive();
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
@@ -394,6 +398,80 @@ async function handleWorkflowAudit(): Promise<Response> {
     });
   }
   return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleSprintLive(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify({ sprint: null }), { headers: { "Content-Type": "application/json" } });
+  }
+
+  // Find the current sprint by looking at tasks with the latest sprint ID
+  const { data: latestTasks } = await supabase
+    .from("tasks")
+    .select("sprint")
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const currentSprint = latestTasks?.[0]?.sprint;
+  if (!currentSprint) {
+    return new Response(JSON.stringify({ sprint: null }), { headers: { "Content-Type": "application/json" } });
+  }
+
+  // Get all tasks for this sprint
+  const { data: tasks } = await supabase
+    .from("tasks")
+    .select("id, title, status, priority, updated_at, completed_at")
+    .eq("sprint", currentSprint)
+    .neq("status", "cancelled")
+    .order("priority", { ascending: true });
+
+  const allTasks = tasks || [];
+  const done = allTasks.filter((t: any) => t.status === "done");
+  const inProgress = allTasks.filter((t: any) => t.status === "in_progress");
+  const backlog = allTasks.filter((t: any) => t.status === "backlog");
+
+  // Get feedback rules status
+  const { data: rules } = await supabase
+    .from("feedback_rules")
+    .select("id, agent_id, active, occurrences")
+    .limit(20);
+
+  // Get latest retro
+  const { data: retros } = await supabase
+    .from("retros")
+    .select("sprint_id, validated_at")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const response = {
+    sprint: currentSprint,
+    timestamp: new Date().toISOString(),
+    progress: {
+      total: allTasks.length,
+      done: done.length,
+      inProgress: inProgress.length,
+      backlog: backlog.length,
+      completionPct: allTasks.length > 0 ? Math.round((done.length / allTasks.length) * 100) : 0,
+    },
+    tasks: allTasks.map((t: any) => ({
+      id: t.id.substring(0, 8),
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      updatedAt: t.updated_at,
+      completedAt: t.completed_at,
+    })),
+    feedbackRules: {
+      total: rules?.length || 0,
+      active: rules?.filter((r: any) => r.active).length || 0,
+    },
+    lastRetro: retros?.[0] || null,
+  };
+
+  return new Response(JSON.stringify(response, null, 2), {
     headers: { "Content-Type": "application/json" },
   });
 }

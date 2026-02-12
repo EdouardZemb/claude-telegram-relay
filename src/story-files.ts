@@ -226,7 +226,7 @@ function parseAcceptanceCriteria(raw: string): AcceptanceCriterion[] {
   let index = 1;
 
   // Try to parse Given/When/Then format
-  const gwtPattern = /(?:Given|GIVEN)\s+(.+?)[\s,]*(?:When|WHEN)\s+(.+?)[\s,]*(?:Then|THEN)\s+(.+?)(?:\n|$)/gi;
+  const gwtPattern = /(?:Given|GIVEN)\s+([\s\S]+?)[\s,]*(?:When|WHEN)\s+([\s\S]+?)[\s,]*(?:Then|THEN)\s+([\s\S]+?)(?:\n\n|\n(?=(?:Given|GIVEN))|$)/gi;
   let match: RegExpExecArray | null;
   while ((match = gwtPattern.exec(raw)) !== null) {
     criteria.push({

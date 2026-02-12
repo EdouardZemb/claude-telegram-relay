@@ -49,6 +49,43 @@
       color: var(--accent);
     }
 
+    .sprint-live-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .sprint-live-bar .progress-bar {
+      flex: 1;
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      min-width: 120px;
+    }
+    .sprint-live-bar .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .sprint-live-bar .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
     .filters {
       display: flex;
       gap: 8px;
@@ -382,6 +419,14 @@
     <div class="tab active" data-tab="kanban" onclick="switchTab('kanban')">Kanban</div>
     <div class="tab" data-tab="prds" onclick="switchTab('prds')">PRDs</div>
     <div class="tab" data-tab="metrics" onclick="switchTab('metrics')">Metriques</div>
+  </div>
+  <div id="sprint-live-bar" class="sprint-live-bar" style="display:none;">
+    <span class="live-dot"></span>
+    <strong id="live-sprint-id">--</strong>
+    <span id="live-sprint-stats">--</span>
+    <div class="progress-bar"><div class="progress-fill" id="live-progress" style="width:0%"></div></div>
+    <span id="live-sprint-pct">0%</span>
+    <span id="live-feedback-info" style="color:var(--text-muted);font-size:11px;"></span>
   </div>
   <div id="kanban-view">
   <div class="filters" id="filters">
@@ -785,10 +830,32 @@
       }
     }
 
+    // Sprint live bar
+    async function loadSprintLive() {
+      try {
+        const token = new URLSearchParams(window.location.search).get('token') || '';
+        const res = await fetch(`/api/sprint-live?token=${token}`);
+        const data = await res.json();
+        const bar = document.getElementById('sprint-live-bar');
+        if (!data.sprint) { bar.style.display = 'none'; return; }
+        bar.style.display = 'flex';
+        document.getElementById('live-sprint-id').textContent = data.sprint;
+        document.getElementById('live-sprint-stats').textContent =
+          `${data.progress.done}/${data.progress.total} done, ${data.progress.inProgress} en cours`;
+        document.getElementById('live-progress').style.width = data.progress.completionPct + '%';
+        document.getElementById('live-sprint-pct').textContent = data.progress.completionPct + '%';
+        const fbInfo = data.feedbackRules;
+        document.getElementById('live-feedback-info').textContent =
+          fbInfo ? `Feedback: ${fbInfo.active}/${fbInfo.total} rules` : '';
+      } catch {}
+    }
+
     // Initial load + auto-refresh every 30s
     loadProjects();
     loadTasks();
+    loadSprintLive();
     setInterval(loadTasks, 30000);
+    setInterval(loadSprintLive, 15000);
   </script>
 </body>
 </html>
