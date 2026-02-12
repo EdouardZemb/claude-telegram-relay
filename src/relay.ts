@@ -64,6 +64,12 @@ import {
 import { analyzePatterns, formatPatterns, type WorkflowSuggestion } from "./patterns.ts";
 import { runAllChecks, formatAlerts } from "./alerts.ts";
 import {
+  proposeWorkflowChange,
+  extractProposalsFromRetro,
+  getPendingProposals,
+  formatProposals,
+} from "./workflow-propagation.ts";
+import {
   analyzeProfile,
   proposeProfileUpdates,
   applyProfileUpdates,
@@ -1368,9 +1374,36 @@ bot.on("callback_query:data", async (ctx) => {
         // Apply workflow suggestions (checkpoint mode changes) from accepted actions
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
 
+        // Cross-project propagation: extract and propose workflow changes
+        const currentProject = await resolveProjectContext(supabase, ctx.callbackQuery?.message?.message_thread_id);
+        if (currentProject?.id) {
+          const proposals = extractProposalsFromRetro(
+            { sprint: sprintId, actions: retro.actions_proposed },
+            currentProject.id
+          );
+          const propagationResults: string[] = [];
+          for (const p of proposals) {
+            const result = await proposeWorkflowChange(supabase, {
+              ...p,
+              projectId: currentProject.id,
+              sprint: sprintId,
+            });
+            if (result.promoted) {
+              propagationResults.push(`PROMU: ${p.target} — ${p.description} (${result.votes} votes)`);
+            } else if (!result.isNew) {
+              propagationResults.push(`Vote ajoute: ${p.target} (${result.votes} votes)`);
+            } else {
+              propagationResults.push(`Propose: ${p.target}`);
+            }
+          }
+          if (propagationResults.length > 0) {
+            workflowChanges.push(...propagationResults.map((r) => `[CROSS-PROJET] ${r}`));
+          }
+        }
+
         let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
         if (workflowChanges.length > 0) {
-          message += `\n\nModifications du workflow appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
+          message += `\n\nModifications appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
         } else {
           message += " Elles seront prises en compte dans le prochain sprint.";
         }
