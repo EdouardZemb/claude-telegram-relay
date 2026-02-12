@@ -180,7 +180,7 @@ export async function saveReviewResult(
   branchName: string,
   result: CodeReviewResult
 ): Promise<void> {
-  await supabase.from("workflow_logs").insert({
+  const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
     step: "code_review",
     from_step: "execution",
@@ -194,6 +194,7 @@ export async function saveReviewResult(
       summary: result.summary,
     },
   });
+  if (error) console.error("saveReviewResult error:", error);
 }
 
 // ── Formatting ───────────────────────────────────────────────

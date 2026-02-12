@@ -396,7 +396,7 @@ async function logOrchestrationResult(
   steps: AgentStepResult[],
   totalDurationMs: number
 ): Promise<void> {
-  await supabase.from("workflow_logs").insert({
+  const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
     step: "orchestration",
     from_step: "orchestration_start",
@@ -413,6 +413,7 @@ async function logOrchestrationResult(
       allPassed: steps.every((s) => s.success),
     },
   });
+  if (error) console.error("logOrchestrationResult error:", error);
 }
 
 // ── Format for Telegram ──────────────────────────────────────
