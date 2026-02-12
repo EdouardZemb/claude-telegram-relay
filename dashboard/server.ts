@@ -63,35 +63,40 @@ const server = Bun.serve({
     }
 
     // API proxy — serve Supabase data without exposing keys to client
+    // Extract optional project_id filter from query params
+    const projectId = url.searchParams.get("project_id") || undefined;
+
+    if (url.pathname === "/api/projects") {
+      return handleProxyProjects();
+    }
+
     if (url.pathname === "/api/tasks") {
-      return handleProxyTasks();
+      return handleProxyTasks(projectId);
     }
 
     if (url.pathname === "/api/prds") {
-      return handleProxyPRDs();
+      return handleProxyPRDs(projectId);
     }
 
     if (url.pathname === "/api/metrics") {
-      return handleProxyMetrics();
+      return handleProxyMetrics(projectId);
     }
 
     if (url.pathname === "/api/retros") {
-      return handleProxyRetros();
+      return handleProxyRetros(projectId);
     }
 
     return new Response("Not found", { status: 404 });
   },
 });
 
-async function handleProxyTasks(): Promise<Response> {
+async function handleProxyProjects(): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
   const { data, error } = await supabase
-    .from("tasks")
+    .from("projects")
     .select("*")
-    .neq("status", "cancelled")
-    .order("priority", { ascending: true })
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -105,15 +110,43 @@ async function handleProxyTasks(): Promise<Response> {
   });
 }
 
-async function handleProxyPRDs(): Promise<Response> {
+async function handleProxyTasks(projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
-  const { data, error } = await supabase
+  let query = supabase
+    .from("tasks")
+    .select("*")
+    .neq("status", "cancelled")
+    .order("priority", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (projectId) query = query.eq("project_id", projectId);
+
+  const { data, error } = await query;
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleProxyPRDs(projectId?: string): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+  let query = supabase
     .from("prds")
     .select("*")
     .order("created_at", { ascending: false });
 
+  if (projectId) query = query.eq("project_id", projectId);
+
+  const { data, error } = await query;
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
@@ -195,15 +228,18 @@ async function handleHealthCheck(): Promise<Response> {
   });
 }
 
-async function handleProxyMetrics(): Promise<Response> {
+async function handleProxyMetrics(projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
-  const { data, error } = await supabase
+  let query = supabase
     .from("sprint_metrics")
     .select("*")
     .order("created_at", { ascending: true });
 
+  if (projectId) query = query.eq("project_id", projectId);
+
+  const { data, error } = await query;
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
@@ -215,15 +251,18 @@ async function handleProxyMetrics(): Promise<Response> {
   });
 }
 
-async function handleProxyRetros(): Promise<Response> {
+async function handleProxyRetros(projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
-  const { data, error } = await supabase
+  let query = supabase
     .from("retros")
     .select("sprint_id, what_worked, what_didnt, patterns_detected, actions_proposed, actions_accepted, validated_at, created_at")
     .order("created_at", { ascending: false });
 
+  if (projectId) query = query.eq("project_id", projectId);
+
+  const { data, error } = await query;
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,

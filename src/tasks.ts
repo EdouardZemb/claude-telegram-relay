@@ -7,6 +7,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+export interface Subtask {
+  title: string;
+  ac_mapping?: string;
+  done?: boolean;
+}
+
 export interface Task {
   id: string;
   created_at: string;
@@ -23,6 +29,11 @@ export interface Task {
   blocked_by: string | null;
   notes: string | null;
   completed_at: string | null;
+  // BMad Story File fields
+  acceptance_criteria: string | null;
+  dev_notes: string | null;
+  architecture_ref: string | null;
+  subtasks: Subtask[];
 }
 
 // ── Queries ──────────────────────────────────────────────────
@@ -30,7 +41,18 @@ export interface Task {
 export async function addTask(
   supabase: SupabaseClient,
   title: string,
-  opts?: { description?: string; project?: string; priority?: number; sprint?: string; tags?: string[] }
+  opts?: {
+    description?: string;
+    project?: string;
+    project_id?: string;
+    priority?: number;
+    sprint?: string;
+    tags?: string[];
+    acceptance_criteria?: string;
+    dev_notes?: string;
+    architecture_ref?: string;
+    subtasks?: Subtask[];
+  }
 ): Promise<Task | null> {
   const { data, error } = await supabase
     .from("tasks")
@@ -38,9 +60,14 @@ export async function addTask(
       title,
       description: opts?.description ?? null,
       project: opts?.project ?? "telegram-relay",
+      project_id: opts?.project_id ?? null,
       priority: opts?.priority ?? 3,
       sprint: opts?.sprint ?? null,
       tags: opts?.tags ?? [],
+      acceptance_criteria: opts?.acceptance_criteria ?? null,
+      dev_notes: opts?.dev_notes ?? null,
+      architecture_ref: opts?.architecture_ref ?? null,
+      subtasks: opts?.subtasks ?? [],
     })
     .select()
     .single();
@@ -54,7 +81,7 @@ export async function addTask(
 
 export async function getBacklog(
   supabase: SupabaseClient,
-  opts?: { project?: string; sprint?: string; status?: string }
+  opts?: { project?: string; project_id?: string; sprint?: string; status?: string }
 ): Promise<Task[]> {
   let query = supabase
     .from("tasks")
@@ -63,7 +90,8 @@ export async function getBacklog(
     .order("priority", { ascending: true })
     .order("created_at", { ascending: true });
 
-  if (opts?.project) query = query.eq("project", opts.project);
+  if (opts?.project_id) query = query.eq("project_id", opts.project_id);
+  else if (opts?.project) query = query.eq("project", opts.project);
   if (opts?.sprint) query = query.eq("sprint", opts.sprint);
   if (opts?.status) query = query.eq("status", opts.status);
 

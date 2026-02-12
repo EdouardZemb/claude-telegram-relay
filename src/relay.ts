@@ -70,6 +70,28 @@ import {
   formatProfileInsights,
   formatProfileUpdates,
 } from "./profile-evolution.ts";
+import {
+  enrichPromptWithAgent,
+  buildBmadExecPrompt,
+  formatAgentList,
+  getAgentForCommand,
+} from "./bmad-agents.ts";
+import {
+  checkGatesWithOverrides,
+  overrideGate,
+  clearGateOverrides,
+} from "./gates.ts";
+import {
+  listProjects,
+  getProject,
+  createProject,
+  archiveProject,
+  updateProject,
+  resolveProjectContext,
+  setActiveProjectSlug,
+  formatProjectList,
+  formatProjectDetail,
+} from "./projects.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -615,11 +637,118 @@ bot.command("help", async (ctx) => {
     "/patterns -- Analyse de patterns multi-sprints",
     "/alerts [sprint] -- Alertes proactives (taches bloquees, rework)",
     "/profile -- Analyse et evolution du profil utilisateur",
+    "/projects -- Liste de tous les projets",
+    "/project [create|switch|archive|topic] -- Gerer les projets",
+    "/agents -- Voir les agents BMad et leurs commandes",
     "/export -- Exporter conversations et memoire",
     "",
     "Envoie un message texte ou vocal pour discuter librement.",
   ].join("\n");
   await ctx.reply(help, threadOpts(ctx));
+});
+
+// /agents — list BMad agents and their capabilities
+bot.command("agents", async (ctx) => {
+  const blocked = commandGuard(ctx, "agents");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  await ctx.reply(formatAgentList(), threadOpts(ctx));
+});
+
+// /projects — list all projects
+bot.command("projects", async (ctx) => {
+  const blocked = commandGuard(ctx, "projects");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) { await ctx.reply("Supabase non configure.", threadOpts(ctx)); return; }
+
+  const projects = await listProjects(supabase);
+  await sendResponse(ctx, formatProjectList(projects));
+});
+
+// /project — manage projects (create, switch, info, archive)
+bot.command("project", async (ctx) => {
+  const blocked = commandGuard(ctx, "project");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) { await ctx.reply("Supabase non configure.", threadOpts(ctx)); return; }
+
+  const args = ctx.match?.trim() || "";
+
+  // /project (no args) → show current project info
+  if (!args) {
+    const current = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+    if (current) {
+      await sendResponse(ctx, formatProjectDetail(current));
+    } else {
+      await ctx.reply("Aucun projet actif. Utilise /projects pour voir la liste.", threadOpts(ctx));
+    }
+    return;
+  }
+
+  const [subcommand, ...rest] = args.split(" ");
+  const argument = rest.join(" ").trim();
+
+  if (subcommand === "create") {
+    if (!argument) {
+      await ctx.reply("Usage: /project create <nom du projet>", threadOpts(ctx));
+      return;
+    }
+    const slug = argument
+      .toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const project = await createProject(supabase, { name: argument, slug });
+    if (project) {
+      await ctx.reply(`Projet cree: ${project.name} (${project.slug})\nID: ${project.id.substring(0, 8)}`, threadOpts(ctx));
+    } else {
+      await ctx.reply("Erreur lors de la creation du projet. Le nom existe peut-etre deja.", threadOpts(ctx));
+    }
+  } else if (subcommand === "switch") {
+    if (!argument) {
+      await ctx.reply("Usage: /project switch <slug>", threadOpts(ctx));
+      return;
+    }
+    const project = await getProject(supabase, argument);
+    if (project) {
+      setActiveProjectSlug(project.slug);
+      await ctx.reply(`Projet actif: ${project.name} (${project.slug})`, threadOpts(ctx));
+    } else {
+      await ctx.reply(`Projet "${argument}" introuvable.`, threadOpts(ctx));
+    }
+  } else if (subcommand === "archive") {
+    if (!argument) {
+      await ctx.reply("Usage: /project archive <slug>", threadOpts(ctx));
+      return;
+    }
+    const project = await getProject(supabase, argument);
+    if (project) {
+      await archiveProject(supabase, project.id);
+      await ctx.reply(`Projet archive: ${project.name}`, threadOpts(ctx));
+    } else {
+      await ctx.reply(`Projet "${argument}" introuvable.`, threadOpts(ctx));
+    }
+  } else if (subcommand === "topic") {
+    // /project topic <topic_id> — link current project to a Telegram topic
+    const topicId = parseInt(argument);
+    if (isNaN(topicId)) {
+      await ctx.reply("Usage: /project topic <topic_thread_id>", threadOpts(ctx));
+      return;
+    }
+    const current = await resolveProjectContext(supabase);
+    if (current) {
+      await updateProject(supabase, current.id, { telegram_topic_id: topicId });
+      await ctx.reply(`Projet ${current.name} lie au topic ${topicId}`, threadOpts(ctx));
+    } else {
+      await ctx.reply("Aucun projet actif.", threadOpts(ctx));
+    }
+  } else {
+    // /project <slug> — show project info
+    const project = await getProject(supabase, subcommand);
+    if (project) {
+      await sendResponse(ctx, formatProjectDetail(project));
+    } else {
+      await ctx.reply(`Projet "${subcommand}" introuvable. Commandes: create, switch, archive, topic`, threadOpts(ctx));
+    }
+  }
 });
 
 // /speak command — synthesize text to voice
@@ -681,9 +810,12 @@ bot.command("task", async (ctx) => {
     await ctx.reply("Usage: /task titre de la tache", threadOpts(ctx));
     return;
   }
-  const task = await addTask(supabase, input);
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+  const task = await addTask(supabase, input, { project: projectSlug, project_id: currentProject?.id });
   if (task) {
-    await ctx.reply(`Tache ajoutee: ${task.title}\nID: ${task.id.substring(0, 8)}`, threadOpts(ctx));
+    await ctx.reply(`Tache ajoutee: ${task.title}\nProjet: ${projectSlug}\nID: ${task.id.substring(0, 8)}`, threadOpts(ctx));
   } else {
     await ctx.reply("Erreur lors de l'ajout de la tache.", threadOpts(ctx));
   }
@@ -698,8 +830,17 @@ bot.command("backlog", async (ctx) => {
     return;
   }
   const filter = ctx.match?.trim();
-  const tasks = await getBacklog(supabase, filter ? { project: filter } : undefined);
-  await sendResponse(ctx, formatBacklog(tasks));
+  if (filter) {
+    // Explicit project filter
+    const tasks = await getBacklog(supabase, { project: filter });
+    await sendResponse(ctx, formatBacklog(tasks));
+  } else {
+    // Auto-scope to current project
+    const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+    const tasks = await getBacklog(supabase, currentProject ? { project_id: currentProject.id } : undefined);
+    const header = currentProject ? `Backlog — ${currentProject.name}\n\n` : "";
+    await sendResponse(ctx, header + formatBacklog(tasks));
+  }
 });
 
 // /sprint — view sprint status or assign tasks to a sprint
@@ -712,24 +853,30 @@ bot.command("sprint", async (ctx) => {
   }
   const arg = ctx.match?.trim();
 
+  // Resolve project context for scoping
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectFilter = currentProject ? { project_id: currentProject.id } : {};
+
   if (!arg) {
     // Show current sprint summary
-    const current = await getCurrentSprint(supabase);
+    const current = currentProject?.current_sprint || await getCurrentSprint(supabase);
     if (!current) {
       await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.", threadOpts(ctx));
       return;
     }
     const summary = await getSprintSummary(supabase, current);
-    const tasks = await getBacklog(supabase, { sprint: current });
-    const text = formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
+    const tasks = await getBacklog(supabase, { sprint: current, ...projectFilter });
+    const header = currentProject ? `${currentProject.name} — ` : "";
+    const text = header + formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
     await sendResponse(ctx, text);
     return;
   }
 
   // /sprint S01 — show that sprint
   const summary = await getSprintSummary(supabase, arg);
-  const tasks = await getBacklog(supabase, { sprint: arg });
-  const text = formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
+  const tasks = await getBacklog(supabase, { sprint: arg, ...projectFilter });
+  const header = currentProject ? `${currentProject.name} — ` : "";
+  const text = header + formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
   await sendResponse(ctx, text);
 });
 
@@ -848,6 +995,22 @@ bot.command("exec", async (ctx) => {
   }
 
   const task = matches[0];
+
+  // BMad Gate Check — enforce gates before execution
+  const gateFailure = await checkGatesWithOverrides(supabase, task);
+  if (gateFailure) {
+    const keyboard = gateFailure.overridable
+      ? new InlineKeyboard()
+          .text("Forcer le bypass", `gate_override:${task.id}:${gateFailure.gate}`)
+          .text("Annuler", `gate_cancel:${task.id}`)
+      : undefined;
+    await ctx.reply(
+      `GATE BLOQUEE\n\n${gateFailure.gate}\n${gateFailure.reason}`,
+      { ...threadOpts(ctx), reply_markup: keyboard }
+    );
+    return;
+  }
+
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   // Workflow tracking
@@ -919,6 +1082,9 @@ bot.command("exec", async (ctx) => {
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
   }
+
+  // Clear gate overrides after execution
+  clearGateOverrides(task.id);
 });
 
 // /plan — decompose a request into sub-tasks and add them to the backlog
@@ -935,10 +1101,14 @@ bot.command("plan", async (ctx) => {
     return;
   }
 
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+
   await ctx.reply("Decomposition en cours...", threadOpts(ctx));
 
   // Workflow tracking for the decomposition step
-  const currentSprint = await getCurrentSprint(supabase);
+  const currentSprint = currentProject?.current_sprint || await getCurrentSprint(supabase);
   const tracker = new WorkflowTracker(supabase, {
     sprintId: currentSprint || undefined,
     startStep: "request",
@@ -961,6 +1131,8 @@ bot.command("plan", async (ctx) => {
     const task = await addTask(supabase, st.title, {
       description: st.description,
       priority: st.priority,
+      project: projectSlug,
+      project_id: currentProject?.id,
     });
     if (task) added.push(task);
   }
@@ -979,9 +1151,13 @@ bot.command("prd", async (ctx) => {
   }
   const input = ctx.match?.trim();
 
-  // /prd without args → list PRDs
+  // Resolve project context
+  const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+  const projectSlug = currentProject?.slug || "telegram-relay";
+
+  // /prd without args → list PRDs for current project
   if (!input) {
-    const prds = await getPRDs(supabase);
+    const prds = await getPRDs(supabase, { project: projectSlug });
     await sendResponse(ctx, formatPRDList(prds));
     return;
   }
@@ -1017,13 +1193,14 @@ bot.command("prd", async (ctx) => {
   // /prd <description> → generate new PRD
   await ctx.reply("Generation du PRD en cours...", threadOpts(ctx));
 
-  const generated = await generatePRD(input);
+  const generated = await generatePRD(input, projectSlug);
   if (!generated) {
     await ctx.reply("Impossible de generer le PRD. Reformule ou ajoute plus de details.", threadOpts(ctx));
     return;
   }
 
   const prd = await savePRD(supabase, generated, {
+    project: projectSlug,
     requested_by: ctx.from?.first_name || "unknown",
   });
 
@@ -1128,6 +1305,28 @@ bot.on("callback_query:data", async (ctx) => {
       await ctx.answerCallbackQuery({ text: "Actions rejetees." });
       await ctx.editMessageText(
         `Retro ${sprintId} : actions rejetees. Tu peux relancer /retro ${sprintId} pour regenerer.`
+      );
+    }
+    return;
+  }
+
+  // Gate override callbacks (BMad gates)
+  if (data.startsWith("gate_")) {
+    const parts = data.split(":");
+    const action = parts[0]; // gate_override or gate_cancel
+    const taskId = parts[1];
+
+    if (action === "gate_override" && taskId) {
+      const gateName = parts.slice(2).join(":"); // gate name may contain colons
+      overrideGate(taskId, gateName);
+      await ctx.answerCallbackQuery({ text: "Gate bypassed." });
+      await ctx.editMessageText(
+        `Gate bypassed: ${gateName}\n\nRelance /exec ${taskId.substring(0, 8)} pour executer la tache.`
+      );
+    } else if (action === "gate_cancel" && taskId) {
+      await ctx.answerCallbackQuery({ text: "Execution annulee." });
+      await ctx.editMessageText(
+        `Execution annulee. Resous la gate avant de relancer /exec.`
       );
     }
     return;
@@ -1405,9 +1604,13 @@ bot.command("retro", async (ctx) => {
   // Also run pattern analysis to feed into the retro
   const patternAnalysis = await analyzePatterns(supabase);
 
-  // Use Claude to analyze and generate the retro
+  // Use Claude to analyze and generate the retro (enriched with SM agent Bob)
+  const smAgent = getAgentForCommand("retro");
+  const agentPrefix = smAgent
+    ? `Tu es ${smAgent.name}, ${smAgent.title} (${smAgent.icon}). ${smAgent.communicationStyle}\n\n`
+    : "";
   const retroPrompt = [
-    "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
+    agentPrefix + "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
     "Reponds UNIQUEMENT en JSON valide, sans markdown, sans commentaires.",
     "",
     `Sprint: ${sprintId}`,

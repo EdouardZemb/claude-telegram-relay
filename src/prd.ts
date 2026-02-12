@@ -11,6 +11,7 @@
 
 import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getAgent, buildAgentSystemPrompt } from "./bmad-agents.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -80,8 +81,11 @@ export async function generatePRD(
   description: string,
   project: string = "telegram-relay"
 ): Promise<{ title: string; summary: string; content: string } | null> {
+  // Use BMad PM agent (John) persona
+  const pmAgent = getAgent("pm");
+  const agentPrefix = pmAgent ? buildAgentSystemPrompt(pmAgent) + "\n\n---\n\n" : "";
   const prompt = [
-    "Tu es un product manager technique. Genere un PRD (Product Requirements Document) structure a partir de la description suivante.",
+    agentPrefix + "Genere un PRD (Product Requirements Document) structure a partir de la description suivante.",
     "",
     `DESCRIPTION: ${description}`,
     `PROJET: ${project}`,

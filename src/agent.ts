@@ -9,6 +9,7 @@
 import { spawn, spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { updateTaskStatus, type Task } from "./tasks.ts";
+import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -316,38 +317,10 @@ export async function executeTask(
 
 /**
  * Build a structured prompt for the sub-agent.
+ * Uses BMad Dev agent (Amelia) persona for structured execution.
  */
 function buildAgentPrompt(task: Task): string {
-  const parts = [
-    "Tu es un agent d'execution autonome. Tu dois realiser la tache suivante.",
-    "",
-    `TACHE: ${task.title}`,
-  ];
-
-  if (task.description) {
-    parts.push(`DESCRIPTION: ${task.description}`);
-  }
-
-  parts.push(`PROJET: ${task.project}`);
-  parts.push(`PRIORITE: P${task.priority}`);
-
-  if (task.notes) {
-    parts.push(`NOTES: ${task.notes}`);
-  }
-
-  parts.push(
-    "",
-    "INSTRUCTIONS:",
-    "- Analyse le codebase existant avant de faire des modifications",
-    "- Ecris du code propre et coherent avec le style existant",
-    "- Teste que les modifications fonctionnent",
-    "- Fais un resume concis de ce que tu as fait a la fin",
-    "- Si tu es bloque, explique clairement pourquoi",
-    "",
-    "Commence maintenant."
-  );
-
-  return parts.join("\n");
+  return buildBmadExecPrompt(task);
 }
 
 /**
@@ -358,7 +331,7 @@ function buildAgentPrompt(task: Task): string {
 export async function decomposeTask(
   request: string
 ): Promise<Array<{ title: string; description: string; priority: number }>> {
-  const prompt = [
+  const taskPrompt = [
     "Decompose cette demande en sous-taches techniques concretes.",
     "Chaque tache doit etre independante et realisable par un agent Claude Code.",
     "",
@@ -374,6 +347,9 @@ export async function decomposeTask(
     "",
     "JSON:",
   ].join("\n");
+
+  // Enrich with PM agent (John) persona
+  const { enrichedPrompt: prompt } = enrichPromptWithAgent("plan", taskPrompt);
 
   try {
     const args = [

@@ -371,7 +371,12 @@
 <body>
   <header>
     <h1>Claude Relay — Backlog</h1>
-    <div class="sprint-info" id="sprint-info">Chargement...</div>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <select id="project-selector" onchange="switchProject(this.value)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px;font-size:13px;">
+        <option value="">Tous les projets</option>
+      </select>
+      <div class="sprint-info" id="sprint-info">Chargement...</div>
+    </div>
   </header>
   <div class="tabs">
     <div class="tab active" data-tab="kanban" onclick="switchTab('kanban')">Kanban</div>
@@ -430,6 +435,32 @@
   <script>
     let allTasks = [];
     let activeSprint = 'all';
+    let activeProjectId = '';
+    let allProjects = [];
+
+    // Load projects for selector
+    async function loadProjects() {
+      try {
+        const tokenParam = new URLSearchParams(window.location.search).get('token');
+        const url = `/api/projects${tokenParam ? '?token=' + tokenParam : ''}`;
+        const res = await fetch(url);
+        allProjects = await res.json();
+        const sel = document.getElementById('project-selector');
+        sel.innerHTML = '<option value="">Tous les projets</option>';
+        for (const p of allProjects) {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = `${p.name} (${p.slug})`;
+          if (p.id === activeProjectId) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      } catch (e) { console.error('loadProjects:', e); }
+    }
+
+    function switchProject(projectId) {
+      activeProjectId = projectId;
+      loadTasks();
+    }
 
     function escapeHtml(str) {
       const div = document.createElement('div');
@@ -537,7 +568,10 @@
     async function loadTasks() {
       try {
         const tokenParam = new URLSearchParams(window.location.search).get('token');
-        const url = `/api/tasks${tokenParam ? '?token=' + tokenParam : ''}`;
+        const params = new URLSearchParams();
+        if (tokenParam) params.set('token', tokenParam);
+        if (activeProjectId) params.set('project_id', activeProjectId);
+        const url = `/api/tasks${params.toString() ? '?' + params.toString() : ''}`;
         const res = await fetch(url);
         allTasks = await res.json();
 
@@ -752,6 +786,7 @@
     }
 
     // Initial load + auto-refresh every 30s
+    loadProjects();
     loadTasks();
     setInterval(loadTasks, 30000);
   </script>
