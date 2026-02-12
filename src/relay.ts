@@ -241,6 +241,56 @@ const bot = new Bot(BOT_TOKEN);
 // TOPIC FORUM HELPERS
 // ============================================================
 
+// Topic configuration: defines behavior and allowed commands per topic
+interface TopicConfig {
+  systemPrompt: string;       // Extra instructions for Claude in this topic
+  allowedCommands: string[];  // Commands allowed in this topic (empty = all)
+  label: string;              // Human-readable label for logs
+}
+
+const TOPIC_CONFIGS: Record<string, TopicConfig> = {
+  "claude-relay": {
+    label: "Dev",
+    systemPrompt:
+      "This is the development topic for the claude-relay project. " +
+      "Focus on technical discussions: code, architecture, bugs, deployments, CI/CD. " +
+      "Be precise and technical. Refer to files, functions, and line numbers when relevant. " +
+      "You can suggest code changes and execute tasks.",
+    allowedCommands: ["exec", "plan", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak"],
+  },
+  "idees": {
+    label: "Brainstorm",
+    systemPrompt:
+      "This is the brainstorming topic. " +
+      "Help explore ideas freely. Be creative, propose alternatives, play devil's advocate. " +
+      "No need to be overly technical here — focus on concepts, possibilities, and strategy. " +
+      "Ask follow-up questions to refine ideas.",
+    allowedCommands: ["task", "plan", "remind", "speak"],
+  },
+  "sprint": {
+    label: "Sprint",
+    systemPrompt:
+      "This is the sprint management topic. " +
+      "Focus on task tracking, progress updates, priorities, and planning. " +
+      "Keep messages short and actionable. Use task IDs when referencing work.",
+    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "exec", "status", "remind", "speak"],
+  },
+  "serveur": {
+    label: "Ops",
+    systemPrompt:
+      "This is the server operations topic. " +
+      "Focus on infrastructure, monitoring, deployments, logs, and system health. " +
+      "Be practical and direct. Suggest concrete commands when troubleshooting.",
+    allowedCommands: ["status", "exec", "remind", "speak"],
+  },
+};
+
+function getTopicConfig(topicName: string | undefined): TopicConfig | undefined {
+  if (!topicName) return undefined;
+  const key = topicName.toLowerCase().trim();
+  return TOPIC_CONFIGS[key];
+}
+
 // Known topic names by thread ID (populated at runtime)
 const TOPIC_NAMES: Record<number, string> = {};
 
@@ -266,6 +316,20 @@ function getTopicName(ctx: Context): string | undefined {
     TOPIC_NAMES[threadId] = topicCreated.name;
   }
   return TOPIC_NAMES[threadId];
+}
+
+function isCommandAllowed(ctx: Context, command: string): boolean {
+  const topicName = getTopicName(ctx);
+  const config = getTopicConfig(topicName);
+  // No topic or no config = all commands allowed (private chat or unknown topic)
+  if (!config) return true;
+  return config.allowedCommands.includes(command);
+}
+
+function commandGuard(ctx: Context, command: string): string | null {
+  if (isCommandAllowed(ctx, command)) return null;
+  const topicName = getTopicName(ctx) || "ce topic";
+  return `La commande /${command} n'est pas disponible dans le topic "${topicName}".`;
 }
 
 // ============================================================
@@ -366,6 +430,8 @@ async function callClaude(
 
 // /speak command — synthesize text to voice
 bot.command("speak", async (ctx) => {
+  const blocked = commandGuard(ctx, "speak");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   const text = ctx.match?.trim();
 
   await ctx.replyWithChatAction("record_voice");
@@ -410,6 +476,8 @@ bot.command("speak", async (ctx) => {
 
 // /task — add a task to the backlog
 bot.command("task", async (ctx) => {
+  const blocked = commandGuard(ctx, "task");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -429,6 +497,8 @@ bot.command("task", async (ctx) => {
 
 // /backlog — view current backlog
 bot.command("backlog", async (ctx) => {
+  const blocked = commandGuard(ctx, "backlog");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -440,6 +510,8 @@ bot.command("backlog", async (ctx) => {
 
 // /sprint — view sprint status or assign tasks to a sprint
 bot.command("sprint", async (ctx) => {
+  const blocked = commandGuard(ctx, "sprint");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -469,6 +541,8 @@ bot.command("sprint", async (ctx) => {
 
 // /done — mark a task as done by ID prefix
 bot.command("done", async (ctx) => {
+  const blocked = commandGuard(ctx, "done");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -510,6 +584,8 @@ bot.command("start", async (ctx) => {
   if (!supabase) return;
   const idPrefix = ctx.match?.trim();
   if (!idPrefix) return; // /start without args = normal bot start, do nothing
+  const blocked = commandGuard(ctx, "start");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
 
   const { data: matches } = await supabase
     .from("tasks")
@@ -537,6 +613,8 @@ bot.command("start", async (ctx) => {
 
 // /exec — execute a task from the backlog using a sub-agent
 bot.command("exec", async (ctx) => {
+  const blocked = commandGuard(ctx, "exec");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -584,6 +662,8 @@ bot.command("exec", async (ctx) => {
 
 // /plan — decompose a request into sub-tasks and add them to the backlog
 bot.command("plan", async (ctx) => {
+  const blocked = commandGuard(ctx, "plan");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -617,6 +697,8 @@ bot.command("plan", async (ctx) => {
 
 // /status — server and bot status
 bot.command("status", async (ctx) => {
+  const blocked = commandGuard(ctx, "status");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   try {
     const uptimeSec = Math.round((Date.now() - RELAY_START_TIME) / 1000);
     const uptimeStr = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
@@ -667,6 +749,8 @@ bot.command("status", async (ctx) => {
 
 // /remind — set a timed reminder
 bot.command("remind", async (ctx) => {
+  const blocked = commandGuard(ctx, "remind");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   const input = ctx.match?.trim();
   if (!input) {
     await ctx.reply("Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs", threadOpts(ctx));
@@ -721,6 +805,8 @@ bot.command("remind", async (ctx) => {
 
 // /export — export conversations and memory
 bot.command("export", async (ctx) => {
+  const blocked = commandGuard(ctx, "export");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
   if (!supabase) {
     await ctx.reply("Supabase non configure.", threadOpts(ctx));
     return;
@@ -986,7 +1072,12 @@ function buildPrompt(
   parts.push(`Current time: ${timeStr}`);
 
   if (topicName) {
-    parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic of a Telegram forum group. Stay focused on the topic's subject. If the topic is a project name, keep responses relevant to that project.`);
+    const config = getTopicConfig(topicName);
+    if (config) {
+      parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic (${config.label}). ${config.systemPrompt}`);
+    } else {
+      parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic of a Telegram forum group. Stay focused on the topic's subject.`);
+    }
   }
 
   if (profileContext) parts.push(`\nProfile:\n${profileContext}`);

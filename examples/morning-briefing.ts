@@ -15,7 +15,8 @@
 import { createClient } from "@supabase/supabase-js";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const CHAT_ID = process.env.TELEGRAM_USER_ID || "";
+const CHAT_ID = process.env.TELEGRAM_GROUP_ID || process.env.TELEGRAM_USER_ID || "";
+const SPRINT_THREAD_ID = process.env.SPRINT_THREAD_ID || "";
 
 const supabase =
   process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
@@ -28,16 +29,20 @@ const supabase =
 
 async function sendTelegram(message: string): Promise<boolean> {
   try {
+    const body: Record<string, unknown> = {
+      chat_id: CHAT_ID,
+      text: message,
+    };
+    if (SPRINT_THREAD_ID) {
+      body.message_thread_id = parseInt(SPRINT_THREAD_ID);
+    }
+
     const response = await fetch(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: CHAT_ID,
-          text: message,
-          parse_mode: "Markdown",
-        }),
+        body: JSON.stringify(body),
       }
     );
 
@@ -118,93 +123,86 @@ async function getAINews(): Promise<string> {
   return "";
 }
 
+async function getSprintTasks(): Promise<string> {
+  if (!supabase) return "";
+  try {
+    const { data } = await supabase
+      .from("tasks")
+      .select("title, status, priority, sprint")
+      .neq("status", "done")
+      .neq("status", "cancelled")
+      .order("priority", { ascending: true })
+      .limit(10);
+    if (!data || data.length === 0) return "";
+    return data
+      .map((t: { title: string; status: string; priority: number; sprint?: string }) => {
+        const status = t.status === "in_progress" ? "[EN COURS]" : "[A FAIRE]";
+        return `${status} P${t.priority} ${t.title}${t.sprint ? ` (${t.sprint})` : ""}`;
+      })
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
 // ============================================================
 // BUILD BRIEFING
 // ============================================================
 
 async function buildBriefing(): Promise<string> {
   const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", {
+  const dateStr = now.toLocaleDateString("fr-FR", {
     weekday: "long",
-    month: "long",
     day: "numeric",
+    month: "long",
+    year: "numeric",
   });
 
   const sections: string[] = [];
 
-  // Header
-  sections.push(`🌅 **Good Morning!**\n${dateStr}\n`);
+  sections.push(`Bonjour Edouard\n${dateStr}\n`);
 
-  // Weather (optional)
+  // Sprint tasks
   try {
-    const weather = await getWeather();
-    sections.push(`☀️ **Weather**\n${weather}\n`);
-  } catch (e) {
-    console.error("Weather fetch failed:", e);
-  }
-
-  // Calendar
-  try {
-    const calendar = await getCalendarEvents();
-    if (calendar) {
-      sections.push(`📅 **Today's Schedule**\n${calendar}\n`);
+    const tasks = await getSprintTasks();
+    if (tasks) {
+      sections.push(`BACKLOG ACTIF\n${tasks}\n`);
     }
   } catch (e) {
-    console.error("Calendar fetch failed:", e);
-  }
-
-  // Emails
-  try {
-    const emails = await getUnreadEmails();
-    if (emails) {
-      sections.push(`📧 **Inbox**\n${emails}\n`);
-    }
-  } catch (e) {
-    console.error("Email fetch failed:", e);
+    console.error("Sprint tasks fetch failed:", e);
   }
 
   // Goals
   try {
     const goals = await getActiveGoals();
     if (goals) {
-      sections.push(`🎯 **Active Goals**\n${goals}\n`);
+      sections.push(`OBJECTIFS\n${goals}\n`);
     }
   } catch (e) {
     console.error("Goals fetch failed:", e);
-  }
-
-  // Known facts
-  try {
-    const facts = await getKnownFacts();
-    if (facts) {
-      sections.push(`🧠 **Memory**\n${facts}\n`);
-    }
-  } catch (e) {
-    console.error("Facts fetch failed:", e);
   }
 
   // Recent conversation
   try {
     const recent = await getRecentConversation();
     if (recent) {
-      sections.push(`💬 **Last Conversation**\n${recent}\n`);
+      sections.push(`DERNIERE CONVERSATION\n${recent}\n`);
     }
   } catch (e) {
     console.error("Recent conversation fetch failed:", e);
   }
 
-  // AI News (optional)
+  // Calendar (placeholder)
   try {
-    const news = await getAINews();
-    if (news) {
-      sections.push(`🤖 **AI News**\n${news}\n`);
+    const calendar = await getCalendarEvents();
+    if (calendar) {
+      sections.push(`AGENDA\n${calendar}\n`);
     }
   } catch (e) {
-    console.error("News fetch failed:", e);
+    console.error("Calendar fetch failed:", e);
   }
 
-  // Footer
-  sections.push("---\n_Reply to chat or say \"call me\" for voice briefing_");
+  sections.push("Reponds ici pour discuter ou envoie un vocal.");
 
   return sections.join("\n");
 }

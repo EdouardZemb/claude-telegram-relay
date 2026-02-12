@@ -49,12 +49,81 @@
       color: var(--accent);
     }
 
+    .filters {
+      display: flex;
+      gap: 8px;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .filters label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-right: 4px;
+    }
+
+    .filter-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .filter-btn.active {
+      background: rgba(88, 166, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .stats {
+      display: flex;
+      gap: 24px;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value.green { color: var(--green); }
+    .stat-value.blue { color: var(--accent); }
+    .stat-value.yellow { color: var(--yellow); }
+    .stat-value.muted { color: var(--text-muted); }
+
     .board {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 16px;
       padding: 24px;
-      min-height: calc(100vh - 80px);
+      min-height: calc(100vh - 200px);
     }
 
     .column {
@@ -183,6 +252,7 @@
       .board {
         grid-template-columns: 1fr;
       }
+      .stats { flex-wrap: wrap; gap: 16px; }
     }
   </style>
 </head>
@@ -191,6 +261,16 @@
     <h1>Claude Relay — Backlog</h1>
     <div class="sprint-info" id="sprint-info">Chargement...</div>
   </header>
+  <div class="filters" id="filters">
+    <label>Sprint:</label>
+    <button class="filter-btn active" data-sprint="all">Tous</button>
+  </div>
+  <div class="stats" id="stats">
+    <div class="stat"><span class="stat-value muted" id="stat-total">-</span><span class="stat-label">Total</span></div>
+    <div class="stat"><span class="stat-value blue" id="stat-active">-</span><span class="stat-label">En cours</span></div>
+    <div class="stat"><span class="stat-value green" id="stat-done">-</span><span class="stat-label">Fait</span></div>
+    <div class="stat"><span class="stat-value yellow" id="stat-pct">-</span><span class="stat-label">Avancement</span></div>
+  </div>
   <div class="board" id="board">
     <div class="column col-backlog">
       <div class="column-header"><h2>A faire</h2><span class="column-count" id="count-backlog">0</span></div>
@@ -212,8 +292,6 @@
   <div class="status-bar" id="status-bar"></div>
 
   <script>
-    // Supabase config — injected from env or hardcoded for simplicity
-    // The dashboard reads directly from Supabase using the anon key (RLS allows all)
     const SUPABASE_URL = '__SUPABASE_URL__';
     const SUPABASE_KEY = '__SUPABASE_KEY__';
 
@@ -224,26 +302,110 @@
       'Content-Type': 'application/json',
     };
 
+    let allTasks = [];
+    let activeSprint = 'all';
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     function createCard(task) {
       const card = document.createElement('div');
       card.className = 'card';
 
       let meta = `<span class="tag priority-${task.priority}">P${task.priority}</span>`;
-      meta += `<span class="tag project-tag">${task.project}</span>`;
-      if (task.sprint) meta += `<span class="tag sprint-tag">${task.sprint}</span>`;
-      meta += `<span class="card-id">${task.id.substring(0, 8)}</span>`;
+      meta += `<span class="tag project-tag">${escapeHtml(task.project)}</span>`;
+      if (task.sprint) meta += `<span class="tag sprint-tag">${escapeHtml(task.sprint)}</span>`;
+      meta += `<span class="card-id">${escapeHtml(task.id.substring(0, 8))}</span>`;
 
       let desc = '';
       if (task.description) {
-        desc = `<div class="card-desc">${task.description.substring(0, 120)}${task.description.length > 120 ? '...' : ''}</div>`;
+        const truncated = task.description.substring(0, 120);
+        desc = `<div class="card-desc">${escapeHtml(truncated)}${task.description.length > 120 ? '...' : ''}</div>`;
       }
 
       card.innerHTML = `
-        <div class="card-title">${task.title}</div>
+        <div class="card-title">${escapeHtml(task.title)}</div>
         <div class="card-meta">${meta}</div>
         ${desc}
       `;
       return card;
+    }
+
+    function renderBoard(tasks) {
+      const filtered = activeSprint === 'all'
+        ? tasks
+        : tasks.filter(t => t.sprint === activeSprint);
+
+      const columns = { backlog: [], in_progress: [], review: [], done: [] };
+      for (const t of filtered) {
+        if (columns[t.status]) columns[t.status].push(t);
+      }
+
+      for (const [status, items] of Object.entries(columns)) {
+        const col = document.getElementById(`col-${status}`);
+        const count = document.getElementById(`count-${status}`);
+        col.innerHTML = '';
+        count.textContent = items.length;
+
+        if (items.length === 0) {
+          col.innerHTML = '<div class="empty-state">Aucune tache</div>';
+        } else {
+          for (const t of items) {
+            col.appendChild(createCard(t));
+          }
+        }
+      }
+
+      // Stats
+      const total = filtered.length;
+      const done = filtered.filter(t => t.status === 'done').length;
+      const active = filtered.filter(t => t.status === 'in_progress').length;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      document.getElementById('stat-total').textContent = total;
+      document.getElementById('stat-active').textContent = active;
+      document.getElementById('stat-done').textContent = done;
+      document.getElementById('stat-pct').textContent = `${pct}%`;
+    }
+
+    function renderFilters(tasks) {
+      const sprints = [...new Set(tasks.map(t => t.sprint).filter(Boolean))].sort();
+      const container = document.getElementById('filters');
+
+      // Keep the label and "Tous" button, remove old sprint buttons
+      const existingBtns = container.querySelectorAll('[data-sprint]:not([data-sprint="all"])');
+      existingBtns.forEach(b => b.remove());
+
+      for (const sprint of sprints) {
+        const btn = document.createElement('button');
+        btn.className = 'filter-btn' + (activeSprint === sprint ? ' active' : '');
+        btn.dataset.sprint = sprint;
+        btn.textContent = sprint;
+        btn.onclick = () => {
+          activeSprint = sprint;
+          updateFilterButtons();
+          renderBoard(allTasks);
+        };
+        container.appendChild(btn);
+      }
+
+      // Update "Tous" button state
+      const allBtn = container.querySelector('[data-sprint="all"]');
+      allBtn.className = 'filter-btn' + (activeSprint === 'all' ? ' active' : '');
+      allBtn.onclick = () => {
+        activeSprint = 'all';
+        updateFilterButtons();
+        renderBoard(allTasks);
+      };
+    }
+
+    function updateFilterButtons() {
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.className = 'filter-btn' + (btn.dataset.sprint === activeSprint ? ' active' : '');
+      });
     }
 
     async function loadTasks() {
@@ -252,38 +414,21 @@
           `${API}/tasks?status=neq.cancelled&order=priority.asc,created_at.asc`,
           { headers: HEADERS }
         );
-        const tasks = await res.json();
+        allTasks = await res.json();
 
-        const columns = { backlog: [], in_progress: [], review: [], done: [] };
-        for (const t of tasks) {
-          if (columns[t.status]) columns[t.status].push(t);
-        }
-
-        for (const [status, items] of Object.entries(columns)) {
-          const col = document.getElementById(`col-${status}`);
-          const count = document.getElementById(`count-${status}`);
-          col.innerHTML = '';
-          count.textContent = items.length;
-
-          if (items.length === 0) {
-            col.innerHTML = '<div class="empty-state">Aucune tache</div>';
-          } else {
-            for (const t of items) {
-              col.appendChild(createCard(t));
-            }
-          }
-        }
+        renderFilters(allTasks);
+        renderBoard(allTasks);
 
         // Sprint info
-        const activeTasks = tasks.filter(t => t.status !== 'done' && t.sprint);
+        const activeTasks = allTasks.filter(t => t.status !== 'done' && t.sprint);
         const sprints = [...new Set(activeTasks.map(t => t.sprint))];
         const sprintInfo = document.getElementById('sprint-info');
         if (sprints.length > 0) {
-          const done = tasks.filter(t => t.status === 'done' && sprints.includes(t.sprint)).length;
-          const total = tasks.filter(t => sprints.includes(t.sprint)).length;
-          sprintInfo.innerHTML = `Sprint actif: <strong>${sprints.join(', ')}</strong> — ${done}/${total} fait`;
+          const done = allTasks.filter(t => t.status === 'done' && sprints.includes(t.sprint)).length;
+          const total = allTasks.filter(t => sprints.includes(t.sprint)).length;
+          sprintInfo.innerHTML = `Sprint actif: <strong>${sprints.join(', ')}</strong> &mdash; ${done}/${total} fait`;
         } else {
-          sprintInfo.textContent = `${tasks.length} taches au total`;
+          sprintInfo.textContent = `${allTasks.length} taches au total`;
         }
 
         document.getElementById('status-bar').textContent = `Mis a jour: ${new Date().toLocaleTimeString('fr-FR')}`;
