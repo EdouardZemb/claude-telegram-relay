@@ -30,5 +30,18 @@ module.exports = {
         DASHBOARD_PORT: "3456",
       },
     },
+    {
+      name: "claude-autodeploy",
+      script: "./scripts/auto-deploy.sh",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: true,
+      max_restarts: 5,
+      min_uptime: "10s",
+      restart_delay: 10000,
+      error_file: "/home/edouard/.claude-relay/logs/autodeploy-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/autodeploy-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
   ],
 };
