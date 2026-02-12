@@ -7,17 +7,31 @@
  * Run: bun run src/relay.ts
  */
 
-import { Bot, Context } from "grammy";
+import { Bot, Context, InputFile } from "grammy";
 import { spawn } from "bun";
 import { writeFile, mkdir, readFile, unlink } from "fs/promises";
 import { join, dirname } from "path";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { execSync } from "child_process";
+import { cpus, totalmem, freemem, loadavg, uptime as osUptime } from "os";
 import { transcribe } from "./transcribe.ts";
+import { synthesize } from "./tts.ts";
 import {
   processMemoryIntents,
   getMemoryContext,
   getRelevantContext,
+  getRecentMessages,
 } from "./memory.ts";
+import {
+  addTask,
+  getBacklog,
+  updateTaskStatus,
+  getSprintSummary,
+  getCurrentSprint,
+  formatBacklog,
+  formatSprintSummary,
+} from "./tasks.ts";
+import { executeTask, decomposeTask } from "./agent.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -61,6 +75,65 @@ async function saveSession(state: SessionState): Promise<void> {
 }
 
 let session = await loadSession();
+
+// ============================================================
+// RATE LIMITER
+// ============================================================
+
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 30; // max messages per window
+const messageTimestamps: number[] = [];
+
+function isRateLimited(): boolean {
+  const now = Date.now();
+  // Remove old timestamps
+  while (messageTimestamps.length > 0 && messageTimestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
+    messageTimestamps.shift();
+  }
+  if (messageTimestamps.length >= RATE_LIMIT_MAX) return true;
+  messageTimestamps.push(now);
+  return false;
+}
+
+// ============================================================
+// REMINDERS
+// ============================================================
+
+interface Reminder {
+  id: string;
+  text: string;
+  triggerAt: number; // epoch ms
+  chatId: number;
+}
+
+const REMINDERS_FILE = join(RELAY_DIR, "reminders.json");
+let reminders: Reminder[] = [];
+
+async function loadReminders(): Promise<void> {
+  try {
+    const content = await readFile(REMINDERS_FILE, "utf-8");
+    reminders = JSON.parse(content);
+  } catch {
+    reminders = [];
+  }
+}
+
+async function saveReminders(): Promise<void> {
+  await writeFile(REMINDERS_FILE, JSON.stringify(reminders, null, 2));
+}
+
+await loadReminders();
+
+// ============================================================
+// ERROR NOTIFICATION
+// ============================================================
+
+const RELAY_START_TIME = Date.now();
+
+async function notifyError(error: unknown, context: string): Promise<void> {
+  console.error(`[${context}]`, error);
+  // Will be wired up after bot is created
+}
 
 // ============================================================
 // LOCK FILE (prevent multiple instances)
@@ -176,6 +249,12 @@ bot.use(async (ctx, next) => {
     return;
   }
 
+  // Rate limiting
+  if (isRateLimited()) {
+    await ctx.reply("Trop de messages. Attends un peu avant de renvoyer.");
+    return;
+  }
+
   await next();
 });
 
@@ -194,7 +273,7 @@ async function callClaude(
     args.push("--resume", session.sessionId);
   }
 
-  args.push("--output-format", "text");
+  args.push("--output-format", "text", "--dangerously-skip-permissions");
 
   console.log(`Calling Claude: ${prompt.substring(0, 50)}...`);
 
@@ -238,6 +317,396 @@ async function callClaude(
 // MESSAGE HANDLERS
 // ============================================================
 
+// /speak command — synthesize text to voice
+bot.command("speak", async (ctx) => {
+  const text = ctx.match?.trim();
+
+  await ctx.replyWithChatAction("record_voice");
+
+  if (text) {
+    // /speak <text> → synthesize the given text
+    const audioBuffer = await synthesize(text);
+    if (audioBuffer) {
+      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+    } else {
+      await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.");
+    }
+    return;
+  }
+
+  // /speak alone → re-synthesize last assistant message from Supabase
+  if (!supabase) {
+    await ctx.reply("Supabase not configured — cannot retrieve last message.");
+    return;
+  }
+
+  const { data } = await supabase
+    .from("messages")
+    .select("content")
+    .eq("role", "assistant")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!data?.content) {
+    await ctx.reply("No previous assistant message found.");
+    return;
+  }
+
+  const audioBuffer = await synthesize(data.content.substring(0, 4000));
+  if (audioBuffer) {
+    await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+  } else {
+    await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.");
+  }
+});
+
+// /task — add a task to the backlog
+bot.command("task", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const input = ctx.match?.trim();
+  if (!input) {
+    await ctx.reply("Usage: /task titre de la tache");
+    return;
+  }
+  const task = await addTask(supabase, input);
+  if (task) {
+    await ctx.reply(`Tache ajoutee: ${task.title}\nID: ${task.id.substring(0, 8)}`);
+  } else {
+    await ctx.reply("Erreur lors de l'ajout de la tache.");
+  }
+});
+
+// /backlog — view current backlog
+bot.command("backlog", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const filter = ctx.match?.trim();
+  const tasks = await getBacklog(supabase, filter ? { project: filter } : undefined);
+  await sendResponse(ctx, formatBacklog(tasks));
+});
+
+// /sprint — view sprint status or assign tasks to a sprint
+bot.command("sprint", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const arg = ctx.match?.trim();
+
+  if (!arg) {
+    // Show current sprint summary
+    const current = await getCurrentSprint(supabase);
+    if (!current) {
+      await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.");
+      return;
+    }
+    const summary = await getSprintSummary(supabase, current);
+    const tasks = await getBacklog(supabase, { sprint: current });
+    const text = formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
+    await sendResponse(ctx, text);
+    return;
+  }
+
+  // /sprint S01 — show that sprint
+  const summary = await getSprintSummary(supabase, arg);
+  const tasks = await getBacklog(supabase, { sprint: arg });
+  const text = formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
+  await sendResponse(ctx, text);
+});
+
+// /done — mark a task as done by ID prefix
+bot.command("done", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const idPrefix = ctx.match?.trim();
+  if (!idPrefix) {
+    await ctx.reply("Usage: /done <id> (premiers caracteres de l'ID)");
+    return;
+  }
+
+  // Find task by ID prefix
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("id, title")
+    .like("id", `${idPrefix}%`)
+    .neq("status", "done")
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`);
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    return;
+  }
+
+  const updated = await updateTaskStatus(supabase, matches[0].id, "done");
+  if (updated) {
+    await ctx.reply(`Fait: ${updated.title}`);
+  } else {
+    await ctx.reply("Erreur lors de la mise a jour.");
+  }
+});
+
+// /start — mark a task as in_progress by ID prefix
+bot.command("start", async (ctx) => {
+  // grammY auto-handles /start for new bots, but we override for task management
+  if (!supabase) return;
+  const idPrefix = ctx.match?.trim();
+  if (!idPrefix) return; // /start without args = normal bot start, do nothing
+
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("id, title")
+    .like("id", `${idPrefix}%`)
+    .eq("status", "backlog")
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache backlog trouvee avec l'ID "${idPrefix}".`);
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    return;
+  }
+
+  const updated = await updateTaskStatus(supabase, matches[0].id, "in_progress");
+  if (updated) {
+    await ctx.reply(`En cours: ${updated.title}`);
+  } else {
+    await ctx.reply("Erreur lors de la mise a jour.");
+  }
+});
+
+// /exec — execute a task from the backlog using a sub-agent
+bot.command("exec", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const idPrefix = ctx.match?.trim();
+  if (!idPrefix) {
+    await ctx.reply("Usage: /exec <id> (premiers caracteres de l'ID de la tache)");
+    return;
+  }
+
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("*")
+    .like("id", `${idPrefix}%`)
+    .in("status", ["backlog", "in_progress"])
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`);
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`);
+    return;
+  }
+
+  const task = matches[0];
+  await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`);
+
+  const result = await executeTask(supabase, task, async (msg) => {
+    await ctx.reply(msg);
+  });
+
+  if (result.success) {
+    const duration = Math.round(result.durationMs / 1000);
+    const summary = result.output.length > 3000
+      ? result.output.substring(result.output.length - 3000)
+      : result.output;
+    await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}\n\n${summary}`);
+  } else {
+    const errMsg = result.error || result.output || "Erreur inconnue";
+    await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
+  }
+});
+
+// /plan — decompose a request into sub-tasks and add them to the backlog
+bot.command("plan", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+  const request = ctx.match?.trim();
+  if (!request) {
+    await ctx.reply("Usage: /plan description de ce que tu veux realiser");
+    return;
+  }
+
+  await ctx.reply("Decomposition en cours...");
+  const subtasks = await decomposeTask(request);
+
+  if (subtasks.length === 0) {
+    await ctx.reply("Impossible de decomposer cette demande. Reformule ou ajoute plus de details.");
+    return;
+  }
+
+  const added = [];
+  for (const st of subtasks) {
+    const task = await addTask(supabase, st.title, {
+      description: st.description,
+      priority: st.priority,
+    });
+    if (task) added.push(task);
+  }
+
+  const lines = added.map((t, i) => `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]`);
+  await sendResponse(ctx, `${added.length} taches ajoutees au backlog:\n\n${lines.join("\n")}\n\nUtilise /exec <id> pour lancer l'execution d'une tache.`);
+});
+
+// /status — server and bot status
+bot.command("status", async (ctx) => {
+  try {
+    const uptimeSec = Math.round((Date.now() - RELAY_START_TIME) / 1000);
+    const uptimeStr = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
+    const memUsed = Math.round((totalmem() - freemem()) / 1024 / 1024);
+    const memTotal = Math.round(totalmem() / 1024 / 1024);
+    const memPct = Math.round((1 - freemem() / totalmem()) * 100);
+    const load = loadavg();
+
+    const parts = [
+      `Serveur: ${require("os").hostname()}`,
+      `Uptime bot: ${uptimeStr}`,
+      `Uptime systeme: ${Math.floor(osUptime() / 3600)}h`,
+      `CPU: ${cpus().length} cores, load ${load[0].toFixed(1)} / ${load[1].toFixed(1)} / ${load[2].toFixed(1)}`,
+      `Memoire: ${memUsed}/${memTotal} MB (${memPct}%)`,
+    ];
+
+    // PM2 services
+    try {
+      const pm2Output = execSync("npx pm2 jlist 2>/dev/null", { timeout: 5000 }).toString();
+      const pm2Apps = JSON.parse(pm2Output);
+      parts.push("");
+      parts.push("Services PM2:");
+      for (const app of pm2Apps) {
+        const status = app.pm2_env?.status || "unknown";
+        const restarts = app.pm2_env?.restart_time || 0;
+        const mem = Math.round((app.monit?.memory || 0) / 1024 / 1024);
+        parts.push(`  ${app.name}: ${status} (${mem}MB, ${restarts} restarts)`);
+      }
+    } catch {}
+
+    // Message count today
+    if (supabase) {
+      const today = new Date().toISOString().split("T")[0];
+      const { count } = await supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", today);
+      parts.push("");
+      parts.push(`Messages aujourd'hui: ${count ?? 0}`);
+    }
+
+    await sendResponse(ctx, parts.join("\n"));
+  } catch (error) {
+    console.error("Status error:", error);
+    await ctx.reply("Erreur lors de la recuperation du statut.");
+  }
+});
+
+// /remind — set a timed reminder
+bot.command("remind", async (ctx) => {
+  const input = ctx.match?.trim();
+  if (!input) {
+    await ctx.reply("Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs");
+    return;
+  }
+
+  // Parse time: either HH:MM (absolute) or Nh/Nm (relative)
+  const relativeMatch = input.match(/^(\d+)(h|m)\s+(.+)$/i);
+  const absoluteMatch = input.match(/^(\d{1,2})[h:](\d{2})?\s+(.+)$/i);
+
+  let triggerAt: number;
+  let text: string;
+  let timeLabel: string;
+
+  if (relativeMatch) {
+    const amount = parseInt(relativeMatch[1]);
+    const unit = relativeMatch[2].toLowerCase();
+    text = relativeMatch[3];
+    const ms = unit === "h" ? amount * 3600_000 : amount * 60_000;
+    triggerAt = Date.now() + ms;
+    timeLabel = `dans ${amount}${unit}`;
+  } else if (absoluteMatch) {
+    const hours = parseInt(absoluteMatch[1]);
+    const minutes = parseInt(absoluteMatch[2] || "0");
+    text = absoluteMatch[3];
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(hours, minutes, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1); // Tomorrow if time already passed
+    }
+    triggerAt = target.getTime();
+    timeLabel = `a ${hours}h${minutes.toString().padStart(2, "0")}`;
+  } else {
+    await ctx.reply("Format non reconnu. Exemples:\n/remind 14h30 Appeler le client\n/remind 2h Verifier les logs\n/remind 30m Pause cafe");
+    return;
+  }
+
+  const reminder: Reminder = {
+    id: crypto.randomUUID().substring(0, 8),
+    text,
+    triggerAt,
+    chatId: ctx.chat.id,
+  };
+
+  reminders.push(reminder);
+  await saveReminders();
+
+  await ctx.reply(`Rappel programme ${timeLabel}: ${text}`);
+});
+
+// /export — export conversations and memory
+bot.command("export", async (ctx) => {
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.");
+    return;
+  }
+
+  await ctx.replyWithChatAction("upload_document");
+
+  try {
+    const [messagesResult, memoryResult, tasksResult] = await Promise.all([
+      supabase.from("messages").select("role, content, created_at").order("created_at", { ascending: true }),
+      supabase.from("memory").select("type, content, created_at"),
+      supabase.from("tasks").select("title, description, status, priority, sprint, created_at, completed_at").order("priority", { ascending: true }),
+    ]);
+
+    const exportData = {
+      exported_at: new Date().toISOString(),
+      messages: messagesResult.data || [],
+      memory: memoryResult.data || [],
+      tasks: tasksResult.data || [],
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const buffer = Buffer.from(json, "utf-8");
+    const filename = `export_${new Date().toISOString().split("T")[0]}.json`;
+
+    await ctx.replyWithDocument(new InputFile(buffer, filename), {
+      caption: `Export: ${exportData.messages.length} messages, ${exportData.memory.length} memories, ${exportData.tasks.length} taches`,
+    });
+  } catch (error) {
+    console.error("Export error:", error);
+    await ctx.reply("Erreur lors de l'export.");
+  }
+});
+
 // Text messages
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
@@ -247,13 +716,14 @@ bot.on("message:text", async (ctx) => {
 
   await saveMessage("user", text);
 
-  // Gather context: semantic search + facts/goals
-  const [relevantContext, memoryContext] = await Promise.all([
+  // Gather context: semantic search + facts/goals + recent messages
+  const [relevantContext, memoryContext, recentMessages] = await Promise.all([
     getRelevantContext(supabase, text),
     getMemoryContext(supabase),
+    getRecentMessages(supabase),
   ]);
 
-  const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext);
+  const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages);
   const rawResponse = await callClaude(enrichedPrompt, { resume: true });
 
   // Parse and save any memory intents, strip tags from response
@@ -291,21 +761,23 @@ bot.on("message:voice", async (ctx) => {
 
     await saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`);
 
-    const [relevantContext, memoryContext] = await Promise.all([
+    const [relevantContext, memoryContext, recentMessages] = await Promise.all([
       getRelevantContext(supabase, transcription),
       getMemoryContext(supabase),
+      getRecentMessages(supabase),
     ]);
 
     const enrichedPrompt = buildPrompt(
       `[Voice message transcribed]: ${transcription}`,
       relevantContext,
-      memoryContext
+      memoryContext,
+      recentMessages
     );
     const rawResponse = await callClaude(enrichedPrompt, { resume: true });
     const claudeResponse = await processMemoryIntents(supabase, rawResponse);
 
     await saveMessage("assistant", claudeResponse);
-    await sendResponse(ctx, claudeResponse);
+    await sendVoiceResponse(ctx, claudeResponse);
   } catch (error) {
     console.error("Voice error:", error);
     await ctx.reply("Could not process voice message. Check logs for details.");
@@ -407,7 +879,8 @@ const USER_TIMEZONE = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolve
 function buildPrompt(
   userMessage: string,
   relevantContext?: string,
-  memoryContext?: string
+  memoryContext?: string,
+  recentMessages?: string
 ): string {
   const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
@@ -422,6 +895,7 @@ function buildPrompt(
 
   const parts = [
     "You are a personal AI assistant responding via Telegram. Keep responses concise and conversational.",
+    "IMPORTANT: Never use markdown formatting in your responses. No bold (**), no italic (*), no code blocks (```), no inline code (`), no headers (#), no bullet lists (- or *). Write in plain text only. Use line breaks for structure if needed.",
   ];
 
   if (USER_NAME) parts.push(`You are speaking with ${USER_NAME}.`);
@@ -438,6 +912,23 @@ function buildPrompt(
       "\n[GOAL: goal text | DEADLINE: optional date]" +
       "\n[DONE: search text for completed goal]"
   );
+
+  if (process.env.VOICE_PROVIDER || process.env.TTS_PROVIDER) {
+    parts.push(
+      "\nVOICE CAPABILITIES:" +
+        "\nYou have full voice capabilities on this Telegram bot." +
+        (process.env.VOICE_PROVIDER
+          ? "\n- Voice messages from the user are automatically transcribed. When you see '[Voice message transcribed]', respond naturally without mentioning transcription."
+          : "") +
+        (process.env.TTS_PROVIDER
+          ? "\n- Your text responses to voice messages are automatically converted to voice audio. You DO have the ability to respond with voice — never say otherwise."
+          : "") +
+        "\n- Never suggest installing TTS, speech synthesis, or voice tools — they are already set up and working." +
+        "\n- Respond naturally as if speaking out loud."
+    );
+  }
+
+  if (recentMessages) parts.push(`\n${recentMessages}`);
 
   parts.push(`\nUser: ${userMessage}`);
 
@@ -477,6 +968,104 @@ async function sendResponse(ctx: Context, response: string): Promise<void> {
     await ctx.reply(chunk);
   }
 }
+
+async function sendVoiceResponse(ctx: Context, response: string): Promise<void> {
+  // Strip any markdown that slipped through
+  const clean = response
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*]\s+/gm, '')
+    .trim();
+
+  // Truncate for TTS (≈2 min of audio max)
+  const TTS_MAX = 4000;
+  const ttsText = clean.length > TTS_MAX ? clean.substring(0, TTS_MAX) : clean;
+  const wasTruncated = response.length > TTS_MAX;
+
+  try {
+    const audioBuffer = await synthesize(ttsText);
+
+    if (audioBuffer) {
+      await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"));
+      // If text was truncated, also send the full text version
+      if (wasTruncated) {
+        await sendResponse(ctx, response);
+      }
+      return;
+    }
+  } catch (error) {
+    console.error("TTS error:", error);
+  }
+
+  // Fallback to text if TTS fails or is not configured
+  await sendResponse(ctx, response);
+}
+
+// ============================================================
+// REMINDER SCHEDULER
+// ============================================================
+
+setInterval(async () => {
+  const now = Date.now();
+  const due = reminders.filter((r) => r.triggerAt <= now);
+  if (due.length === 0) return;
+
+  for (const r of due) {
+    try {
+      await bot.api.sendMessage(r.chatId, `Rappel: ${r.text}`);
+    } catch (error) {
+      console.error("Reminder send error:", error);
+    }
+  }
+
+  reminders = reminders.filter((r) => r.triggerAt > now);
+  await saveReminders();
+}, 30_000); // Check every 30 seconds
+
+// ============================================================
+// ERROR NOTIFICATION (wire up after bot is created)
+// ============================================================
+
+bot.catch(async (err) => {
+  console.error("Bot error:", err);
+  if (ALLOWED_USER_ID) {
+    try {
+      const errorMsg = `Erreur critique du bot:\n${String(err.error || err).substring(0, 500)}`;
+      await bot.api.sendMessage(parseInt(ALLOWED_USER_ID), errorMsg);
+    } catch {
+      // Can't notify — just log
+    }
+  }
+});
+
+// Catch uncaught exceptions and notify
+process.on("uncaughtException", async (error) => {
+  console.error("Uncaught exception:", error);
+  if (ALLOWED_USER_ID) {
+    try {
+      await bot.api.sendMessage(
+        parseInt(ALLOWED_USER_ID),
+        `Exception non geree dans le relay:\n${String(error).substring(0, 500)}\n\nLe bot va redemarrer via PM2.`
+      );
+    } catch {}
+  }
+  process.exit(1);
+});
+
+process.on("unhandledRejection", async (reason) => {
+  console.error("Unhandled rejection:", reason);
+  if (ALLOWED_USER_ID) {
+    try {
+      await bot.api.sendMessage(
+        parseInt(ALLOWED_USER_ID),
+        `Rejection non geree:\n${String(reason).substring(0, 500)}`
+      );
+    } catch {}
+  }
+});
 
 // ============================================================
 // START

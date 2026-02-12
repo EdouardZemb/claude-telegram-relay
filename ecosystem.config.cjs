@@ -1,0 +1,34 @@
+module.exports = {
+  apps: [
+    {
+      name: "claude-relay",
+      script: "./start-relay.sh",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "10s",
+      restart_delay: 5000,
+      error_file: "/home/edouard/.claude-relay/logs/relay-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/relay-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
+    {
+      name: "claude-dashboard",
+      script: "bun",
+      args: "run dashboard/server.ts",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: "5s",
+      restart_delay: 3000,
+      error_file: "/home/edouard/.claude-relay/logs/dashboard-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/dashboard-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      env: {
+        DASHBOARD_PORT: "3456",
+      },
+    },
+  ],
+};

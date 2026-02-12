@@ -9,6 +9,7 @@ import { writeFile, readFile, unlink } from "fs/promises";
 import { join } from "path";
 
 const VOICE_PROVIDER = process.env.VOICE_PROVIDER || "";
+const WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE || "auto";
 
 /**
  * Transcribe an audio buffer to text.
@@ -74,7 +75,7 @@ async function transcribeLocal(audioBuffer: Buffer): Promise<string> {
 
     // Transcribe via whisper.cpp
     const whisper = spawn(
-      [whisperBinary, "--model", modelPath, "--file", wavPath, "--output-txt", "--output-file", join(tmpDir, `voice_${timestamp}`), "--no-prints"],
+      [whisperBinary, "--model", modelPath, "--language", WHISPER_LANGUAGE, "--file", wavPath, "--output-txt", "--output-file", join(tmpDir, `voice_${timestamp}`), "--no-prints"],
       { stdout: "pipe", stderr: "pipe" }
     );
     const whisperExit = await whisper.exited;

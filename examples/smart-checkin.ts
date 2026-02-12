@@ -14,12 +14,19 @@
 import { spawn } from "bun";
 import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
+import { createClient } from "@supabase/supabase-js";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const CHAT_ID = process.env.TELEGRAM_USER_ID || "";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const STATE_FILE =
   process.env.CHECKIN_STATE_FILE || "/tmp/checkin-state.json";
+
+// Supabase client
+const supabase =
+  process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
+    : null;
 
 // ============================================================
 // STATE MANAGEMENT
@@ -53,22 +60,55 @@ async function saveState(state: CheckinState): Promise<void> {
 // ============================================================
 
 async function getGoals(): Promise<string[]> {
-  // Load from your persistence layer
-  // Example: Supabase, JSON file, etc.
-  return ["Finish video edit by 5pm", "Review PR"];
+  if (!supabase) return [];
+  try {
+    const { data } = await supabase.rpc("get_active_goals");
+    return (data || []).map((g: { content: string; deadline?: string }) =>
+      g.deadline ? `${g.content} (deadline: ${g.deadline})` : g.content
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function getFacts(): Promise<string[]> {
+  if (!supabase) return [];
+  try {
+    const { data } = await supabase.rpc("get_facts");
+    return (data || []).map((f: { content: string }) => f.content);
+  } catch {
+    return [];
+  }
 }
 
 async function getCalendarContext(): Promise<string> {
-  // What's coming up today?
-  return "Next event: Team call in 2 hours";
+  // Placeholder — connect Google Calendar MCP in the full version
+  return "No calendar connected";
 }
 
 async function getLastActivity(): Promise<string> {
+  // Try Supabase first for accurate last message time
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from("messages")
+        .select("created_at")
+        .eq("role", "user")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) {
+        const lastMsg = new Date(data[0].created_at);
+        const now = new Date();
+        const hoursSince = (now.getTime() - lastMsg.getTime()) / (1000 * 60 * 60);
+        return `Last message: ${hoursSince.toFixed(1)} hours ago`;
+      }
+    } catch {}
+  }
+
   const state = await loadState();
   const lastMsg = new Date(state.lastMessageTime);
   const now = new Date();
   const hoursSince = (now.getTime() - lastMsg.getTime()) / (1000 * 60 * 60);
-
   return `Last message: ${hoursSince.toFixed(1)} hours ago`;
 }
 
@@ -105,6 +145,7 @@ async function askClaudeToDecide(): Promise<{
 }> {
   const state = await loadState();
   const goals = await getGoals();
+  const facts = await getFacts();
   const calendar = await getCalendarContext();
   const activity = await getLastActivity();
 
@@ -121,6 +162,7 @@ CONTEXT:
 - ${activity}
 - Last check-in: ${state.lastCheckinTime || "Never"}
 - Active goals: ${goals.join(", ") || "None"}
+- Known facts about user: ${facts.slice(0, 5).join(", ") || "None"}
 - Calendar: ${calendar}
 - Pending follow-ups: ${state.pendingItems.join(", ") || "None"}
 

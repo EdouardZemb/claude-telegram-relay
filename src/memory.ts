@@ -115,6 +115,36 @@ export async function getMemoryContext(
 }
 
 /**
+ * Get the most recent messages for conversational continuity.
+ */
+export async function getRecentMessages(
+  supabase: SupabaseClient | null,
+  limit: number = 20
+): Promise<string> {
+  if (!supabase) return "";
+
+  try {
+    const { data } = await supabase
+      .from("messages")
+      .select("role, content, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (!data?.length) return "";
+
+    const messages = data
+      .reverse()
+      .map((m: any) => `[${m.role}]: ${m.content}`)
+      .join("\n");
+
+    return "RECENT CONVERSATION:\n" + messages;
+  } catch (error) {
+    console.error("Recent messages error:", error);
+    return "";
+  }
+}
+
+/**
  * Semantic search for relevant past messages via the search Edge Function.
  * The Edge Function handles embedding generation (OpenAI key stays in Supabase).
  */

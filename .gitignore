@@ -28,3 +28,14 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Claude Code
+.claude/
+
+# SSH keys
+deploy_key*
+*.pem
+
+# Logs
+*.log
+~/.claude-relay/

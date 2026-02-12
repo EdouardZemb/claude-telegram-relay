@@ -1,0 +1,17 @@
+# Caddy Reverse Proxy for Claude Relay Dashboard
+#
+# Usage:
+#   1. Install Caddy: sudo apt install caddy
+#   2. Copy this file: sudo cp Caddyfile /etc/caddy/Caddyfile
+#   3. Restart: sudo systemctl restart caddy
+#
+# Option A: With a domain (auto HTTPS via Let's Encrypt)
+# YOUR_DOMAIN {
+#     reverse_proxy localhost:3456
+# }
+#
+# Option B: Local network HTTPS with self-signed cert (current setup)
+# Port 443 is allowed from 192.168.1.0/24 via ufw
+:8080 {
+    reverse_proxy localhost:3456
+}
