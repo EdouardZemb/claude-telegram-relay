@@ -540,9 +540,11 @@ export function formatRetro(retro: any): string {
 /**
  * Applique des suggestions de patterns au workflow.yaml.
  * Retourne les modifications effectuees.
+ * Logs each change to the audit trail (S16-05).
  */
 export function applyWorkflowSuggestions(
-  suggestions: Array<{ action: string; target_step?: string; suggested_change?: string }>
+  suggestions: Array<{ action: string; target_step?: string; suggested_change?: string }>,
+  opts?: { author?: string; reason?: string; supabase?: any }
 ): string[] {
   const configPath = join(
     process.env.PROJECT_DIR || join(import.meta.dir, ".."),
@@ -554,6 +556,7 @@ export function applyWorkflowSuggestions(
   const raw = readFileSync(configPath, "utf-8");
   const config = parse(raw) as WorkflowConfig;
   const applied: string[] = [];
+  const changes: Array<{ step: string; field: string; from: string; to: string }> = [];
 
   for (const suggestion of suggestions) {
     if (!suggestion.target_step || !suggestion.suggested_change) continue;
@@ -572,15 +575,114 @@ export function applyWorkflowSuggestions(
     step.checkpoint.mode = newMode;
     step.checkpoint.enabled = newMode !== "off";
     applied.push(`${suggestion.target_step}: checkpoint ${oldMode} -> ${newMode}`);
+    changes.push({
+      step: suggestion.target_step,
+      field: "checkpoint.mode",
+      from: oldMode,
+      to: newMode,
+    });
   }
 
   if (applied.length > 0) {
     // Bump version
-    config.version = (config.version || 1) + 1;
+    const oldVersion = config.version || 1;
+    config.version = oldVersion + 1;
     writeFileSync(configPath, stringify(config, { lineWidth: 120 }));
     // Reload cached config
     reloadWorkflowConfig();
+
+    // Log to audit trail (fire and forget)
+    if (opts?.supabase) {
+      logWorkflowAudit(opts.supabase, {
+        author: opts.author || "system",
+        action: "apply_suggestions",
+        reason: opts.reason || `Applied ${applied.length} workflow suggestions`,
+        changes,
+        configVersion: config.version,
+      }).catch(() => {});
+    }
   }
 
   return applied;
+}
+
+// ── Audit Trail (S16-05) ─────────────────────────────────────
+
+export interface WorkflowAuditEntry {
+  author: string;
+  action: string;
+  reason?: string;
+  changes: Array<{ step?: string; field: string; from: string; to: string }>;
+  configVersion?: number;
+}
+
+/**
+ * Log a workflow configuration change to the audit trail.
+ */
+export async function logWorkflowAudit(
+  supabase: any,
+  entry: WorkflowAuditEntry
+): Promise<void> {
+  // Capture current config as snapshot
+  let configSnapshot: WorkflowConfig | null = null;
+  try {
+    configSnapshot = loadWorkflowConfig();
+  } catch {}
+
+  const { error } = await supabase.from("workflow_audit").insert({
+    author: entry.author,
+    action: entry.action,
+    reason: entry.reason || null,
+    changes: entry.changes,
+    config_version: entry.configVersion || configSnapshot?.version,
+    config_snapshot: configSnapshot,
+  });
+
+  if (error) {
+    console.error("logWorkflowAudit error:", error);
+  }
+}
+
+/**
+ * Get recent audit entries for display.
+ */
+export async function getWorkflowAuditHistory(
+  supabase: any,
+  limit: number = 10
+): Promise<WorkflowAuditEntry[]> {
+  const { data, error } = await supabase
+    .from("workflow_audit")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) return [];
+  return (data || []).map((row: any) => ({
+    author: row.author,
+    action: row.action,
+    reason: row.reason,
+    changes: row.changes || [],
+    configVersion: row.config_version,
+  }));
+}
+
+/**
+ * Format audit history for Telegram display.
+ */
+export function formatAuditHistory(entries: WorkflowAuditEntry[]): string {
+  if (entries.length === 0) return "Aucun historique de modifications du workflow.";
+
+  const lines: string[] = ["AUDIT TRAIL — Workflow", ""];
+
+  for (const entry of entries) {
+    lines.push(`[v${entry.configVersion || "?"}] ${entry.action} par ${entry.author}`);
+    if (entry.reason) lines.push(`  Raison: ${entry.reason}`);
+    for (const change of entry.changes) {
+      const step = change.step ? `${change.step}.` : "";
+      lines.push(`  ${step}${change.field}: ${change.from} -> ${change.to}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
 }

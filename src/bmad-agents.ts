@@ -13,6 +13,7 @@ import {
   buildIsolationInstructions,
   type AgentPromptContext,
 } from "./bmad-prompts.ts";
+import { buildStoryFile, formatStoryForAgent } from "./story-files.ts";
 
 // ── Agent Types ──────────────────────────────────────────────
 
@@ -267,13 +268,19 @@ export function buildBmadExecPrompt(task: {
   architecture_ref?: string | null;
   subtasks?: Array<{ title: string; ac_mapping?: string; done?: boolean }> | null;
 }): string {
+  // Generate a story file for structured execution (S16-02)
+  const storyFile = buildStoryFile(task as any);
+  const storyText = formatStoryForAgent(storyFile);
+
   const context: AgentPromptContext = {
     command: "exec",
     taskTitle: task.title,
     taskDescription: task.description || undefined,
     priority: task.priority,
     acceptanceCriteria: task.acceptance_criteria || undefined,
-    devNotes: task.dev_notes || undefined,
+    devNotes: task.dev_notes
+      ? `${task.dev_notes}\n\n--- STORY FILE ---\n${storyText}`
+      : storyText,
     architectureRef: task.architecture_ref || undefined,
     projectName: task.project,
     subtasks: task.subtasks?.map((st) => ({

@@ -88,6 +88,22 @@ import {
   clearGateOverrides,
 } from "./gates.ts";
 import {
+  orchestrate,
+  formatOrchestrationResult,
+  DEFAULT_PIPELINE,
+  QUICK_PIPELINE,
+  REVIEW_PIPELINE,
+  type AgentRole,
+} from "./orchestrator.ts";
+import {
+  runAutoPipeline,
+  formatPipelineResult,
+} from "./auto-pipeline.ts";
+import {
+  analyzeBacklog as analyzeBacklogProactive,
+  formatPlannerResult as formatPlannerResultTg,
+} from "./proactive-planner.ts";
+import {
   listProjects,
   getProject,
   createProject,
@@ -648,6 +664,8 @@ bot.command("help", async (ctx) => {
     "",
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
+    "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
+    "  /autopipeline <id> [fast|full] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
     "QUALITE & AMELIORATION",
@@ -655,6 +673,7 @@ bot.command("help", async (ctx) => {
     "  /retro [sprint] -- Retrospective (Bob)",
     "  /patterns -- Analyse multi-sprints (Analyste Mary)",
     "  /alerts -- Alertes proactives (QA Quinn)",
+    "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
     "",
     "PROJETS",
     "  /projects -- Tous les projets",
@@ -1160,6 +1179,159 @@ bot.command("exec", async (ctx) => {
   clearGateOverrides(task.id);
 });
 
+// /orchestrate — run a task through a multi-agent pipeline
+bot.command("orchestrate", async (ctx) => {
+  const blocked = commandGuard(ctx, "orchestrate");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const args = ctx.match?.trim() || "";
+  // Parse: /orchestrate <taskId> [pipeline]
+  // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
+  const parts = args.split(/\s+/);
+  const idPrefix = parts[0];
+  const pipelineArg = parts[1] || "full";
+
+  if (!idPrefix) {
+    await ctx.reply(
+      "Usage: /orchestrate <id> [pipeline]\n\n" +
+      "Pipelines disponibles:\n" +
+      "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
+      "  quick — Dev -> QA\n" +
+      "  review — QA -> Architect\n" +
+      "  custom — ex: /orchestrate abc pm,dev,qa",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  // Find task
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("*")
+    .like("id", `${idPrefix}%`)
+    .in("status", ["backlog", "in_progress"])
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(
+      `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const task = matches[0];
+
+  // Resolve pipeline
+  let pipeline: AgentRole[];
+  const validAgents: AgentRole[] = ["analyst", "pm", "architect", "dev", "qa", "sm"];
+  if (pipelineArg === "full") {
+    pipeline = [...DEFAULT_PIPELINE];
+  } else if (pipelineArg === "quick") {
+    pipeline = [...QUICK_PIPELINE];
+  } else if (pipelineArg === "review") {
+    pipeline = [...REVIEW_PIPELINE];
+  } else {
+    // Custom: comma-separated agent IDs
+    const customAgents = pipelineArg.split(",").map((s) => s.trim().toLowerCase());
+    const invalid = customAgents.filter((a) => !validAgents.includes(a as AgentRole));
+    if (invalid.length > 0) {
+      await ctx.reply(
+        `Agents inconnus: ${invalid.join(", ")}\nAgents valides: ${validAgents.join(", ")}`,
+        threadOpts(ctx)
+      );
+      return;
+    }
+    pipeline = customAgents as AgentRole[];
+  }
+
+  await ctx.reply(
+    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}\nCa peut prendre plusieurs minutes...`,
+    threadOpts(ctx)
+  );
+
+  const result = await orchestrate(supabase, task, {
+    pipeline,
+    stopOnFailure: true,
+    onProgress: async (msg) => {
+      await ctx.reply(msg, threadOpts(ctx));
+    },
+  });
+
+  const formatted = formatOrchestrationResult(result);
+  await sendResponse(ctx, formatted);
+});
+
+// /autopipeline — run a task through the full automated BMad pipeline
+bot.command("autopipeline", async (ctx) => {
+  const blocked = commandGuard(ctx, "autopipeline");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const args = ctx.match?.trim() || "";
+  const parts = args.split(/\s+/);
+  const idPrefix = parts[0];
+  const mode = parts[1] || "fast"; // "fast" (default) or "full" (with analysis)
+
+  if (!idPrefix) {
+    await ctx.reply(
+      "Usage: /autopipeline <id> [fast|full]\n\n" +
+      "Modes:\n" +
+      "  fast — Gate -> Story -> Dev -> Review (defaut)\n" +
+      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const { data: matches } = await supabase
+    .from("tasks")
+    .select("*")
+    .like("id", `${idPrefix}%`)
+    .in("status", ["backlog", "in_progress"])
+    .limit(2);
+
+  if (!matches || matches.length === 0) {
+    await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, threadOpts(ctx));
+    return;
+  }
+  if (matches.length > 1) {
+    await ctx.reply(
+      `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  const task = matches[0];
+
+  await ctx.reply(
+    `AUTO-PIPELINE lance pour: ${task.title}\nMode: ${mode}\nLe pipeline tourne en autonomie. Notifications a chaque phase.`,
+    threadOpts(ctx)
+  );
+
+  const result = await runAutoPipeline(supabase, task, {
+    includeAnalysis: mode === "full",
+    onProgress: async (msg) => {
+      await ctx.reply(msg, threadOpts(ctx));
+    },
+  });
+
+  const formatted = formatPipelineResult(result);
+  await sendResponse(ctx, formatted);
+});
+
 // /plan — decompose a request into sub-tasks and add them to the backlog
 bot.command("plan", async (ctx) => {
   const blocked = commandGuard(ctx, "plan");
@@ -1614,6 +1786,23 @@ bot.command("alerts", async (ctx) => {
   await ctx.replyWithChatAction("typing");
   const alerts = await runAllChecks(supabase, sprintId);
   await sendResponse(ctx, formatAlerts(alerts));
+});
+
+// /planify — proactive backlog analysis with recommendations
+bot.command("planify", async (ctx) => {
+  const blocked = commandGuard(ctx, "planify");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+  const sprintId = arg || await getCurrentSprint(supabase) || undefined;
+
+  await ctx.replyWithChatAction("typing");
+  const result = await analyzeBacklogProactive(supabase, sprintId);
+  await sendResponse(ctx, formatPlannerResultTg(result));
 });
 
 // /profile — analyze and evolve user profile

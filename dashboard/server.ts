@@ -86,6 +86,14 @@ const server = Bun.serve({
       return handleProxyRetros(projectId);
     }
 
+    if (url.pathname === "/api/agent-metrics") {
+      return handleAgentMetrics(projectId);
+    }
+
+    if (url.pathname === "/api/workflow-audit") {
+      return handleWorkflowAudit();
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
@@ -263,6 +271,122 @@ async function handleProxyRetros(projectId?: string): Promise<Response> {
   if (projectId) query = query.eq("project_id", projectId);
 
   const { data, error } = await query;
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return new Response(JSON.stringify(data ?? []), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleAgentMetrics(projectId?: string): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
+  }
+
+  // Query orchestration logs from workflow_logs
+  const { data: logs, error } = await supabase
+    .from("workflow_logs")
+    .select("step, metadata, created_at, duration_seconds, checkpoint_result")
+    .or("step.like.orchestration_%,step.eq.orchestration,step.eq.code_review")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Aggregate per-agent stats
+  const agentStats: Record<string, {
+    runs: number;
+    successes: number;
+    totalDurationMs: number;
+    avgDurationMs: number;
+    lastRun: string | null;
+  }> = {};
+
+  for (const log of logs || []) {
+    // Orchestration logs have metadata.results array
+    const results = log.metadata?.results;
+    if (Array.isArray(results)) {
+      for (const r of results) {
+        if (!r.agent) continue;
+        if (!agentStats[r.agent]) {
+          agentStats[r.agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+        }
+        const stats = agentStats[r.agent];
+        stats.runs++;
+        if (r.success) stats.successes++;
+        stats.totalDurationMs += r.durationMs || 0;
+        if (!stats.lastRun) stats.lastRun = log.created_at;
+      }
+    }
+
+    // Code review logs
+    if (log.step === "code_review" && log.metadata) {
+      const agent = "qa";
+      if (!agentStats[agent]) {
+        agentStats[agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+      }
+      agentStats[agent].runs++;
+      if (log.metadata.passes_gate) agentStats[agent].successes++;
+      if (!agentStats[agent].lastRun) agentStats[agent].lastRun = log.created_at;
+    }
+  }
+
+  // Compute averages
+  for (const stats of Object.values(agentStats)) {
+    stats.avgDurationMs = stats.runs > 0 ? Math.round(stats.totalDurationMs / stats.runs) : 0;
+  }
+
+  // Gate pass rates
+  const { data: gateLogs } = await supabase
+    .from("workflow_logs")
+    .select("step, checkpoint_result, metadata")
+    .eq("step", "code_review")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  const gateStats = {
+    total: gateLogs?.length || 0,
+    passed: gateLogs?.filter((l: any) => l.metadata?.passes_gate).length || 0,
+    avgScore: 0,
+  };
+  const scores = (gateLogs || [])
+    .map((l: any) => l.metadata?.score)
+    .filter((s: any) => typeof s === "number");
+  if (scores.length > 0) {
+    gateStats.avgScore = Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length);
+  }
+
+  const response = {
+    agents: agentStats,
+    gates: gateStats,
+    totalOrchestrations: logs?.filter((l: any) => l.step === "orchestration").length || 0,
+  };
+
+  return new Response(JSON.stringify(response, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleWorkflowAudit(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+
+  const { data, error } = await supabase
+    .from("workflow_audit")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
