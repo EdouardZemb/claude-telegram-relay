@@ -1,13 +1,15 @@
 /**
- * Voice Transcription Test
+ * Voice Transcription & TTS Test
  *
- * Verifies the chosen voice provider is configured correctly.
+ * Verifies the chosen voice provider and TTS are configured correctly.
  * Run: bun run test:voice
  */
 
 import "dotenv/config";
+import { unlink } from "fs/promises";
 
 const VOICE_PROVIDER = process.env.VOICE_PROVIDER || "";
+const TTS_PROVIDER = process.env.TTS_PROVIDER || "";
 
 async function testGroq(): Promise<boolean> {
   if (!process.env.GROQ_API_KEY) {
@@ -76,8 +78,81 @@ async function testLocal(): Promise<boolean> {
       console.error(
         "Download with: curl -L -o " +
           modelPath +
-          " https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+          " https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
       );
+      allGood = false;
+    }
+  }
+
+  return allGood;
+}
+
+async function testTTS(): Promise<boolean> {
+  const piperBinary = process.env.PIPER_BINARY || "piper";
+  const modelPath = process.env.PIPER_MODEL_PATH || "";
+  let allGood = true;
+
+  // Check piper binary
+  try {
+    const proc = Bun.spawn([piperBinary, "--help"], { stdout: "pipe", stderr: "pipe" });
+    await proc.exited;
+    console.log(`${piperBinary}: installed`);
+  } catch {
+    console.error(`${piperBinary}: NOT FOUND — download from https://github.com/rhasspy/piper/releases`);
+    allGood = false;
+  }
+
+  // Check model files
+  if (!modelPath) {
+    console.error("PIPER_MODEL_PATH not set in .env");
+    allGood = false;
+  } else {
+    const onnxFile = Bun.file(modelPath);
+    const jsonFile = Bun.file(modelPath + ".json");
+
+    if (await onnxFile.exists()) {
+      const sizeMB = (onnxFile.size / 1024 / 1024).toFixed(1);
+      console.log(`Piper model: ${modelPath} (${sizeMB} MB)`);
+    } else {
+      console.error(`Piper model not found: ${modelPath}`);
+      allGood = false;
+    }
+
+    if (await jsonFile.exists()) {
+      console.log(`Piper config: ${modelPath}.json`);
+    } else {
+      console.error(`Piper config not found: ${modelPath}.json`);
+      allGood = false;
+    }
+  }
+
+  // Test synthesis if binary and model are available
+  if (allGood) {
+    try {
+      const testWav = `/tmp/tts_test_${Date.now()}.wav`;
+      const proc = Bun.spawn(
+        [piperBinary, "--model", modelPath, "--output_file", testWav],
+        { stdin: "pipe", stdout: "pipe", stderr: "pipe" }
+      );
+
+      proc.stdin.write("Test de synthèse vocale.");
+      proc.stdin.end();
+
+      const exitCode = await proc.exited;
+      if (exitCode === 0) {
+        const wavFile = Bun.file(testWav);
+        if (await wavFile.exists()) {
+          const sizeKB = (wavFile.size / 1024).toFixed(1);
+          console.log(`TTS synthesis test: OK (${sizeKB} KB WAV)`);
+          await unlink(testWav).catch(() => {});
+        }
+      } else {
+        const stderr = await new Response(proc.stderr).text();
+        console.error(`TTS synthesis test failed: ${stderr}`);
+        allGood = false;
+      }
+    } catch (error: any) {
+      console.error(`TTS synthesis test error: ${error.message || error}`);
       allGood = false;
     }
   }
@@ -87,30 +162,74 @@ async function testLocal(): Promise<boolean> {
 
 // ---- Main ----
 
-console.log("Voice Transcription Test\n");
+console.log("Voice Transcription & TTS Test\n");
+
+// === Transcription ===
+
+console.log("=== Transcription ===\n");
 
 if (!VOICE_PROVIDER) {
-  console.log("VOICE_PROVIDER is not set in .env — voice is disabled.");
-  console.log('\nTo enable, set VOICE_PROVIDER=groq or VOICE_PROVIDER=local in .env');
-  process.exit(0);
+  console.log("VOICE_PROVIDER is not set in .env — voice transcription is disabled.");
+  console.log('To enable, set VOICE_PROVIDER=groq or VOICE_PROVIDER=local in .env\n');
+} else {
+  console.log(`Provider: ${VOICE_PROVIDER}\n`);
 }
 
-console.log(`Provider: ${VOICE_PROVIDER}\n`);
-
-let passed = false;
+let transcriptionPassed = false;
 
 if (VOICE_PROVIDER === "groq") {
-  passed = await testGroq();
+  transcriptionPassed = await testGroq();
 } else if (VOICE_PROVIDER === "local") {
-  passed = await testLocal();
-} else {
+  transcriptionPassed = await testLocal();
+} else if (VOICE_PROVIDER) {
   console.error(`Unknown VOICE_PROVIDER: "${VOICE_PROVIDER}"`);
   console.log('Valid options: "groq" or "local"');
 }
 
-if (passed) {
-  console.log("\nVoice transcription is ready.");
+if (VOICE_PROVIDER) {
+  if (transcriptionPassed) {
+    console.log("\nTranscription: PASSED");
+  } else {
+    console.error("\nTranscription: FAILED");
+  }
+}
+
+// === TTS ===
+
+console.log("\n=== Text-to-Speech ===\n");
+
+let ttsPassed = false;
+
+if (!TTS_PROVIDER) {
+  console.log("TTS_PROVIDER is not set in .env — TTS is disabled.");
+  console.log('To enable, set TTS_PROVIDER=local in .env\n');
 } else {
-  console.error("\nVoice transcription test failed. Fix the issues above.");
+  console.log(`TTS Provider: ${TTS_PROVIDER}\n`);
+
+  if (TTS_PROVIDER === "local") {
+    ttsPassed = await testTTS();
+  } else {
+    console.error(`Unknown TTS_PROVIDER: "${TTS_PROVIDER}"`);
+    console.log('Valid options: "local"');
+  }
+
+  if (ttsPassed) {
+    console.log("\nTTS: PASSED");
+  } else {
+    console.error("\nTTS: FAILED");
+  }
+}
+
+// === Summary ===
+
+console.log("\n=== Summary ===\n");
+
+const anyFailed =
+  (VOICE_PROVIDER && !transcriptionPassed) || (TTS_PROVIDER && !ttsPassed);
+
+if (anyFailed) {
+  console.error("Some tests failed. Fix the issues above.");
   process.exit(1);
+} else {
+  console.log("All configured voice features are ready.");
 }

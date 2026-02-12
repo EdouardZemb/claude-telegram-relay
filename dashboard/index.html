@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backlog — Claude Relay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --red: #f85149;
+      --purple: #bc8cff;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .sprint-info {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .sprint-info strong {
+      color: var(--accent);
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 24px;
+      min-height: calc(100vh - 80px);
+    }
+
+    .column {
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 200px;
+    }
+
+    .column-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .column-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .column-count {
+      background: var(--border);
+      color: var(--text-muted);
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .column-body {
+      padding: 8px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: default;
+      transition: border-color 0.15s;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .card-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .priority-1 { background: var(--red); color: #fff; }
+    .priority-2 { background: var(--yellow); color: #000; }
+    .priority-3 { background: var(--border); color: var(--text-muted); }
+    .priority-4 { background: var(--border); color: var(--text-muted); }
+    .priority-5 { background: var(--border); color: var(--text-muted); }
+
+    .project-tag {
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent);
+    }
+
+    .sprint-tag {
+      background: rgba(188, 140, 255, 0.15);
+      color: var(--purple);
+    }
+
+    .card-id {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .empty-state {
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 32px 16px;
+    }
+
+    .status-bar {
+      padding: 8px 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    .col-backlog .column-header { border-top: 3px solid var(--text-muted); }
+    .col-in_progress .column-header { border-top: 3px solid var(--accent); }
+    .col-review .column-header { border-top: 3px solid var(--yellow); }
+    .col-done .column-header { border-top: 3px solid var(--green); }
+
+    @media (max-width: 900px) {
+      .board {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Claude Relay — Backlog</h1>
+    <div class="sprint-info" id="sprint-info">Chargement...</div>
+  </header>
+  <div class="board" id="board">
+    <div class="column col-backlog">
+      <div class="column-header"><h2>A faire</h2><span class="column-count" id="count-backlog">0</span></div>
+      <div class="column-body" id="col-backlog"></div>
+    </div>
+    <div class="column col-in_progress">
+      <div class="column-header"><h2>En cours</h2><span class="column-count" id="count-in_progress">0</span></div>
+      <div class="column-body" id="col-in_progress"></div>
+    </div>
+    <div class="column col-review">
+      <div class="column-header"><h2>Review</h2><span class="column-count" id="count-review">0</span></div>
+      <div class="column-body" id="col-review"></div>
+    </div>
+    <div class="column col-done">
+      <div class="column-header"><h2>Fait</h2><span class="column-count" id="count-done">0</span></div>
+      <div class="column-body" id="col-done"></div>
+    </div>
+  </div>
+  <div class="status-bar" id="status-bar"></div>
+
+  <script>
+    // Supabase config — injected from env or hardcoded for simplicity
+    // The dashboard reads directly from Supabase using the anon key (RLS allows all)
+    const SUPABASE_URL = '__SUPABASE_URL__';
+    const SUPABASE_KEY = '__SUPABASE_KEY__';
+
+    const API = `${SUPABASE_URL}/rest/v1`;
+    const HEADERS = {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+    };
+
+    function createCard(task) {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      let meta = `<span class="tag priority-${task.priority}">P${task.priority}</span>`;
+      meta += `<span class="tag project-tag">${task.project}</span>`;
+      if (task.sprint) meta += `<span class="tag sprint-tag">${task.sprint}</span>`;
+      meta += `<span class="card-id">${task.id.substring(0, 8)}</span>`;
+
+      let desc = '';
+      if (task.description) {
+        desc = `<div class="card-desc">${task.description.substring(0, 120)}${task.description.length > 120 ? '...' : ''}</div>`;
+      }
+
+      card.innerHTML = `
+        <div class="card-title">${task.title}</div>
+        <div class="card-meta">${meta}</div>
+        ${desc}
+      `;
+      return card;
+    }
+
+    async function loadTasks() {
+      try {
+        const res = await fetch(
+          `${API}/tasks?status=neq.cancelled&order=priority.asc,created_at.asc`,
+          { headers: HEADERS }
+        );
+        const tasks = await res.json();
+
+        const columns = { backlog: [], in_progress: [], review: [], done: [] };
+        for (const t of tasks) {
+          if (columns[t.status]) columns[t.status].push(t);
+        }
+
+        for (const [status, items] of Object.entries(columns)) {
+          const col = document.getElementById(`col-${status}`);
+          const count = document.getElementById(`count-${status}`);
+          col.innerHTML = '';
+          count.textContent = items.length;
+
+          if (items.length === 0) {
+            col.innerHTML = '<div class="empty-state">Aucune tache</div>';
+          } else {
+            for (const t of items) {
+              col.appendChild(createCard(t));
+            }
+          }
+        }
+
+        // Sprint info
+        const activeTasks = tasks.filter(t => t.status !== 'done' && t.sprint);
+        const sprints = [...new Set(activeTasks.map(t => t.sprint))];
+        const sprintInfo = document.getElementById('sprint-info');
+        if (sprints.length > 0) {
+          const done = tasks.filter(t => t.status === 'done' && sprints.includes(t.sprint)).length;
+          const total = tasks.filter(t => sprints.includes(t.sprint)).length;
+          sprintInfo.innerHTML = `Sprint actif: <strong>${sprints.join(', ')}</strong> — ${done}/${total} fait`;
+        } else {
+          sprintInfo.textContent = `${tasks.length} taches au total`;
+        }
+
+        document.getElementById('status-bar').textContent = `Mis a jour: ${new Date().toLocaleTimeString('fr-FR')}`;
+      } catch (err) {
+        console.error('Load error:', err);
+        document.getElementById('status-bar').textContent = `Erreur: ${err.message}`;
+      }
+    }
+
+    // Initial load + auto-refresh every 30s
+    loadTasks();
+    setInterval(loadTasks, 30000);
+  </script>
+</body>
+</html>
