@@ -16,6 +16,14 @@ const SERVER_THREAD_ID = parseInt(process.env.SERVER_THREAD_ID || "0");
 
 let botInstance: Bot | null = null;
 
+function timestamp(): string {
+  return new Date().toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+  });
+}
+
 export function initNotifications(bot: Bot): void {
   botInstance = bot;
 }
@@ -39,9 +47,10 @@ export async function notifyPRCreated(
   branchName: string
 ): Promise<void> {
   const message = [
-    `PR creee: ${taskTitle}`,
+    `[${timestamp()}] PR creee`,
+    `${taskTitle}`,
     `Branche: ${branchName}`,
-    `Lien: ${prUrl}`,
+    `${prUrl}`,
   ].join("\n");
   await sendToTopic(DEV_THREAD_ID, message);
 }
@@ -50,7 +59,11 @@ export async function notifyPRMerged(
   taskTitle: string,
   prUrl: string
 ): Promise<void> {
-  const message = `PR mergee: ${taskTitle}\n${prUrl}`;
+  const message = [
+    `[${timestamp()}] PR mergee`,
+    `${taskTitle}`,
+    `${prUrl}`,
+  ].join("\n");
   await sendToTopic(DEV_THREAD_ID, message);
 }
 
@@ -60,7 +73,7 @@ export async function notifyTaskStarted(
   taskTitle: string,
   taskId: string
 ): Promise<void> {
-  const message = `Tache demarree: ${taskTitle} [${taskId.substring(0, 8)}]`;
+  const message = `[${timestamp()}] Tache demarree: ${taskTitle} [${taskId.substring(0, 8)}]`;
   await sendToTopic(SPRINT_THREAD_ID, message);
 }
 
@@ -68,7 +81,7 @@ export async function notifyTaskDone(
   taskTitle: string,
   taskId: string
 ): Promise<void> {
-  const message = `Tache terminee: ${taskTitle} [${taskId.substring(0, 8)}]`;
+  const message = `[${timestamp()}] Tache terminee: ${taskTitle} [${taskId.substring(0, 8)}]`;
   await sendToTopic(SPRINT_THREAD_ID, message);
 }
 
@@ -80,7 +93,7 @@ export async function notifyDeploy(
   details?: string
 ): Promise<void> {
   const icon = status === "success" ? "OK" : "ECHEC";
-  const parts = [`Deploy ${icon}: ${branch}`];
+  const parts = [`[${timestamp()}] Deploy ${icon}: ${branch}`];
   if (details) parts.push(details);
   await sendToTopic(SERVER_THREAD_ID, parts.join("\n"));
 }

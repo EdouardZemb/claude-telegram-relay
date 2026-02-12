@@ -41,9 +41,16 @@ while true; do
             npx pm2 restart claude-relay --update-env 2>/dev/null
             npx pm2 restart claude-dashboard --update-env 2>/dev/null
 
-            echo "$LOG_PREFIX Deploy complete: $(git log --oneline -1)"
+            COMMIT=$(git log --oneline -1)
+            echo "$LOG_PREFIX Deploy complete: $COMMIT"
+
+            # Notify serveur topic
+            bash "$REPO_DIR/scripts/notify-deploy.sh" "success" "$COMMIT"
         else
             echo "$LOG_PREFIX ERROR: git pull failed"
+
+            # Notify deploy failure
+            bash "$REPO_DIR/scripts/notify-deploy.sh" "failure" "git pull failed on $BRANCH"
         fi
     fi
 
