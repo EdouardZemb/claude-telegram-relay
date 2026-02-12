@@ -47,6 +47,19 @@ import {
   notifyTaskStarted,
   notifyTaskDone,
 } from "./notifications.ts";
+import {
+  collectSprintMetrics,
+  getSprintMetrics,
+  getAllSprintMetrics,
+  formatMetrics,
+  formatMetricsComparison,
+  generateRetroData,
+  saveRetro,
+  acceptRetroActions,
+  getRetro,
+  formatRetro,
+  WorkflowTracker,
+} from "./workflow.ts";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 
@@ -337,7 +350,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Focus on technical discussions: code, architecture, bugs, deployments, CI/CD. " +
       "Be precise and technical. Refer to files, functions, and line numbers when relevant. " +
       "You can suggest code changes and execute tasks.",
-    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak"],
+    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak", "metrics", "retro"],
   },
   "idees": {
     label: "Brainstorm",
@@ -354,7 +367,7 @@ const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "This is the sprint management topic. " +
       "Focus on task tracking, progress updates, priorities, and planning. " +
       "Keep messages short and actionable. Use task IDs when referencing work.",
-    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak"],
+    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak", "metrics", "retro"],
   },
   "serveur": {
     label: "Ops",
@@ -560,6 +573,8 @@ bot.command("help", async (ctx) => {
     "/status -- Etat du serveur et des services",
     "/remind <heure> <texte> -- Programmer un rappel",
     "/speak [texte] -- Synthese vocale (TTS)",
+    "/metrics [sprint] -- Metriques du sprint (amelioration continue)",
+    "/retro [sprint] -- Retrospective automatique du sprint",
     "/export -- Exporter conversations et memoire",
     "",
     "Envoie un message texte ou vocal pour discuter librement.",
@@ -795,6 +810,16 @@ bot.command("exec", async (ctx) => {
   const task = matches[0];
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
+  // Workflow tracking
+  const tracker = new WorkflowTracker(supabase, {
+    taskId: task.id,
+    sprintId: task.sprint || undefined,
+    startStep: "request",
+  });
+
+  // Log transition: request -> execution
+  await tracker.transition("execution", { agent_notes: `Exec lance pour: ${task.title}` });
+
   // Periodic heartbeat so user knows the agent is still running
   let heartbeatCount = 0;
   const heartbeat = setInterval(async () => {
@@ -812,6 +837,12 @@ bot.command("exec", async (ctx) => {
   clearInterval(heartbeat);
 
   if (result.success) {
+    // Log transition: execution -> review
+    await tracker.transition("review", {
+      checkpoint_result: "pass",
+      agent_notes: `Agent termine avec succes`,
+    });
+
     const duration = Math.round(result.durationMs / 1000);
     const summary = result.output.length > 3000
       ? result.output.substring(result.output.length - 3000)
@@ -824,6 +855,16 @@ bot.command("exec", async (ctx) => {
       : "";
     await sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}${ciLine}\n\n${summary}`);
 
+    // Log transition: review -> closure (if CI passed)
+    if (result.ciPassed !== false) {
+      await tracker.transition("closure", {
+        checkpoint_result: result.ciPassed ? "pass" : "skipped",
+        agent_notes: result.ciPassed ? "CI OK, tache cloturee" : "Pas de CI, tache cloturee",
+      });
+    } else {
+      await tracker.logCheckpoint("fail", `CI echouee: ${result.ciDetails || "details dans la PR"}`);
+    }
+
     // Proactive notifications to other topics
     if (result.prUrl) {
       const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
@@ -833,6 +874,8 @@ bot.command("exec", async (ctx) => {
       await notifyTaskDone(task.title, task.id);
     }
   } else {
+    // Log failure
+    await tracker.logCheckpoint("fail", result.error || "Execution echouee");
     const errMsg = result.error || result.output || "Erreur inconnue";
     await sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
   }
@@ -853,12 +896,25 @@ bot.command("plan", async (ctx) => {
   }
 
   await ctx.reply("Decomposition en cours...", threadOpts(ctx));
+
+  // Workflow tracking for the decomposition step
+  const currentSprint = await getCurrentSprint(supabase);
+  const tracker = new WorkflowTracker(supabase, {
+    sprintId: currentSprint || undefined,
+    startStep: "request",
+  });
+  await tracker.transition("decomposition", { agent_notes: `Plan demande: ${request.substring(0, 100)}` });
+
   const subtasks = await decomposeTask(request);
 
   if (subtasks.length === 0) {
+    await tracker.logCheckpoint("fail", "Aucune sous-tache generee");
     await ctx.reply("Impossible de decomposer cette demande. Reformule ou ajoute plus de details.", threadOpts(ctx));
     return;
   }
+
+  await tracker.logCheckpoint("pass", `${subtasks.length} sous-taches generees`);
+  await tracker.transition("validation", { agent_notes: `${subtasks.length} sous-taches proposees` });
 
   const added = [];
   for (const st of subtasks) {
@@ -997,6 +1053,37 @@ bot.on("callback_query:data", async (ctx) => {
     return;
   }
 
+  // Retro validation callbacks
+  if (data.startsWith("retro_")) {
+    if (!supabase) {
+      await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+      return;
+    }
+
+    const [action, sprintId] = data.split(":");
+    if (!sprintId) {
+      await ctx.answerCallbackQuery({ text: "Sprint ID manquant." });
+      return;
+    }
+
+    if (action === "retro_accept_all") {
+      const retro = await getRetro(supabase, sprintId);
+      if (retro?.actions_proposed) {
+        await acceptRetroActions(supabase, sprintId, retro.actions_proposed);
+        await ctx.answerCallbackQuery({ text: "Actions validees !" });
+        await ctx.editMessageText(
+          `Retro ${sprintId} : toutes les actions ont ete validees. Elles seront prises en compte dans le prochain sprint.`
+        );
+      }
+    } else if (action === "retro_reject") {
+      await ctx.answerCallbackQuery({ text: "Actions rejetees." });
+      await ctx.editMessageText(
+        `Retro ${sprintId} : actions rejetees. Tu peux relancer /retro ${sprintId} pour regenerer.`
+      );
+    }
+    return;
+  }
+
   // Unknown callback
   await ctx.answerCallbackQuery();
 });
@@ -1110,6 +1197,120 @@ bot.command("remind", async (ctx) => {
 });
 
 // /export — export conversations and memory
+// /metrics — show sprint metrics
+bot.command("metrics", async (ctx) => {
+  const blocked = commandGuard(ctx, "metrics");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+
+  if (arg === "all" || arg === "compare") {
+    const all = await getAllSprintMetrics(supabase);
+    await sendResponse(ctx, formatMetricsComparison(all));
+    return;
+  }
+
+  // Specific sprint or current
+  const sprintId = arg || await getCurrentSprint(supabase);
+  if (!sprintId) {
+    await ctx.reply("Aucun sprint actif. Usage: /metrics S11 ou /metrics all", threadOpts(ctx));
+    return;
+  }
+
+  // Collect fresh metrics first
+  await collectSprintMetrics(supabase, sprintId);
+  const metrics = await getSprintMetrics(supabase, sprintId);
+  await sendResponse(ctx, formatMetrics(metrics));
+});
+
+// /retro — generate or view sprint retrospective
+bot.command("retro", async (ctx) => {
+  const blocked = commandGuard(ctx, "retro");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+  const sprintId = arg || await getCurrentSprint(supabase);
+  if (!sprintId) {
+    await ctx.reply("Aucun sprint actif. Usage: /retro S11", threadOpts(ctx));
+    return;
+  }
+
+  // Check if retro already exists
+  const existing = await getRetro(supabase, sprintId);
+  if (existing) {
+    await sendResponse(ctx, formatRetro(existing));
+    return;
+  }
+
+  // Generate new retro
+  await ctx.reply(`Generation de la retro pour ${sprintId}...`, threadOpts(ctx));
+  await ctx.replyWithChatAction("typing");
+
+  // Collect metrics first
+  await collectSprintMetrics(supabase, sprintId);
+  const retroData = await generateRetroData(supabase, sprintId);
+
+  if (!retroData) {
+    await ctx.reply("Pas assez de donnees pour generer une retro.", threadOpts(ctx));
+    return;
+  }
+
+  // Use Claude to analyze and generate the retro
+  const retroPrompt = [
+    "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
+    "Reponds UNIQUEMENT en JSON valide, sans markdown, sans commentaires.",
+    "",
+    `Sprint: ${sprintId}`,
+    `Metriques: ${JSON.stringify(retroData.metrics)}`,
+    `Stats workflow: ${JSON.stringify(retroData.workflowStats)}`,
+    `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t: any) => ({ title: t.title, status: t.status, priority: t.priority })))}`,
+    "",
+    'Format JSON attendu:',
+    '{"what_worked": ["..."], "what_didnt": ["..."], "patterns_detected": ["..."], "actions_proposed": [{"action": "...", "priority": "high|medium|low"}]}',
+  ].join("\n");
+
+  try {
+    const analysis = await callClaude(retroPrompt);
+    const jsonMatch = analysis.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      await ctx.reply("Erreur: impossible de parser la retro generee.", threadOpts(ctx));
+      return;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    await saveRetro(supabase, sprintId, {
+      what_worked: parsed.what_worked || [],
+      what_didnt: parsed.what_didnt || [],
+      patterns_detected: parsed.patterns_detected || [],
+      actions_proposed: parsed.actions_proposed || [],
+      raw_analysis: analysis,
+    });
+
+    const retro = await getRetro(supabase, sprintId);
+    await sendResponse(ctx, formatRetro(retro));
+
+    // Offer validation buttons
+    if (parsed.actions_proposed?.length > 0) {
+      const keyboard = new InlineKeyboard()
+        .text("Valider toutes les actions", `retro_accept_all:${sprintId}`)
+        .row()
+        .text("Rejeter", `retro_reject:${sprintId}`);
+      await ctx.reply("Valider les actions proposees ?", { ...threadOpts(ctx), reply_markup: keyboard });
+    }
+  } catch (error) {
+    console.error("Retro generation error:", error);
+    await ctx.reply("Erreur lors de la generation de la retro.", threadOpts(ctx));
+  }
+});
+
 bot.command("export", async (ctx) => {
   const blocked = commandGuard(ctx, "export");
   if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
