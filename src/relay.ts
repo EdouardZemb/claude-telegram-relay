@@ -670,7 +670,7 @@ bot.command("help", async (ctx) => {
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
     "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
-    "  /autopipeline <id> [fast|full] -- Pipeline auto BMad complet",
+    "  /autopipeline <id> [full|fast] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
     "QUALITE & AMELIORATION",
@@ -1306,14 +1306,14 @@ bot.command("autopipeline", async (ctx) => {
   const args = ctx.match?.trim() || "";
   const parts = args.split(/\s+/);
   const idPrefix = parts[0];
-  const mode = parts[1] || "fast"; // "fast" (default) or "full" (with analysis)
+  const mode = parts[1] || "full"; // "full" (default, with analysis) or "fast" (skip analysis)
 
   if (!idPrefix) {
     await ctx.reply(
-      "Usage: /autopipeline <id> [fast|full]\n\n" +
+      "Usage: /autopipeline <id> [full|fast]\n\n" +
       "Modes:\n" +
-      "  fast — Gate -> Story -> Dev -> Review (defaut)\n" +
-      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review",
+      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review (defaut)\n" +
+      "  fast — Gate -> Story -> Dev -> Review (sans analyse)",
       threadOpts(ctx)
     );
     return;

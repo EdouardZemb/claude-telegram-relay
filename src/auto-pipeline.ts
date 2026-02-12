@@ -18,7 +18,6 @@ import { checkGatesWithOverrides } from "./gates.ts";
 import { orchestrate, type AgentRole, type OrchestratedResult } from "./orchestrator.ts";
 import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
-import { runCodeReview, formatReviewResult } from "./code-review.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -74,7 +73,7 @@ export async function runAutoPipeline(
   options: PipelineOptions = {}
 ): Promise<PipelineResult> {
   const startTime = Date.now();
-  const { onProgress, includeAnalysis = false, skipGates = false } = options;
+  const { onProgress, includeAnalysis = true, skipGates = false } = options;
 
   const progress = async (msg: string) => {
     if (onProgress) await onProgress(msg);
@@ -145,6 +144,18 @@ export async function runAutoPipeline(
 
     const analysisOk = analysisResult.steps.filter((s) => s.success).length;
     await progress(`Analyse: ${analysisOk}/${analysisResult.steps.length} agents OK.`);
+
+    // Reload task from DB so dev agent gets PM/Architect artefacts
+    if (supabase) {
+      const { data: enriched } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("id", task.id)
+        .single();
+      if (enriched) {
+        Object.assign(task, enriched);
+      }
+    }
   } else {
     await progress("Phase 3/5: Analyse — sautee (mode rapide).");
   }
