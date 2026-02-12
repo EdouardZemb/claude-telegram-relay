@@ -100,6 +100,10 @@ import {
   formatPipelineResult,
 } from "./auto-pipeline.ts";
 import {
+  analyzeBacklog as analyzeBacklogProactive,
+  formatPlannerResult as formatPlannerResultTg,
+} from "./proactive-planner.ts";
+import {
   listProjects,
   getProject,
   createProject,
@@ -669,6 +673,7 @@ bot.command("help", async (ctx) => {
     "  /retro [sprint] -- Retrospective (Bob)",
     "  /patterns -- Analyse multi-sprints (Analyste Mary)",
     "  /alerts -- Alertes proactives (QA Quinn)",
+    "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
     "",
     "PROJETS",
     "  /projects -- Tous les projets",
@@ -1781,6 +1786,23 @@ bot.command("alerts", async (ctx) => {
   await ctx.replyWithChatAction("typing");
   const alerts = await runAllChecks(supabase, sprintId);
   await sendResponse(ctx, formatAlerts(alerts));
+});
+
+// /planify — proactive backlog analysis with recommendations
+bot.command("planify", async (ctx) => {
+  const blocked = commandGuard(ctx, "planify");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+  const sprintId = arg || await getCurrentSprint(supabase) || undefined;
+
+  await ctx.replyWithChatAction("typing");
+  const result = await analyzeBacklogProactive(supabase, sprintId);
+  await sendResponse(ctx, formatPlannerResultTg(result));
 });
 
 // /profile — analyze and evolve user profile
