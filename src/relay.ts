@@ -21,6 +21,8 @@ import {
   getMemoryContext,
   getRelevantContext,
   getRecentMessages,
+  classifyMessage,
+  autoRemember,
 } from "./memory.ts";
 import {
   addTask,
@@ -679,6 +681,7 @@ bot.command("help", async (ctx) => {
     "  /patterns -- Analyse multi-sprints (Analyste Mary)",
     "  /alerts -- Alertes proactives (QA Quinn)",
     "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
+    "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
     "",
     "PROJETS",
     "  /projects -- Tous les projets",
@@ -1857,6 +1860,98 @@ bot.command("planify", async (ctx) => {
   await sendResponse(ctx, formatPlannerResultTg(result));
 });
 
+// /brain — memory synthesis (facts, decisions, patterns)
+bot.command("brain", async (ctx) => {
+  const blocked = commandGuard(ctx, "brain");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  await ctx.replyWithChatAction("typing");
+
+  try {
+    // Gather recent facts and all memory stats
+    const [factsResult, goalsResult, recentFacts] = await Promise.all([
+      supabase.rpc("get_facts"),
+      supabase.rpc("get_active_goals"),
+      supabase.from("memory")
+        .select("type, content, metadata, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+
+    const facts = factsResult.data || [];
+    const goals = goalsResult.data || [];
+    const recent = recentFacts.data || [];
+
+    // Count by type
+    const typeCounts: Record<string, number> = {};
+    for (const r of recent) {
+      typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+    }
+
+    // Extract auto-classified topics
+    const topicCounts: Record<string, number> = {};
+    for (const r of recent) {
+      const topics = r.metadata?.topics;
+      if (Array.isArray(topics)) {
+        for (const t of topics) {
+          topicCounts[t] = (topicCounts[t] || 0) + 1;
+        }
+      }
+    }
+    const topTopics = Object.entries(topicCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([topic, count]) => `${topic} (${count})`)
+      .join(", ");
+
+    // Recent auto-classified facts
+    const autoFacts = recent
+      .filter((r: any) => r.metadata?.auto_classified)
+      .slice(0, 5);
+
+    // Build the synthesis prompt
+    const contextParts = [
+      `STATISTIQUES MEMOIRE`,
+      `Total facts: ${facts.length}`,
+      `Goals actifs: ${goals.length}`,
+      `Entrees recentes (50 dernieres): ${JSON.stringify(typeCounts)}`,
+      topTopics ? `Topics frequents: ${topTopics}` : "",
+      "",
+      `FACTS RECENTS (10 derniers):`,
+      ...facts.slice(0, 10).map((f: any) => `- ${f.content}`),
+      "",
+      `GOALS ACTIFS:`,
+      ...goals.map((g: any) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`),
+      "",
+      autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
+      ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
+    ].filter(Boolean).join("\n");
+
+    const prompt = `Tu es un assistant de synthese memoire. Analyse les donnees suivantes et produis une synthese hebdomadaire concise en francais.
+
+${contextParts}
+
+Produis:
+1. RESUME: ce qui s'est passe recemment (2-3 phrases)
+2. DECISIONS CLES: les decisions importantes prises
+3. PATTERNS: les sujets recurrents ou tendances
+4. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
+5. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
+
+Reponds en texte brut, sans markdown.`;
+
+    const synthesis = await callClaude(prompt, { heartbeat: heartbeatOpts(ctx) });
+    await sendResponse(ctx, synthesis);
+  } catch (error) {
+    console.error("Brain review error:", error);
+    await ctx.reply("Erreur lors de la synthese memoire.", threadOpts(ctx));
+  }
+});
+
 // /profile — analyze and evolve user profile
 bot.command("profile", async (ctx) => {
   const blocked = commandGuard(ctx, "profile");
@@ -2073,12 +2168,19 @@ bot.on("message:text", async (ctx) => {
     await saveMessage("user", text, meta);
 
     // Gather context: semantic search + facts/goals + recent messages + dynamic profile
-    const [relevantContext, memoryContext, recentMessages, dynProfile] = await Promise.all([
+    // Also classify the message in parallel (fire-and-forget for auto-memory)
+    const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
       getRelevantContext(supabase, text),
       getMemoryContext(supabase),
       getRecentMessages(supabase),
       getDynamicProfile(),
+      classifyMessage(supabase, text, "user"),
     ]);
+
+    // Auto-remember if classification detected something memorable
+    if (classification?.is_memorable) {
+      autoRemember(supabase, text, classification).catch(() => {});
+    }
 
     const enrichedPrompt = buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName, dynProfile);
     const rawResponse = await callClaude(enrichedPrompt, { resume: true, heartbeat: heartbeatOpts(ctx) });
@@ -2136,12 +2238,17 @@ bot.on("message:voice", async (ctx) => {
 
     await saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`, meta);
 
-    const [relevantContext, memoryContext, recentMessages, dynProfile] = await Promise.all([
+    const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
       getRelevantContext(supabase, transcription),
       getMemoryContext(supabase),
       getRecentMessages(supabase),
       getDynamicProfile(),
+      classifyMessage(supabase, transcription, "user"),
     ]);
+
+    if (classification?.is_memorable) {
+      autoRemember(supabase, transcription, classification).catch(() => {});
+    }
 
     const enrichedPrompt = buildPrompt(
       `[Voice message transcribed]: ${transcription}`,

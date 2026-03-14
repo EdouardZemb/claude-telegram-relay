@@ -15,6 +15,10 @@ interface MockRpcHandlers {
   [name: string]: (params: any) => any;
 }
 
+interface MockFunctionHandlers {
+  [name: string]: (opts?: { body?: any }) => any;
+}
+
 function matchFilter(row: Row, filters: Filter[]): boolean {
   for (const f of filters) {
     switch (f.op) {
@@ -273,6 +277,7 @@ class MockQueryBuilder {
 export function createMockSupabase(initialData?: MockStore) {
   const store: MockStore = initialData ? JSON.parse(JSON.stringify(initialData)) : {};
   const rpcHandlers: MockRpcHandlers = {};
+  const functionHandlers: MockFunctionHandlers = {};
 
   const client = {
     from(table: string) {
@@ -289,6 +294,10 @@ export function createMockSupabase(initialData?: MockStore) {
 
     functions: {
       invoke(name: string, opts?: { body?: any }) {
+        const handler = functionHandlers[name];
+        if (handler) {
+          return Promise.resolve({ data: handler(opts), error: null });
+        }
         return Promise.resolve({ data: [], error: null });
       },
     },
@@ -300,6 +309,9 @@ export function createMockSupabase(initialData?: MockStore) {
     },
     _getTable(table: string): Row[] {
       return store[table] ?? [];
+    },
+    _registerFunction(name: string, handler: (opts?: { body?: any }) => any) {
+      functionHandlers[name] = handler;
     },
     _reset() {
       for (const key of Object.keys(store)) {

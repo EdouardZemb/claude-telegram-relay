@@ -13,6 +13,16 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** Classification result from the classify-thought Edge Function */
+export interface ThoughtClassification {
+  type: string;
+  topics: string[];
+  people: string[];
+  action_items: string[];
+  is_memorable: boolean;
+  summary: string;
+}
+
 /**
  * Parse Claude's response for memory intent tags.
  * Saves facts/goals to Supabase and returns the cleaned response.
@@ -173,5 +183,90 @@ export async function getRelevantContext(
   } catch {
     // Search not available yet (Edge Functions not deployed) — that's fine
     return "";
+  }
+}
+
+/**
+ * Classify a message via the classify-thought Edge Function.
+ * Returns structured metadata (type, topics, action_items, is_memorable).
+ * Fails silently if the Edge Function is not deployed.
+ */
+export async function classifyMessage(
+  supabase: SupabaseClient | null,
+  content: string,
+  role: string = "user"
+): Promise<ThoughtClassification | null> {
+  if (!supabase || !content) return null;
+
+  try {
+    const { data, error } = await supabase.functions.invoke("classify-thought", {
+      body: { content, role },
+    });
+
+    if (error || !data) return null;
+    return data as ThoughtClassification;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Auto-store a memorable message as a fact in the memory table.
+ * Called when classify-thought flags is_memorable=true.
+ * Stores the classification metadata in the metadata jsonb column.
+ */
+export async function autoRemember(
+  supabase: SupabaseClient | null,
+  content: string,
+  classification: ThoughtClassification
+): Promise<void> {
+  if (!supabase || !classification.is_memorable) return;
+
+  try {
+    const memoryContent = classification.summary || content;
+
+    const { error } = await supabase.from("memory").insert({
+      type: "fact",
+      content: memoryContent,
+      metadata: {
+        auto_classified: true,
+        thought_type: classification.type,
+        topics: classification.topics,
+        people: classification.people,
+        action_items: classification.action_items,
+        source: "auto-detect",
+      },
+    });
+
+    if (error) console.error("auto-remember insert error:", error);
+  } catch (error) {
+    console.error("auto-remember error:", error);
+  }
+}
+
+/**
+ * Archive old memories (completed goals > 90 days, stale facts > 90 days).
+ * Calls the archive_old_memories RPC.
+ */
+export async function archiveOldMemories(
+  supabase: SupabaseClient | null,
+  daysThreshold: number = 90
+): Promise<number> {
+  if (!supabase) return 0;
+
+  try {
+    const { data, error } = await supabase.rpc("archive_old_memories", {
+      days_threshold: daysThreshold,
+    });
+
+    if (error) {
+      console.error("archive memories error:", error);
+      return 0;
+    }
+
+    return data || 0;
+  } catch (error) {
+    console.error("archive memories error:", error);
+    return 0;
   }
 }
