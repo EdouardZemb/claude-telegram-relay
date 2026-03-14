@@ -32,6 +32,7 @@ import {
   formatSprintSummary,
 } from "./tasks.ts";
 import { executeTask, decomposeTask } from "./agent.ts";
+import { buildStoryFile, enrichTaskWithStory, formatStoryPreview } from "./story-files.ts";
 import {
   generatePRD,
   savePRD,
@@ -669,7 +670,7 @@ bot.command("help", async (ctx) => {
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
     "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
-    "  /autopipeline <id> [fast|full] -- Pipeline auto BMad complet",
+    "  /autopipeline <id> [full|fast] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
     "QUALITE & AMELIORATION",
@@ -1107,6 +1108,25 @@ bot.command("exec", async (ctx) => {
     }
   }
 
+  // Enrich task with story file (BMad structured specs)
+  if (supabase) {
+    const story = buildStoryFile(task);
+    const enriched = await enrichTaskWithStory(supabase, task.id, story);
+    if (enriched) {
+      // Reload task with persisted story data
+      const { data: refreshed } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("id", task.id)
+        .single();
+      if (refreshed) {
+        Object.assign(task, refreshed);
+      }
+      const preview = formatStoryPreview(story);
+      await ctx.reply(`Story file generee:\n${preview}`, threadOpts(ctx));
+    }
+  }
+
   await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, threadOpts(ctx));
 
   // Workflow tracking
@@ -1180,7 +1200,7 @@ bot.command("exec", async (ctx) => {
   }
 
   // Clear gate overrides after execution
-  clearGateOverrides(task.id);
+  await clearGateOverrides(supabase, task.id);
 });
 
 // /orchestrate — run a task through a multi-agent pipeline
@@ -1286,14 +1306,14 @@ bot.command("autopipeline", async (ctx) => {
   const args = ctx.match?.trim() || "";
   const parts = args.split(/\s+/);
   const idPrefix = parts[0];
-  const mode = parts[1] || "fast"; // "fast" (default) or "full" (with analysis)
+  const mode = parts[1] || "full"; // "full" (default, with analysis) or "fast" (skip analysis)
 
   if (!idPrefix) {
     await ctx.reply(
-      "Usage: /autopipeline <id> [fast|full]\n\n" +
+      "Usage: /autopipeline <id> [full|fast]\n\n" +
       "Modes:\n" +
-      "  fast — Gate -> Story -> Dev -> Review (defaut)\n" +
-      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review",
+      "  full — Gate -> Story -> Analyst+PM+Architect -> Dev -> Review (defaut)\n" +
+      "  fast — Gate -> Story -> Dev -> Review (sans analyse)",
       threadOpts(ctx)
     );
     return;
@@ -1383,11 +1403,26 @@ bot.command("plan", async (ctx) => {
       project: projectSlug,
       project_id: currentProject?.id,
     });
-    if (task) added.push(task);
+    if (task) {
+      // Persist acceptance criteria from decomposition
+      if (st.acceptance_criteria) {
+        await supabase.from("tasks").update({
+          acceptance_criteria: st.acceptance_criteria,
+        }).eq("id", task.id);
+        task.acceptance_criteria = st.acceptance_criteria;
+      }
+      // Generate and persist story file for each subtask
+      const story = buildStoryFile(task);
+      await enrichTaskWithStory(supabase, task.id, story);
+      added.push(task);
+    }
   }
 
-  const lines = added.map((t, i) => `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]`);
-  await sendResponse(ctx, `${added.length} taches ajoutees au backlog:\n\n${lines.join("\n")}\n\nUtilise /exec <id> pour lancer l'execution d'une tache.`);
+  const lines = added.map((t, i) => {
+    const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+    return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
+  });
+  await sendResponse(ctx, `${added.length} taches ajoutees au backlog avec story files:\n\n${lines.join("\n")}\n\nUtilise /exec <id> pour lancer l'execution d'une tache.`);
 });
 
 // /prd — generate a PRD from a description, or list existing PRDs
@@ -1614,21 +1649,9 @@ bot.on("callback_query:data", async (ctx) => {
     const action = parts[0]; // gate_override or gate_cancel
     const taskId = parts[1];
 
-    if (action === "gate_override" && taskId) {
+    if (action === "gate_override" && taskId && supabase) {
       const gateName = parts.slice(2).join(":"); // gate name may contain colons
-      overrideGate(taskId, gateName);
-
-      // Audit trail: log gate override
-      if (supabase) {
-        await supabase.from("workflow_audit").insert({
-          task_id: taskId,
-          action: "gate_override",
-          field: gateName,
-          from_value: "blocked",
-          to_value: "overridden",
-          reason: `User override via Telegram button`,
-        }).catch(() => {});
-      }
+      await overrideGate(supabase, taskId, gateName);
 
       await ctx.answerCallbackQuery({ text: "Gate bypassed." });
       await ctx.editMessageText(

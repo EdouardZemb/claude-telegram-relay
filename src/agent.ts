@@ -365,7 +365,7 @@ function buildAgentPrompt(task: Task): string {
  */
 export async function decomposeTask(
   request: string
-): Promise<Array<{ title: string; description: string; priority: number }>> {
+): Promise<Array<{ title: string; description: string; priority: number; acceptance_criteria?: string }>> {
   const taskPrompt = [
     "Decompose cette demande en sous-taches techniques concretes.",
     "Chaque tache doit etre independante et realisable par un agent Claude Code.",
@@ -376,9 +376,10 @@ export async function decomposeTask(
     '  title: string (court, imperatif, ex: "Ajouter la route /api/tasks")',
     '  description: string (1-2 phrases de contexte technique)',
     "  priority: number (1=critique, 2=important, 3=normal)",
+    '  acceptance_criteria: string (criteres d\'acceptation au format Given/When/Then, separes par des retours a la ligne)',
     "",
     "Exemple de reponse:",
-    '[{"title": "Creer le composant Button", "description": "Composant React reutilisable avec variantes primary/secondary.", "priority": 2}]',
+    '[{"title": "Creer le composant Button", "description": "Composant React reutilisable avec variantes primary/secondary.", "priority": 2, "acceptance_criteria": "Given le composant Button existe\\nWhen l\'utilisateur clique dessus\\nThen l\'action onClick est declenchee"}]',
     "",
     "JSON:",
   ].join("\n");

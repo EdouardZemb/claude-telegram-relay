@@ -84,20 +84,46 @@ describe("Gate 1 — PRD", () => {
 });
 
 describe("Gate 2 — Architecture", () => {
-  it("passes when task has sufficient description", async () => {
-    const supabase = createMockSupabase();
+  it("passes when task has acceptance_criteria", async () => {
+    const supabase = createMockSupabase({
+      tasks: [
+        { id: "t1", title: "Implement feature", acceptance_criteria: "Given a user\nWhen they login\nThen they see the dashboard" },
+      ],
+    });
 
     const result = await checkGate2_Architecture(supabase, {
       id: "t1",
       title: "Implement feature",
-      description: "Create a new REST endpoint /api/projects with CRUD operations and proper validation",
+      description: null,
     });
 
     expect(result.passed).toBe(true);
+    expect(result.reason).toContain("acceptance criteria");
   });
 
-  it("fails when task has no description", async () => {
-    const supabase = createMockSupabase();
+  it("passes when task has architecture_ref", async () => {
+    const supabase = createMockSupabase({
+      tasks: [
+        { id: "t1", title: "Implement feature", architecture_ref: "REST endpoint with CRUD" },
+      ],
+    });
+
+    const result = await checkGate2_Architecture(supabase, {
+      id: "t1",
+      title: "Implement feature",
+      description: null,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.reason).toContain("architecture ref");
+  });
+
+  it("fails when task has no BMad artefacts", async () => {
+    const supabase = createMockSupabase({
+      tasks: [
+        { id: "t1", title: "Do something" },
+      ],
+    });
 
     const result = await checkGate2_Architecture(supabase, {
       id: "t1",
@@ -107,18 +133,40 @@ describe("Gate 2 — Architecture", () => {
 
     expect(result.passed).toBe(false);
     expect(result.overridable).toBe(true);
+    expect(result.reason).toContain("acceptance criteria");
   });
 
-  it("fails when description is too short", async () => {
-    const supabase = createMockSupabase();
+  it("fails when task only has description (no BMad artefacts)", async () => {
+    const supabase = createMockSupabase({
+      tasks: [
+        { id: "t1", title: "Task", description: "Some long description that would have passed before" },
+      ],
+    });
 
     const result = await checkGate2_Architecture(supabase, {
       id: "t1",
       title: "Task",
-      description: "Fix bug",
+      description: "Some long description that would have passed before",
     });
 
     expect(result.passed).toBe(false);
+  });
+
+  it("includes subtask count in reason when present", async () => {
+    const supabase = createMockSupabase({
+      tasks: [
+        { id: "t1", title: "Task", acceptance_criteria: "Given/When/Then", subtasks: ["step1", "step2", "step3"] },
+      ],
+    });
+
+    const result = await checkGate2_Architecture(supabase, {
+      id: "t1",
+      title: "Task",
+      description: null,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.reason).toContain("3 subtasks");
   });
 });
 
@@ -126,6 +174,7 @@ describe("checkAllGates", () => {
   it("returns null when all gates pass", async () => {
     const supabase = createMockSupabase({
       prds: [{ id: "prd-1", title: "PRD", project: "my-app", status: "approved" }],
+      tasks: [{ id: "t1", title: "Task", acceptance_criteria: "Given/When/Then criteria" }],
     });
 
     const result = await checkAllGates(supabase, {
@@ -156,23 +205,30 @@ describe("checkAllGates", () => {
 });
 
 describe("Gate Overrides", () => {
-  it("overrideGate marks a gate as overridden", () => {
-    overrideGate("task-1", "GATE 1 — PRD");
-    expect(isGateOverridden("task-1", "GATE 1 — PRD")).toBe(true);
-    expect(isGateOverridden("task-1", "GATE 2 — Architecture")).toBe(false);
-    clearGateOverrides("task-1");
+  it("overrideGate marks a gate as overridden (persisted)", async () => {
+    const supabase = createMockSupabase();
+
+    await overrideGate(supabase, "task-1", "GATE 1 — PRD");
+    expect(await isGateOverridden(supabase, "task-1", "GATE 1 — PRD")).toBe(true);
+    expect(await isGateOverridden(supabase, "task-1", "GATE 2 — Architecture")).toBe(false);
+    await clearGateOverrides(supabase, "task-1");
   });
 
-  it("clearGateOverrides removes all overrides for a task", () => {
-    overrideGate("task-2", "GATE 1 — PRD");
-    overrideGate("task-2", "GATE 2 — Architecture");
-    clearGateOverrides("task-2");
-    expect(isGateOverridden("task-2", "GATE 1 — PRD")).toBe(false);
-    expect(isGateOverridden("task-2", "GATE 2 — Architecture")).toBe(false);
+  it("clearGateOverrides marks overrides as consumed", async () => {
+    const supabase = createMockSupabase();
+
+    await overrideGate(supabase, "task-2", "GATE 1 — PRD");
+    await overrideGate(supabase, "task-2", "GATE 2 — Architecture");
+    await clearGateOverrides(supabase, "task-2");
+    expect(await isGateOverridden(supabase, "task-2", "GATE 1 — PRD")).toBe(false);
+    expect(await isGateOverridden(supabase, "task-2", "GATE 2 — Architecture")).toBe(false);
   });
 
   it("checkGatesWithOverrides skips overridden gates", async () => {
-    const supabase = createMockSupabase({ prds: [] });
+    const supabase = createMockSupabase({
+      prds: [],
+      tasks: [{ id: "task-3", title: "Task", acceptance_criteria: "Given/When/Then" }],
+    });
 
     const task = {
       id: "task-3",
@@ -188,12 +244,12 @@ describe("Gate Overrides", () => {
     expect(result1!.gate).toContain("PRD");
 
     // Override gate 1
-    overrideGate("task-3", result1!.gate);
+    await overrideGate(supabase, "task-3", result1!.gate);
 
-    // Now gate 1 is skipped, should pass (description is sufficient)
+    // Now gate 1 is skipped, should pass (task has acceptance_criteria)
     const result2 = await checkGatesWithOverrides(supabase, task);
     expect(result2).toBeNull();
 
-    clearGateOverrides("task-3");
+    await clearGateOverrides(supabase, "task-3");
   });
 });
