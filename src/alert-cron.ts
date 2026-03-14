@@ -11,6 +11,7 @@ import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import { runAllChecks, formatAlerts } from "./alerts.ts";
 import { getCurrentSprint } from "./tasks.ts";
+import { archiveOldMemories } from "./memory.ts";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || "";
@@ -61,6 +62,12 @@ async function main(): Promise<void> {
   console.log(`[${new Date().toISOString()}] ${alerts.length} alert(s) detected.`);
   const message = `[Alerte automatique]\n\n${formatAlerts(alerts)}`;
   await sendTelegram(message);
+
+  // Archive old memories (>90 days)
+  const archived = await archiveOldMemories(supabase);
+  if (archived > 0) {
+    console.log(`[${new Date().toISOString()}] Archived ${archived} old memories.`);
+  }
 }
 
 main().catch((err) => {

@@ -343,6 +343,26 @@ CREATE TABLE IF NOT EXISTS workflow_audit (
 );
 
 -- ============================================================
+-- MEMORY ARCHIVE TABLE (Old memories for retention management)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_archive (
+  id UUID PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL,
+  archived_at TIMESTAMPTZ DEFAULT NOW(),
+  type TEXT NOT NULL,
+  content TEXT NOT NULL,
+  deadline TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  priority INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}'
+);
+
+COMMENT ON TABLE memory_archive IS 'Archived memory entries older than retention threshold. No embeddings to save storage.';
+
+CREATE INDEX IF NOT EXISTS idx_memory_archive_type ON memory_archive(type);
+CREATE INDEX IF NOT EXISTS idx_memory_archive_archived_at ON memory_archive(archived_at DESC);
+
+-- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
@@ -358,6 +378,7 @@ ALTER TABLE feedback_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_shards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memory_archive ENABLE ROW LEVEL SECURITY;
 
 -- Project-scoped RLS helper function
 CREATE OR REPLACE FUNCTION current_project_id()
@@ -437,6 +458,9 @@ CREATE POLICY "Allow all for authenticated" ON workflow_proposals FOR ALL USING 
 
 -- Workflow audit: full access
 CREATE POLICY "Allow all for authenticated" ON workflow_audit FOR ALL USING (true);
+
+-- Memory archive: full access
+CREATE POLICY "Allow all for authenticated" ON memory_archive FOR ALL USING (true);
 
 -- ============================================================
 -- HELPER FUNCTIONS (RPCs)
@@ -571,5 +595,33 @@ BEGIN
     AND 1 - (m.embedding <=> query_embedding) > match_threshold
   ORDER BY m.embedding <=> query_embedding
   LIMIT match_count;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+-- ============================================================
+-- MEMORY ARCHIVE RPC
+-- ============================================================
+-- Archive old completed goals and stale facts.
+-- Moves rows from memory to memory_archive (without embeddings).
+CREATE OR REPLACE FUNCTION archive_old_memories(days_threshold INTEGER DEFAULT 90)
+RETURNS INTEGER AS $$
+DECLARE
+  archived_count INTEGER;
+BEGIN
+  WITH moved AS (
+    DELETE FROM public.memory
+    WHERE (
+      (type = 'completed_goal' AND completed_at < NOW() - (days_threshold || ' days')::INTERVAL)
+      OR
+      (type = 'fact' AND updated_at < NOW() - (days_threshold || ' days')::INTERVAL)
+    )
+    RETURNING id, created_at, type, content, deadline, completed_at, priority, metadata
+  )
+  INSERT INTO public.memory_archive (id, created_at, type, content, deadline, completed_at, priority, metadata)
+  SELECT id, created_at, type, content, deadline, completed_at, priority, metadata
+  FROM moved;
+
+  GET DIAGNOSTICS archived_count = ROW_COUNT;
+  RETURN archived_count;
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
