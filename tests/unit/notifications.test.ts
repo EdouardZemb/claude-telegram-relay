@@ -7,12 +7,14 @@
  */
 
 import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
-import {
-  initNotifications,
-  notifyPRCreated,
-  notifyTaskStarted,
-  notifyTaskDone,
-} from "../../src/notifications";
+
+// Set env vars BEFORE importing the module (they are read at load time)
+process.env.TELEGRAM_GROUP_ID = "123456";
+process.env.DEV_THREAD_ID = "100";
+process.env.SPRINT_THREAD_ID = "200";
+
+// Force re-import with env vars set
+const { initNotifications, notifyPRCreated, notifyTaskStarted, notifyTaskDone } = await import("../../src/notifications");
 
 function createMockBot(shouldFail = false) {
   return {
