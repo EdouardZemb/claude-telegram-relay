@@ -55,5 +55,17 @@ module.exports = {
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
     },
+    {
+      name: "claude-autonomy-cron",
+      script: "bun",
+      args: "run src/autonomy-cron.ts",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: false,
+      cron_restart: "0 8 * * *",
+      error_file: "/home/edouard/.claude-relay/logs/autonomy-cron-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/autonomy-cron-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
   ],
 };
