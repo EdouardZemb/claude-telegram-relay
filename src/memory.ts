@@ -9,10 +9,83 @@
  *
  * The relay parses these tags, saves to Supabase, and strips them
  * from the response before sending to the user.
+ *
+ * S23: Importance scoring with temporal decay. Memories have an
+ * importance_score (0-100) that decays exponentially over time
+ * and is boosted when accessed. getMemoryContext returns top-ranked
+ * memories instead of all.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyIdeaCreated } from "./notifications.ts";
+
+// ── Memory Importance & Decay (S23-02) ───────────────────────
+
+/** Half-life in days for exponential decay */
+const DECAY_HALF_LIFE_DAYS = 70;
+
+/** Max facts injected into prompt context */
+const MAX_FACTS_IN_CONTEXT = 20;
+
+/** Max goals injected into prompt context */
+const MAX_GOALS_IN_CONTEXT = 10;
+
+/**
+ * Calculate the effective importance of a memory, applying temporal decay.
+ *
+ * Formula: effective = base_score * 2^(-age_days / half_life)
+ * A memory with score 50 at 70 days old → effective 25.
+ * Access boosts: each access adds +2 to effective (capped at base_score).
+ */
+export function calculateEffectiveImportance(
+  baseScore: number,
+  createdAt: string | Date,
+  lastAccessedAt: string | Date | null,
+  accessCount: number = 0,
+  referenceDate: Date = new Date()
+): number {
+  const created = new Date(createdAt);
+  const ageDays = (referenceDate.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
+
+  // Exponential decay
+  const decayFactor = Math.pow(2, -ageDays / DECAY_HALF_LIFE_DAYS);
+  let effective = baseScore * decayFactor;
+
+  // Access boost: +2 per access, capped at base score
+  const accessBoost = Math.min(accessCount * 2, baseScore * 0.5);
+  effective += accessBoost;
+
+  // Recency boost: if accessed in last 7 days, small bonus
+  if (lastAccessedAt) {
+    const lastAccess = new Date(lastAccessedAt);
+    const daysSinceAccess = (referenceDate.getTime() - lastAccess.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceAccess < 7) {
+      effective += 5 * (1 - daysSinceAccess / 7);
+    }
+  }
+
+  return Math.max(0, Math.min(100, Math.round(effective * 100) / 100));
+}
+
+/**
+ * Bump access stats for memories used in context.
+ * Called after getMemoryContext to track which memories were served.
+ */
+export async function bumpMemoryAccess(
+  supabase: SupabaseClient | null,
+  memoryIds: string[]
+): Promise<void> {
+  if (!supabase || memoryIds.length === 0) return;
+
+  try {
+    const { error } = await supabase.rpc("bump_memory_access", {
+      memory_ids: memoryIds,
+    });
+    if (error) console.error("bump_memory_access error:", error);
+  } catch (error) {
+    console.error("bump_memory_access error:", error);
+  }
+}
 
 /** Classification result from the classify-thought Edge Function */
 export interface ThoughtClassification {
@@ -106,7 +179,9 @@ export async function processMemoryIntents(
 }
 
 /**
- * Get all facts and active goals for prompt context.
+ * Get top-ranked facts and active goals for prompt context.
+ * S23-03: Ranked by importance score (DB-side), limited to top N.
+ * Bumps access stats for served memories.
  */
 export async function getMemoryContext(
   supabase: SupabaseClient | null
@@ -120,18 +195,24 @@ export async function getMemoryContext(
     ]);
 
     const parts: string[] = [];
+    const servedIds: string[] = [];
 
     if (factsResult.data?.length) {
+      // Take top N facts (already ordered by importance_score DESC from DB)
+      const topFacts = factsResult.data.slice(0, MAX_FACTS_IN_CONTEXT);
       parts.push(
         "FACTS:\n" +
-          factsResult.data.map((f: any) => `- ${f.content}`).join("\n")
+          topFacts.map((f: any) => `- ${f.content}`).join("\n")
       );
+      servedIds.push(...topFacts.map((f: any) => f.id).filter(Boolean));
     }
 
     if (goalsResult.data?.length) {
+      // Take top N goals (already ordered by importance_score DESC from DB)
+      const topGoals = goalsResult.data.slice(0, MAX_GOALS_IN_CONTEXT);
       parts.push(
         "GOALS:\n" +
-          goalsResult.data
+          topGoals
             .map((g: any) => {
               const deadline = g.deadline
                 ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
@@ -140,6 +221,12 @@ export async function getMemoryContext(
             })
             .join("\n")
       );
+      servedIds.push(...topGoals.map((g: any) => g.id).filter(Boolean));
+    }
+
+    // Bump access stats asynchronously (fire and forget)
+    if (servedIds.length > 0) {
+      bumpMemoryAccess(supabase, servedIds).catch(() => {});
     }
 
     return parts.join("\n\n");
@@ -336,6 +423,62 @@ export async function findDuplicateIdea(
     // Search not available — skip deduplication, allow insert
     return null;
   }
+}
+
+// ── Contradiction Detection (S23-04) ─────────────────────────
+
+/**
+ * Check if a new fact contradicts existing facts using semantic search.
+ * Looks for highly similar facts (>0.80) and flags potential contradictions.
+ * Returns the conflicting memory content if found, null otherwise.
+ */
+export async function findContradiction(
+  supabase: SupabaseClient | null,
+  content: string,
+  threshold: number = 0.80
+): Promise<{ id: string; content: string; similarity: number } | null> {
+  if (!supabase || !content) return null;
+
+  try {
+    const { data, error } = await supabase.functions.invoke("search", {
+      body: { query: content, table: "memory", match_count: 3, match_threshold: threshold },
+    });
+
+    if (error || !data?.length) return null;
+
+    // Look for facts that are semantically very similar but might contradict
+    // (same topic, different assertion)
+    const match = data.find(
+      (m: any) => m.type === "fact" && m.similarity >= threshold
+    );
+    return match ? { id: match.id, content: match.content, similarity: match.similarity } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect contradictions when inserting a new fact.
+ * If a very similar fact exists, log a warning and add contradiction metadata.
+ * Returns the contradiction info or null.
+ */
+export async function detectAndLogContradiction(
+  supabase: SupabaseClient | null,
+  newContent: string
+): Promise<{ existingContent: string; similarity: number } | null> {
+  if (!supabase) return null;
+
+  const contradiction = await findContradiction(supabase, newContent);
+  if (!contradiction) return null;
+
+  console.log(
+    `Potential contradiction detected: "${newContent}" vs existing "${contradiction.content}" (similarity: ${contradiction.similarity})`
+  );
+
+  return {
+    existingContent: contradiction.content,
+    similarity: contradiction.similarity,
+  };
 }
 
 // ── Ideas CRUD (S21-05) ─────────────────────────────────────

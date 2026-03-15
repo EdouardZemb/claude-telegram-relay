@@ -31,6 +31,7 @@ import {
   buildStructuredOutputInstructions,
   buildStructuredChainContext,
 } from "./agent-schemas.ts";
+import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -48,6 +49,9 @@ export interface AgentStepResult {
   error?: string;
   durationMs: number;
   retryCount?: number;
+  tokensInput?: number;
+  tokensOutput?: number;
+  costUsd?: number;
 }
 
 export interface OrchestratedResult {
@@ -149,6 +153,9 @@ async function runAgentStep(
     // Parse structured output (S22-02)
     const structured = success ? parseAgentOutput(rawOutput, agentId) : null;
 
+    // Parse token usage (S23-05)
+    const usage = parseTokenUsage(rawOutput, prompt.length);
+
     return {
       agentId,
       agentName,
@@ -157,6 +164,9 @@ async function runAgentStep(
       structured,
       error: exitCode !== 0 ? stderr.trim() : undefined,
       durationMs: Date.now() - startTime,
+      tokensInput: usage.tokensInput,
+      tokensOutput: usage.tokensOutput,
+      costUsd: usage.costUsd,
     };
   } catch (error) {
     return {
@@ -443,6 +453,22 @@ export async function orchestrate(
       await persistAgentArtifact(supabase, task.id, agentId, result!.output);
     }
 
+    // Log cost (S23-05)
+    if (supabase && result!.tokensInput) {
+      logCost(supabase, {
+        taskId: task.id,
+        sprintId: task.sprint || undefined,
+        agentRole: agentId,
+        agentName: result!.agentName,
+        tokensInput: result!.tokensInput || 0,
+        tokensOutput: result!.tokensOutput || 0,
+        costUsd: result!.costUsd || 0,
+        durationMs: result!.durationMs,
+        retryAttempt: retryCount,
+        context: "orchestration",
+      }).catch(() => {});
+    }
+
     if (options.onProgress) {
       const status = result!.success ? "OK" : "ECHEC";
       const duration = Math.round(result!.durationMs / 1000);
@@ -511,6 +537,12 @@ function buildOrchestrationSummary(
   if (structuredCount > 0) {
     lines.push(`Sorties structurees: ${structuredCount}/${steps.length}`);
   }
+
+  const totalCost = steps.reduce((sum, s) => sum + (s.costUsd || 0), 0);
+  const totalTokens = steps.reduce((sum, s) => sum + (s.tokensInput || 0) + (s.tokensOutput || 0), 0);
+  if (totalTokens > 0) {
+    lines.push(`Tokens: ~${totalTokens} (~$${totalCost.toFixed(4)})`);
+  }
   lines.push("");
 
   for (const step of steps) {
@@ -556,9 +588,13 @@ async function logOrchestrationResult(
         outputLength: s.output.length,
         hasStructuredOutput: s.structured !== null,
         retryCount: s.retryCount || 0,
+        tokensInput: s.tokensInput || 0,
+        tokensOutput: s.tokensOutput || 0,
+        costUsd: s.costUsd || 0,
       })),
       totalDurationMs,
       totalRetries,
+      totalCost: steps.reduce((sum, s) => sum + (s.costUsd || 0), 0),
       allPassed: steps.every((s) => s.success),
     },
   });
@@ -661,6 +697,11 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
   if (totalRetries > 0) {
     lines.push(`Retries: ${totalRetries}`);
   }
+
+  const totalCost = result.steps.reduce((sum, s) => sum + (s.costUsd || 0), 0);
+  if (totalCost > 0) {
+    lines.push(`Cout: ~$${totalCost.toFixed(4)}`);
+  }
   lines.push("");
 
   for (const step of result.steps) {
@@ -670,7 +711,8 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     const duration = Math.round(step.durationMs / 1000);
     const structuredTag = step.structured ? " [JSON]" : "";
     const retryTag = step.retryCount ? ` (${step.retryCount} retries)` : "";
-    lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}`);
+    const costTag = step.costUsd ? ` ~$${step.costUsd.toFixed(4)}` : "";
+    lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}${costTag}`);
   }
 
   // Add last agent's output as the main result

@@ -139,6 +139,38 @@ export function getCheckpointConfig(stepId: string): CheckpointConfig {
   return step?.checkpoint ?? { enabled: false, mode: "off" };
 }
 
+// ── Retry Policy (S23-09) ────────────────────────────────────
+
+/**
+ * Get the max retries allowed for a given step based on its checkpoint mode.
+ * Uses the checkpoint_modes config from workflow.yaml.
+ *   off → 0 retries
+ *   light → max_retries from config (default 1)
+ *   strict → max_retries from config (default 3)
+ */
+export function getRetryPolicy(stepId: string): { maxRetries: number; mode: string } {
+  const checkpoint = getCheckpointConfig(stepId);
+  const config = loadWorkflowConfig();
+  const modeConfig = config.checkpoint_modes[checkpoint.mode];
+
+  if (!modeConfig || checkpoint.mode === "off") {
+    return { maxRetries: 0, mode: checkpoint.mode };
+  }
+
+  return {
+    maxRetries: modeConfig.max_retries ?? (checkpoint.mode === "strict" ? 3 : 1),
+    mode: checkpoint.mode,
+  };
+}
+
+/**
+ * Get retry policy for the execution step (used by orchestrator).
+ * Returns the max retries from the workflow config.
+ */
+export function getExecutionRetryPolicy(): number {
+  return getRetryPolicy("execution").maxRetries;
+}
+
 // ── Workflow Tracker ─────────────────────────────────────────
 
 export class WorkflowTracker {
@@ -163,6 +195,11 @@ export class WorkflowTracker {
     return this.currentStep;
   }
 
+  /**
+   * Transition to a new step.
+   * S23-08: Validates transitions against workflow.yaml when enforce=true.
+   * Orchestration steps (orchestration_*) bypass validation.
+   */
   async transition(
     toStep: string,
     opts?: {
@@ -170,8 +207,22 @@ export class WorkflowTracker {
       checkpoint_result?: "pass" | "fail" | "skipped" | "corrected";
       checkpoint_notes?: string;
       agent_notes?: string;
+      enforce?: boolean;
     }
   ): Promise<boolean> {
+    // S23-08: Enforce valid transitions (skip for orchestration internal steps)
+    const isOrchestrationStep =
+      this.currentStep.startsWith("orchestration_") || toStep.startsWith("orchestration_");
+    if (opts?.enforce && !isOrchestrationStep) {
+      if (!canTransition(this.currentStep, toStep)) {
+        const valid = getValidTransitions(this.currentStep).map((t) => t.to);
+        console.error(
+          `Invalid workflow transition: ${this.currentStep} -> ${toStep}. Valid: ${valid.join(", ")}`
+        );
+        return false;
+      }
+    }
+
     const checkpoint = getCheckpointConfig(this.currentStep);
     const durationSeconds = Math.round((Date.now() - this.stepStartedAt) / 1000);
 
@@ -273,6 +324,20 @@ export async function collectSprintMetrics(
       ? (firstPassTasks.length / reviewedTasks.size) * 100
       : null;
 
+  // Aggregate cost data (S23-06)
+  const { data: costData } = await supabase
+    .from("cost_tracking")
+    .select("tokens_input, tokens_output, cost_usd")
+    .eq("sprint_id", sprintId);
+
+  let totalTokens = 0;
+  let totalCostUsd = 0;
+  const agentExecutions = costData?.length ?? 0;
+  for (const row of costData ?? []) {
+    totalTokens += (row.tokens_input || 0) + (row.tokens_output || 0);
+    totalCostUsd += Number(row.cost_usd) || 0;
+  }
+
   // Upsert metrics
   const { error: upsertError } = await supabase
     .from("sprint_metrics")
@@ -285,6 +350,9 @@ export async function collectSprintMetrics(
         first_pass_rate: firstPassRate ? Math.round(firstPassRate * 100) / 100 : null,
         rework_count: reworkCount,
         sprint_ended_at: new Date().toISOString(),
+        total_tokens: totalTokens,
+        total_cost_usd: Math.round(totalCostUsd * 10000) / 10000,
+        agent_executions: agentExecutions,
       },
       { onConflict: "sprint_id" }
     );
@@ -345,6 +413,13 @@ export function formatMetrics(metrics: any): string {
   }
   if (metrics.incidents_count > 0) {
     lines.push(`Incidents: ${metrics.incidents_count}`);
+  }
+
+  if (metrics.total_tokens > 0 || metrics.total_cost_usd > 0) {
+    lines.push(`Tokens: ${metrics.total_tokens || 0} (~$${(metrics.total_cost_usd || 0).toFixed(4)})`);
+    if (metrics.agent_executions > 0) {
+      lines.push(`Executions agent: ${metrics.agent_executions}`);
+    }
   }
 
   if (metrics.sprint_ended_at) {

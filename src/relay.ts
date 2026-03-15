@@ -111,6 +111,11 @@ import {
   formatPipelineResult,
 } from "./auto-pipeline.ts";
 import {
+  getSprintCostSummary,
+  getTotalCost,
+  formatCostSummary,
+} from "./cost-tracking.ts";
+import {
   loadFeedbackRules,
   processRetroFeedback,
 } from "./feedback-loop.ts";
@@ -1838,6 +1843,36 @@ bot.command("alerts", async (ctx) => {
   await ctx.replyWithChatAction("typing");
   const alerts = await runAllChecks(supabase, sprintId);
   await sendResponse(ctx, formatAlerts(alerts));
+});
+
+// /cost — token usage and cost tracking (S23-07)
+bot.command("cost", async (ctx) => {
+  const blocked = commandGuard(ctx, "cost");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+
+  if (arg === "total" || arg === "all") {
+    const total = await getTotalCost(supabase);
+    await sendResponse(ctx,
+      `Couts totaux\n\nTokens: ${total.totalTokens}\nCout estime: $${total.totalCostUsd.toFixed(4)}\nExecutions: ${total.executions}`
+    );
+    return;
+  }
+
+  const sprintId = arg || await getCurrentSprint(supabase);
+  if (!sprintId) {
+    await ctx.reply("Aucun sprint actif. Usage: /cost S22 ou /cost total", threadOpts(ctx));
+    return;
+  }
+
+  await ctx.replyWithChatAction("typing");
+  const summary = await getSprintCostSummary(supabase, sprintId);
+  await sendResponse(ctx, formatCostSummary(summary));
 });
 
 // /planify — proactive backlog analysis with recommendations

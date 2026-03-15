@@ -64,14 +64,23 @@ CREATE TABLE IF NOT EXISTS memory (
   deadline TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   priority INTEGER DEFAULT 0,
+  importance_score NUMERIC DEFAULT 50,
+  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
+  access_count INTEGER DEFAULT 0,
   idea_status TEXT CHECK (idea_status IS NULL OR idea_status IN ('new', 'reviewed', 'promoted', 'archived')),
   metadata JSONB DEFAULT '{}',
   embedding VECTOR(1536)
 );
 
+COMMENT ON COLUMN memory.importance_score IS 'Importance score 0-100, decays over time, boosted by access';
+COMMENT ON COLUMN memory.last_accessed_at IS 'Last time this memory was accessed/used in context';
+COMMENT ON COLUMN memory.access_count IS 'Number of times this memory was accessed/used';
+
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory(type);
 CREATE INDEX IF NOT EXISTS idx_memory_created_at ON memory(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_idea_status ON memory(idea_status) WHERE idea_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory(importance_score DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_last_accessed ON memory(last_accessed_at DESC);
 
 COMMENT ON COLUMN memory.idea_status IS 'Lifecycle status for idea-type memories: new → reviewed → promoted → archived';
 
@@ -238,6 +247,9 @@ CREATE TABLE IF NOT EXISTS sprint_metrics (
   retro_actions_accepted INTEGER NOT NULL DEFAULT 0,
   sprint_started_at TIMESTAMPTZ,
   sprint_ended_at TIMESTAMPTZ,
+  total_tokens INTEGER DEFAULT 0,
+  total_cost_usd NUMERIC DEFAULT 0,
+  agent_executions INTEGER DEFAULT 0,
   project_id UUID REFERENCES projects(id)
 );
 
@@ -333,6 +345,34 @@ CREATE INDEX IF NOT EXISTS idx_workflow_proposals_status ON workflow_proposals(s
 CREATE INDEX IF NOT EXISTS idx_workflow_proposals_target ON workflow_proposals(target);
 
 -- ============================================================
+-- COST TRACKING TABLE (Token usage & budget visibility)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cost_tracking (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  task_id UUID REFERENCES tasks(id),
+  sprint_id TEXT,
+  agent_role TEXT,
+  agent_name TEXT,
+  tokens_input INTEGER DEFAULT 0,
+  tokens_output INTEGER DEFAULT 0,
+  tokens_total INTEGER GENERATED ALWAYS AS (tokens_input + tokens_output) STORED,
+  cost_usd NUMERIC DEFAULT 0,
+  duration_ms INTEGER DEFAULT 0,
+  retry_attempt INTEGER DEFAULT 0,
+  context TEXT,
+  metadata JSONB DEFAULT '{}',
+  project_id UUID REFERENCES projects(id)
+);
+
+COMMENT ON TABLE cost_tracking IS 'Tracks token usage and cost per agent execution for budget visibility';
+
+CREATE INDEX IF NOT EXISTS idx_cost_tracking_task ON cost_tracking(task_id);
+CREATE INDEX IF NOT EXISTS idx_cost_tracking_sprint ON cost_tracking(sprint_id);
+CREATE INDEX IF NOT EXISTS idx_cost_tracking_created ON cost_tracking(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cost_tracking_project_id ON cost_tracking(project_id);
+
+-- ============================================================
 -- WORKFLOW AUDIT TABLE (Configuration change tracking)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_audit (
@@ -358,6 +398,9 @@ CREATE TABLE IF NOT EXISTS memory_archive (
   deadline TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   priority INTEGER DEFAULT 0,
+  importance_score NUMERIC DEFAULT 50,
+  last_accessed_at TIMESTAMPTZ,
+  access_count INTEGER DEFAULT 0,
   metadata JSONB DEFAULT '{}'
 );
 
@@ -382,6 +425,7 @@ ALTER TABLE feedback_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_shards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cost_tracking ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_archive ENABLE ROW LEVEL SECURITY;
 
 -- Project-scoped RLS helper function
@@ -463,6 +507,9 @@ CREATE POLICY "Allow all for authenticated" ON workflow_proposals FOR ALL USING 
 -- Workflow audit: full access
 CREATE POLICY "Allow all for authenticated" ON workflow_audit FOR ALL USING (true);
 
+-- Cost tracking: full access
+CREATE POLICY "Allow all for authenticated" ON cost_tracking FOR ALL USING (true);
+
 -- Memory archive: full access
 CREATE POLICY "Allow all for authenticated" ON memory_archive FOR ALL USING (true);
 
@@ -487,35 +534,51 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
 
--- Get active goals
+-- Get active goals (ranked by importance)
 CREATE OR REPLACE FUNCTION get_active_goals()
 RETURNS TABLE (
   id UUID,
   content TEXT,
   deadline TIMESTAMPTZ,
-  priority INTEGER
+  priority INTEGER,
+  importance_score NUMERIC
 ) AS $$
 BEGIN
   RETURN QUERY
-  SELECT m.id, m.content, m.deadline, m.priority
+  SELECT m.id, m.content, m.deadline, m.priority, m.importance_score
   FROM public.memory m
   WHERE m.type = 'goal'
-  ORDER BY m.priority DESC, m.created_at DESC;
+  ORDER BY m.importance_score DESC, m.priority DESC, m.created_at DESC;
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
 
--- Get all facts
+-- Get all facts (ranked by importance)
 CREATE OR REPLACE FUNCTION get_facts()
 RETURNS TABLE (
   id UUID,
-  content TEXT
+  content TEXT,
+  importance_score NUMERIC,
+  access_count INTEGER
 ) AS $$
 BEGIN
   RETURN QUERY
-  SELECT m.id, m.content
+  SELECT m.id, m.content, m.importance_score, m.access_count
   FROM public.memory m
   WHERE m.type = 'fact'
-  ORDER BY m.created_at DESC;
+  ORDER BY m.importance_score DESC, m.created_at DESC;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+-- Bump access stats when memories are used in context
+CREATE OR REPLACE FUNCTION bump_memory_access(memory_ids UUID[])
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.memory
+  SET
+    last_accessed_at = NOW(),
+    access_count = access_count + 1,
+    updated_at = NOW()
+  WHERE id = ANY(memory_ids);
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
 
@@ -619,10 +682,10 @@ BEGIN
       OR
       (type = 'fact' AND updated_at < NOW() - (days_threshold || ' days')::INTERVAL)
     )
-    RETURNING id, created_at, type, content, deadline, completed_at, priority, metadata
+    RETURNING id, created_at, type, content, deadline, completed_at, priority, metadata, importance_score, last_accessed_at, access_count
   )
-  INSERT INTO public.memory_archive (id, created_at, type, content, deadline, completed_at, priority, metadata)
-  SELECT id, created_at, type, content, deadline, completed_at, priority, metadata
+  INSERT INTO public.memory_archive (id, created_at, type, content, deadline, completed_at, priority, metadata, importance_score, last_accessed_at, access_count)
+  SELECT id, created_at, type, content, deadline, completed_at, priority, metadata, importance_score, last_accessed_at, access_count
   FROM moved;
 
   GET DIAGNOSTICS archived_count = ROW_COUNT;
