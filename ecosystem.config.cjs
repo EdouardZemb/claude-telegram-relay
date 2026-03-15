@@ -66,6 +66,9 @@ module.exports = {
       out_file: "/home/edouard/.claude-relay/logs/autonomy-cron-out.log",
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
+      env: {
+        AUTONOMY_EXEC: "1",
+      },
     },
   ],
 };

@@ -1,12 +1,14 @@
 /**
- * Autonomy Cron — Proactive Task Creation
+ * Autonomy Cron — Proactive Task Creation & Execution
  *
  * Standalone script that runs periodically via PM2.
  * Scans the project for improvement opportunities,
  * creates tasks in Supabase (tag: auto-generated),
- * and notifies on Telegram.
+ * notifies on Telegram, and optionally executes
+ * safe tasks automatically (code + PR).
  *
  * Run: bun run src/autonomy-cron.ts
+ * Run with execution: AUTONOMY_EXEC=1 bun run src/autonomy-cron.ts
  */
 
 import "dotenv/config";
@@ -17,8 +19,9 @@ import {
   formatScanResult,
   type Opportunity,
 } from "./autonomy-scanner.ts";
-import { addTask } from "./tasks.ts";
+import { addTask, type Task } from "./tasks.ts";
 import { getCurrentSprint } from "./tasks.ts";
+import { executeTask } from "./agent.ts";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || "";
@@ -29,6 +32,12 @@ const PROJECT_ROOT = process.env.PROJECT_ROOT || "/home/edouard/claude-telegram-
 
 // Max tasks to create per run (avoid flooding)
 const MAX_TASKS_PER_RUN = 3;
+
+// Auto-execution: only these opportunity types are safe to execute automatically
+const EXEC_SAFE_TYPES: Set<Opportunity["type"]> = new Set(["missing_tests", "todo_marker"]);
+
+// Enable auto-execution via env var (default: off)
+const AUTONOMY_EXEC = process.env.AUTONOMY_EXEC === "1" || process.env.AUTONOMY_EXEC === "true";
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.log("Supabase not configured, skipping autonomy scan.");
@@ -58,10 +67,16 @@ async function sendTelegram(text: string): Promise<void> {
   });
 }
 
+interface CreatedTask {
+  id: string;
+  task: Task;
+  opportunity: Opportunity;
+}
+
 async function createTaskFromOpportunity(
   opp: Opportunity,
   sprint: string | null
-): Promise<string | null> {
+): Promise<CreatedTask | null> {
   // Check for duplicates using dedup_key stored in notes
   const duplicate = await isDuplicate(supabase, opp.dedup_key);
   if (duplicate) {
@@ -84,12 +99,12 @@ async function createTaskFromOpportunity(
     .update({ notes: opp.dedup_key })
     .eq("id", task.id);
 
-  return task.id;
+  return { id: task.id, task: task as Task, opportunity: opp };
 }
 
 async function main(): Promise<void> {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Autonomy scan starting...`);
+  console.log(`[${timestamp}] Autonomy scan starting... (exec=${AUTONOMY_EXEC})`);
 
   // Run all scanners
   const result = await runAllScanners(PROJECT_ROOT, supabase);
@@ -105,30 +120,69 @@ async function main(): Promise<void> {
   const sprint = await getCurrentSprint(supabase);
 
   // Create tasks for top opportunities (respect limit)
-  const created: string[] = [];
+  const createdTasks: CreatedTask[] = [];
   for (const opp of result.opportunities.slice(0, MAX_TASKS_PER_RUN)) {
-    const taskId = await createTaskFromOpportunity(opp, sprint);
-    if (taskId) {
-      created.push(opp.title);
-      console.log(`  Created: ${opp.title} [${taskId.substring(0, 8)}]`);
+    const created = await createTaskFromOpportunity(opp, sprint);
+    if (created) {
+      createdTasks.push(created);
+      console.log(`  Created: ${opp.title} [${created.id.substring(0, 8)}]`);
     }
   }
 
   // Notify on Telegram
-  if (created.length > 0) {
+  if (createdTasks.length > 0) {
     const message = [
-      `[Autonomie] ${created.length} tache(s) auto-generee(s):`,
+      `[Autonomie] ${createdTasks.length} tache(s) auto-generee(s):`,
       "",
-      ...created.map((t) => `  ${t}`),
+      ...createdTasks.map((t) => `  ${t.opportunity.title}`),
       "",
       `Sprint: ${sprint || "aucun"}`,
       `Total detecte: ${result.opportunities.length} opportunite(s)`,
+      AUTONOMY_EXEC ? `\nExecution auto activee. Recherche d'une tache executable...` : "",
     ].join("\n");
 
     await sendTelegram(message);
   }
 
-  console.log(`[${timestamp}] Done. Created ${created.length} task(s).`);
+  // Auto-execution: pick the first safe task and execute it
+  if (AUTONOMY_EXEC && createdTasks.length > 0) {
+    const execCandidate = createdTasks.find((t) => EXEC_SAFE_TYPES.has(t.opportunity.type));
+
+    if (execCandidate) {
+      console.log(`  Auto-executing: ${execCandidate.opportunity.title}`);
+      await sendTelegram(
+        `[Autonomie] Execution auto: ${execCandidate.opportunity.title}\nBranche + code + PR en cours...`
+      );
+
+      const onProgress = async (msg: string) => {
+        console.log(`  [exec] ${msg}`);
+        await sendTelegram(`[Autonomie] ${msg}`);
+      };
+
+      const agentResult = await executeTask(supabase, execCandidate.task, onProgress);
+
+      const execSummary = agentResult.success
+        ? [
+            `[Autonomie] Execution terminee: ${execCandidate.opportunity.title}`,
+            agentResult.prUrl ? `PR: ${agentResult.prUrl}` : "Aucun changement de fichier.",
+            `Duree: ${Math.round(agentResult.durationMs / 60000)} min`,
+            agentResult.reviewScore != null ? `Review: ${agentResult.reviewScore}/100` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : [
+            `[Autonomie] Echec execution: ${execCandidate.opportunity.title}`,
+            agentResult.error || "Erreur inconnue",
+          ].join("\n");
+
+      await sendTelegram(execSummary);
+      console.log(`  Execution done: success=${agentResult.success}`);
+    } else {
+      console.log("  No safe task found for auto-execution.");
+    }
+  }
+
+  console.log(`[${timestamp}] Done. Created ${createdTasks.length} task(s).`);
 }
 
 main().catch((err) => {
