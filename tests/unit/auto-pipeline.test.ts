@@ -140,13 +140,8 @@ describe("PipelinePhase types", () => {
 
 describe("PipelineOptions defaults", () => {
   it("includeAnalysis defaults to true (full BMad pipeline)", () => {
-    // The default options should include analysis (full mode)
-    // We verify this by checking that runAutoPipeline exists and
-    // accepts options where includeAnalysis is optional
     const defaultOpts: PipelineOptions = {};
-    // includeAnalysis should default to true in the function body
     expect(defaultOpts.includeAnalysis).toBeUndefined();
-    // When undefined, the function defaults to true (verified by code review)
   });
 
   it("skipGates can be set to true", () => {
@@ -157,6 +152,27 @@ describe("PipelineOptions defaults", () => {
   it("onProgress callback is optional", () => {
     const opts: PipelineOptions = {};
     expect(opts.onProgress).toBeUndefined();
+  });
+
+  // S22 options
+  it("autoPipeline defaults to undefined (manual)", () => {
+    const opts: PipelineOptions = {};
+    expect(opts.autoPipeline).toBeUndefined();
+  });
+
+  it("autoPipeline can be set to true", () => {
+    const opts: PipelineOptions = { autoPipeline: true };
+    expect(opts.autoPipeline).toBe(true);
+  });
+
+  it("maxRetries defaults to undefined (0)", () => {
+    const opts: PipelineOptions = {};
+    expect(opts.maxRetries).toBeUndefined();
+  });
+
+  it("maxRetries can be set", () => {
+    const opts: PipelineOptions = { maxRetries: 3 };
+    expect(opts.maxRetries).toBe(3);
   });
 });
 

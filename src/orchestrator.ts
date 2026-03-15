@@ -1,8 +1,9 @@
 /**
- * Multi-Agent Orchestrator — S16-01
+ * Multi-Agent Orchestrator — S16-01 / S22
  *
  * Chains BMad agents in configurable sequences.
- * Supports sequential pipelines, parallel reviews, and feedback loops.
+ * S22: Structured message passing (JSON schemas), retry loop,
+ *      dynamic pipeline selection.
  *
  * Usage:
  *   const result = await orchestrate(supabase, task, {
@@ -23,6 +24,13 @@ import {
 import { getAgent, type BmadAgent } from "./bmad-agents.ts";
 import { WorkflowTracker } from "./workflow.ts";
 import { buildTaskContext } from "./document-sharding.ts";
+import {
+  type AgentMessage,
+  type StructuredAgentOutput,
+  parseAgentOutput,
+  buildStructuredOutputInstructions,
+  buildStructuredChainContext,
+} from "./agent-schemas.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -36,8 +44,10 @@ export interface AgentStepResult {
   agentName: string;
   success: boolean;
   output: string;
+  structured: StructuredAgentOutput | null;
   error?: string;
   durationMs: number;
+  retryCount?: number;
 }
 
 export interface OrchestratedResult {
@@ -76,23 +86,17 @@ export const REVIEW_PIPELINE: AgentRole[] = ["qa", "architect"];
 
 /**
  * Run a single agent step: build prompt, call Claude, return result.
+ * S22: Uses structured output instructions and parses JSON from output.
  */
 async function runAgentStep(
   agentId: AgentRole,
   task: Task,
-  previousOutputs: AgentStepResult[],
+  previousMessages: AgentMessage[],
   shardedContext?: string
 ): Promise<AgentStepResult> {
   const startTime = Date.now();
   const agent = getAgent(agentId);
   const agentName = agent?.name || agentId;
-
-  // Build context from previous agent outputs
-  const chainContext = previousOutputs.length > 0
-    ? previousOutputs.map((r) =>
-        `--- ${r.agentName} (${r.agentId}) ---\n${r.output}`
-      ).join("\n\n")
-    : undefined;
 
   const command = AGENT_COMMAND_MAP[agentId] || agentId;
 
@@ -118,10 +122,12 @@ async function runAgentStep(
   const isolation = buildIsolationInstructions(agentId);
   prompt = `${prompt}\n\n${isolation}`;
 
-  // Add chain context from previous agents
-  if (chainContext) {
-    prompt += `\n\n---\n\nCONTEXTE DES AGENTS PRECEDENTS:\n${chainContext}`;
-    prompt += "\n\nUtilise ces outputs comme base. Ne repete pas ce qui a deja ete fait.";
+  // Add structured output instructions (S22-03)
+  prompt += buildStructuredOutputInstructions(agentId);
+
+  // Add structured chain context from previous agents (S22-01/02)
+  if (previousMessages.length > 0) {
+    prompt += `\n\n---\n\n${buildStructuredChainContext(previousMessages)}`;
   }
 
   // Specific instructions per role in orchestration
@@ -137,11 +143,18 @@ async function runAgentStep(
     const stderr = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;
 
+    const rawOutput = output.trim();
+    const success = exitCode === 0;
+
+    // Parse structured output (S22-02)
+    const structured = success ? parseAgentOutput(rawOutput, agentId) : null;
+
     return {
       agentId,
       agentName,
-      success: exitCode === 0,
-      output: output.trim(),
+      success,
+      output: rawOutput,
+      structured,
       error: exitCode !== 0 ? stderr.trim() : undefined,
       durationMs: Date.now() - startTime,
     };
@@ -151,6 +164,7 @@ async function runAgentStep(
       agentName,
       success: false,
       output: "",
+      structured: null,
       error: String(error),
       durationMs: Date.now() - startTime,
     };
@@ -291,22 +305,31 @@ export interface OrchestrateOptions {
   stopOnFailure?: boolean;
   /** Skip agents that aren't relevant (e.g., analyst for simple tasks) */
   skipIfSimple?: boolean;
+  /** Max retry attempts per agent (default: 0 = no retry) */
+  maxRetries?: number;
+  /** Use dynamic pipeline selection based on task analysis (S22-06) */
+  autoPipeline?: boolean;
 }
 
 /**
  * Orchestrate a task through a pipeline of BMad agents.
  *
- * Each agent receives the outputs of all previous agents as context.
- * The pipeline stops early if a critical agent fails and stopOnFailure is true.
+ * Each agent receives structured outputs of all previous agents as context.
+ * S22: Retry loop, structured message passing, dynamic pipeline selection.
  */
 export async function orchestrate(
   supabase: SupabaseClient | null,
   task: Task,
   options: OrchestrateOptions = {}
 ): Promise<OrchestratedResult> {
-  const pipeline = options.pipeline || DEFAULT_PIPELINE;
+  // Dynamic pipeline selection (S22-06)
+  const pipeline = options.autoPipeline
+    ? selectPipeline(task, options.pipeline)
+    : (options.pipeline || DEFAULT_PIPELINE);
+  const maxRetries = options.maxRetries ?? 0;
   const startTime = Date.now();
   const steps: AgentStepResult[] = [];
+  const messages: AgentMessage[] = [];
 
   // Load sharded context for the task (PRD, architecture docs)
   let shardedContext: string | undefined;
@@ -338,13 +361,16 @@ export async function orchestrate(
     }
   }
 
+  // Log selected pipeline (S22-07)
+  const pipelineLabel = options.autoPipeline ? "auto" : "manual";
+
   if (options.onProgress) {
     const agentNames = pipeline.map((id) => {
       const a = getAgent(id);
       return a ? `${a.icon} ${a.name}` : id;
     });
     await options.onProgress(
-      `Orchestration demarree : ${agentNames.join(" -> ")}`
+      `Orchestration demarree (${pipelineLabel}) : ${agentNames.join(" -> ")}`
     );
   }
 
@@ -375,32 +401,68 @@ export async function orchestrate(
       });
     }
 
-    const result = await runAgentStep(agentId, task, steps, shardedContext);
-    steps.push(result);
+    // S22-04: Retry loop with exponential backoff
+    let result: AgentStepResult | null = null;
+    let retryCount = 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      result = await runAgentStep(agentId, task, messages, shardedContext);
+
+      if (result.success) break;
+
+      if (attempt < maxRetries) {
+        retryCount = attempt + 1;
+        const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+        if (options.onProgress) {
+          await options.onProgress(
+            `${agentLabel} echoue, retry ${retryCount}/${maxRetries} dans ${backoffMs / 1000}s...`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+
+    // result is never null here because maxRetries >= 0 guarantees at least one iteration
+    result!.retryCount = retryCount;
+    steps.push(result!);
+
+    // Build AgentMessage for downstream agents
+    const message: AgentMessage = {
+      agentId,
+      agentName: result!.agentName,
+      success: result!.success,
+      structured: result!.structured,
+      rawOutput: result!.output,
+      durationMs: result!.durationMs,
+      error: result!.error,
+    };
+    messages.push(message);
 
     // Persist agent artifacts to the task in Supabase
-    if (result.success && supabase) {
-      await persistAgentArtifact(supabase, task.id, agentId, result.output);
+    if (result!.success && supabase) {
+      await persistAgentArtifact(supabase, task.id, agentId, result!.output);
     }
 
     if (options.onProgress) {
-      const status = result.success ? "OK" : "ECHEC";
-      const duration = Math.round(result.durationMs / 1000);
+      const status = result!.success ? "OK" : "ECHEC";
+      const duration = Math.round(result!.durationMs / 1000);
+      const retryInfo = retryCount > 0 ? ` (${retryCount} retries)` : "";
       await options.onProgress(
-        `${agentLabel} : ${status} (${duration}s)`
+        `${agentLabel} : ${status} (${duration}s)${retryInfo}`
       );
     }
 
-    // Log checkpoint
+    // Log checkpoint (S22-05: include retry metrics)
     if (tracker) {
       await tracker.logCheckpoint(
-        result.success ? "pass" : "fail",
-        `Agent ${agentId}: ${result.success ? "succes" : "echec"} en ${result.durationMs}ms`
+        result!.success ? "pass" : "fail",
+        `Agent ${agentId}: ${result!.success ? "succes" : "echec"} en ${result!.durationMs}ms` +
+          (retryCount > 0 ? ` (${retryCount} retries)` : "")
       );
     }
 
     // Stop on failure if configured
-    if (!result.success && options.stopOnFailure) {
+    if (!result!.success && options.stopOnFailure) {
       if (options.onProgress) {
         await options.onProgress(
           `Pipeline arrete: ${agentLabel} a echoue.`
@@ -415,9 +477,9 @@ export async function orchestrate(
   // Build summary
   const summary = buildOrchestrationSummary(steps, totalDurationMs);
 
-  // Log orchestration result to Supabase
+  // Log orchestration result to Supabase (S22-05/07: include retry metrics + pipeline selection)
   if (supabase) {
-    await logOrchestrationResult(supabase, task.id, steps, totalDurationMs);
+    await logOrchestrationResult(supabase, task.id, steps, totalDurationMs, pipelineLabel);
   }
 
   return {
@@ -439,12 +501,23 @@ function buildOrchestrationSummary(
   lines.push(`Duree totale: ${Math.round(totalDurationMs / 1000)}s`);
   lines.push(`Agents: ${steps.length}`);
   lines.push(`Succes: ${steps.filter((s) => s.success).length}/${steps.length}`);
+
+  const totalRetries = steps.reduce((sum, s) => sum + (s.retryCount || 0), 0);
+  if (totalRetries > 0) {
+    lines.push(`Retries: ${totalRetries}`);
+  }
+
+  const structuredCount = steps.filter((s) => s.structured).length;
+  if (structuredCount > 0) {
+    lines.push(`Sorties structurees: ${structuredCount}/${steps.length}`);
+  }
   lines.push("");
 
   for (const step of steps) {
     const status = step.success ? "OK" : "ECHEC";
     const duration = Math.round(step.durationMs / 1000);
-    lines.push(`${step.agentName} (${step.agentId}): ${status} — ${duration}s`);
+    const retryInfo = step.retryCount ? ` [${step.retryCount} retries]` : "";
+    lines.push(`${step.agentName} (${step.agentId}): ${status} — ${duration}s${retryInfo}`);
 
     // Add a brief excerpt of the output (first 200 chars)
     if (step.output) {
@@ -464,8 +537,10 @@ async function logOrchestrationResult(
   supabase: SupabaseClient,
   taskId: string,
   steps: AgentStepResult[],
-  totalDurationMs: number
+  totalDurationMs: number,
+  pipelineSelection?: string
 ): Promise<void> {
+  const totalRetries = steps.reduce((sum, s) => sum + (s.retryCount || 0), 0);
   const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
     step: "orchestration",
@@ -473,17 +548,104 @@ async function logOrchestrationResult(
     to_step: "orchestration_end",
     metadata: {
       pipeline: steps.map((s) => s.agentId),
+      pipelineSelection: pipelineSelection || "manual",
       results: steps.map((s) => ({
         agent: s.agentId,
         success: s.success,
         durationMs: s.durationMs,
         outputLength: s.output.length,
+        hasStructuredOutput: s.structured !== null,
+        retryCount: s.retryCount || 0,
       })),
       totalDurationMs,
+      totalRetries,
       allPassed: steps.every((s) => s.success),
     },
   });
   if (error) console.error("logOrchestrationResult error:", error);
+}
+
+// ── Dynamic Pipeline Selection (S22-06) ──────────────────────
+
+/** Keywords that indicate a bug fix task */
+const BUG_KEYWORDS = [
+  "fix", "bug", "crash", "erreur", "error", "broken", "casse",
+  "regression", "hotfix", "patch", "reparer", "corriger",
+];
+
+/** Keywords that indicate a review/QA task */
+const REVIEW_KEYWORDS = [
+  "review", "audit", "revue", "test", "qa", "qualite", "refactor",
+  "nettoyage", "cleanup", "lint", "dette", "debt",
+];
+
+/** Keywords that indicate a documentation task */
+const DOC_KEYWORDS = [
+  "doc", "documentation", "readme", "changelog", "guide", "tutoriel",
+];
+
+export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC";
+
+/**
+ * Analyze a task and select the most appropriate pipeline.
+ *
+ * Rules:
+ *   - Bug/fix/patch/hotfix → QUICK (dev + qa)
+ *   - Review/audit/refactor → REVIEW (qa + architect)
+ *   - Documentation → QUICK (dev + qa)
+ *   - Simple priority P3 with short title → QUICK
+ *   - Everything else → DEFAULT (analyst + pm + architect + dev + qa)
+ *   - Explicit override via options.pipeline always wins
+ */
+export function selectPipeline(
+  task: Task,
+  explicitPipeline?: AgentRole[]
+): AgentRole[] {
+  if (explicitPipeline) return explicitPipeline;
+
+  const text = `${task.title} ${task.description || ""}`.toLowerCase();
+
+  if (BUG_KEYWORDS.some((kw) => text.includes(kw))) {
+    return QUICK_PIPELINE;
+  }
+
+  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) {
+    return REVIEW_PIPELINE;
+  }
+
+  if (DOC_KEYWORDS.some((kw) => text.includes(kw))) {
+    return QUICK_PIPELINE;
+  }
+
+  // Simple tasks: short title, low priority, no subtasks
+  if (
+    task.priority >= 3 &&
+    task.title.length < 40 &&
+    (!task.subtasks || task.subtasks.length === 0)
+  ) {
+    return QUICK_PIPELINE;
+  }
+
+  return DEFAULT_PIPELINE;
+}
+
+/**
+ * Classify a task into a pipeline type (for logging/display).
+ */
+export function classifyPipeline(task: Task): PipelineType {
+  const text = `${task.title} ${task.description || ""}`.toLowerCase();
+
+  if (BUG_KEYWORDS.some((kw) => text.includes(kw))) return "QUICK";
+  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) return "REVIEW";
+  if (DOC_KEYWORDS.some((kw) => text.includes(kw))) return "DOC";
+  if (
+    task.priority >= 3 &&
+    task.title.length < 40 &&
+    (!task.subtasks || task.subtasks.length === 0)
+  ) {
+    return "QUICK";
+  }
+  return "DEFAULT";
 }
 
 // ── Format for Telegram ──────────────────────────────────────
@@ -494,6 +656,11 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
   const statusIcon = result.success ? "OK" : "ATTENTION";
   lines.push(`ORCHESTRATION ${statusIcon}`);
   lines.push(`Duree: ${Math.round(result.totalDurationMs / 1000)}s`);
+
+  const totalRetries = result.steps.reduce((sum, s) => sum + (s.retryCount || 0), 0);
+  if (totalRetries > 0) {
+    lines.push(`Retries: ${totalRetries}`);
+  }
   lines.push("");
 
   for (const step of result.steps) {
@@ -501,7 +668,9 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     const icon = agent?.icon || "";
     const status = step.success ? "ok" : "echec";
     const duration = Math.round(step.durationMs / 1000);
-    lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)`);
+    const structuredTag = step.structured ? " [JSON]" : "";
+    const retryTag = step.retryCount ? ` (${step.retryCount} retries)` : "";
+    lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}`);
   }
 
   // Add last agent's output as the main result
