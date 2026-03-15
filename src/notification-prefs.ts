@@ -49,7 +49,7 @@ export async function loadPrefs(): Promise<NotificationPrefs> {
     cachedPrefs = { ...DEFAULT_PREFS, ...parsed, types: { ...DEFAULT_PREFS.types, ...parsed.types } };
     return cachedPrefs;
   } catch {
-    cachedPrefs = { ...DEFAULT_PREFS, types: { ...DEFAULT_PREFS.types } };
+    cachedPrefs = getDefaultPrefs();
     return cachedPrefs;
   }
 }
@@ -110,5 +110,13 @@ export function formatPrefs(prefs: NotificationPrefs): string {
 }
 
 export function getDefaultPrefs(): NotificationPrefs {
-  return { ...DEFAULT_PREFS, types: { ...DEFAULT_PREFS.types } };
+  return {
+    ...DEFAULT_PREFS,
+    types: {
+      task: { ...DEFAULT_PREFS.types.task },
+      pr: { ...DEFAULT_PREFS.types.pr },
+      idea: { ...DEFAULT_PREFS.types.idea },
+      alert: { ...DEFAULT_PREFS.types.alert },
+    },
+  };
 }

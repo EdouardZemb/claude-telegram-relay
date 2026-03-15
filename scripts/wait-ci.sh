@@ -20,7 +20,7 @@ while true; do
     exit 1
   fi
 
-  OUTPUT=$(gh pr checks "$BRANCH" -R "$REPO" --json name,state,conclusion 2>/dev/null || echo "")
+  OUTPUT=$(gh pr checks "$BRANCH" -R "$REPO" --json name,state,bucket 2>/dev/null || echo "")
 
   if [ -z "$OUTPUT" ] || [ "$OUTPUT" = "[]" ]; then
     echo "  Checks not yet available... (${ELAPSED}s)"
@@ -28,17 +28,17 @@ while true; do
     continue
   fi
 
-  PENDING=$(echo "$OUTPUT" | jq '[.[] | select(.state != "COMPLETED" and .state != "completed")] | length')
+  PENDING=$(echo "$OUTPUT" | jq '[.[] | select(.state != "COMPLETED" and .state != "completed" and .state != "SUCCESS" and .state != "FAILURE")] | length')
   if [ "$PENDING" -gt 0 ]; then
     echo "  $PENDING check(s) still running... (${ELAPSED}s)"
     sleep "$POLL"
     continue
   fi
 
-  FAILED=$(echo "$OUTPUT" | jq '[.[] | select(.conclusion != "SUCCESS" and .conclusion != "success" and .conclusion != "NEUTRAL" and .conclusion != "neutral")] | length')
+  FAILED=$(echo "$OUTPUT" | jq '[.[] | select(.bucket == "fail")] | length')
   if [ "$FAILED" -gt 0 ]; then
     echo "CI FAILED:"
-    echo "$OUTPUT" | jq -r '.[] | select(.conclusion != "SUCCESS" and .conclusion != "success" and .conclusion != "NEUTRAL" and .conclusion != "neutral") | "  \(.name): \(.conclusion)"'
+    echo "$OUTPUT" | jq -r '.[] | select(.bucket == "fail") | "  \(.name): \(.state)"'
     exit 1
   fi
 
