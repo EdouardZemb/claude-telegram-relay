@@ -12,7 +12,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 27 Telegram commands, voice, photos, docs |
+| `relay.ts` | Main bot: message handling, 28 Telegram commands, voice, photos, docs |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
@@ -43,10 +43,12 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
 | `proactive-planner.ts` | Daily backlog analysis + recommendations |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
-| `notifications.ts` | Proactive Telegram notifications to forum topics (tasks, ideas) |
+| `notifications.ts` | Proactive Telegram notifications routed through notification queue (tasks, ideas, PRs) |
+| `notification-queue.ts` | Notification batching queue: enqueue, flush, digest formatting, inline buttons, quiet hours, morning digest, JSON persistence |
+| `notification-prefs.ts` | Notification preferences: quiet hours, per-type enable/disable/immediate, /notify command config |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
-| `alert-cron.ts` | Hourly scheduled alert runner + memory archival |
+| `alert-cron.ts` | Hourly scheduled alert runner + memory archival + morning digest flush |
 
 ### Telegram Commands
 
@@ -80,6 +82,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/export` | Export tasks/metrics |
 | `/brain` | Memory synthesis: patterns, health, ideas, suggestions |
 | `/ideas` | Ideas pipeline: list, add, review, promote, archive |
+| `/notify` | Notification preferences: status, quiet hours, on/off per type, immediate mode |
 
 ### Database (Supabase)
 
@@ -127,6 +130,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Parallel execution (S25):** DAG-based parallel scheduling replaces sequential for...of loop when `parallel: true`. Three levels: (1) independent agents run concurrently (analyst+PM in DEFAULT), (2) fan-out N Dev agents on subtasks (each in git worktree), (3) batch tasks in autopipeline. Supervisor (TypeScript, zero LLM cost) handles retry/skip/escalate. Semaphore limits max concurrency (default 3). Blackboard supports concurrent writes via `writeSectionWithRetry`. ParallelMetrics track speedup ratio. `/orchestrate <id> [pipeline] --parallel` activates parallel mode. Backward-compatible: `parallel: false` (default) = sequential.
 
+**Smart Notifications (S26):** All proactive notifications (tasks, PRs, ideas, alerts) route through a batching queue (`notification-queue.ts`). Batching: flush after 5min interval OR 5-message threshold, whichever comes first. Single notifications sent standalone with inline action buttons; 2+ grouped into digest format. Quiet hours (default 20h-9h, timezone-aware) queue non-critical notifications for morning digest. Critical alerts bypass quiet hours. Inline buttons: task (Demarrer/Terminer/Voir), PR (URL button), idea (Promouvoir/Archiver), alert (Voir tache/sprint/Ignorer). Preferences configurable via `/notify` command (quiet hours, per-type enable/disable/immediate). Persistence: queue + prefs saved to JSON files in RELAY_DIR. Morning digest triggered by alert-cron when quiet hours end.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -142,7 +147,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    36 TypeScript modules (core logic)
+src/                    38 TypeScript modules (core logic)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
@@ -151,7 +156,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  555 tests (unit + integration)
+tests/                  640 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -159,7 +164,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (611 tests, all must pass before merge)
+- Tests: `bun test` (640 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI → merge to master
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting

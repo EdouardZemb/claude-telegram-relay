@@ -1,0 +1,24 @@
+{
+  "quietStart": 0,
+  "quietEnd": 0,
+  "batchIntervalMs": 300000,
+  "batchThreshold": 100,
+  "types": {
+    "task": {
+      "enabled": true,
+      "immediate": false
+    },
+    "pr": {
+      "enabled": true,
+      "immediate": false
+    },
+    "idea": {
+      "enabled": true,
+      "immediate": false
+    },
+    "alert": {
+      "enabled": true,
+      "immediate": true
+    }
+  }
+}

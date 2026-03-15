@@ -1,13 +1,13 @@
 /**
- * Proactive Notifications
+ * Proactive Notifications — S26 Smart Notifications
  *
- * Sends automatic notifications to specific Telegram forum topics:
- * - PR created/merged → claude-relay topic
- * - Task status changes → sprint topic
- * - Deploy events → serveur topic
+ * All notifications are routed through the notification queue for
+ * batching, quiet hours, and inline buttons. Direct sends kept
+ * as fallback (sendToTopic) for queue-bypassed messages.
  */
 
 import type { Bot } from "grammy";
+import { enqueue } from "./notification-queue.ts";
 
 const GROUP_ID = process.env.TELEGRAM_GROUP_ID || "";
 const DEV_THREAD_ID = parseInt(process.env.DEV_THREAD_ID || "0");
@@ -27,7 +27,7 @@ export function initNotifications(bot: Bot): void {
   botInstance = bot;
 }
 
-async function sendToTopic(threadId: number, message: string): Promise<void> {
+export async function sendToTopic(threadId: number, message: string): Promise<void> {
   if (!botInstance || !GROUP_ID || !threadId) return;
   try {
     await botInstance.api.sendMessage(parseInt(GROUP_ID), message, {
@@ -38,7 +38,7 @@ async function sendToTopic(threadId: number, message: string): Promise<void> {
   }
 }
 
-// ── PR Notifications → claude-relay topic ────────────────────
+// ── PR Notifications → queue ─────────────────────────────────
 
 export async function notifyPRCreated(
   taskTitle: string,
@@ -51,17 +51,27 @@ export async function notifyPRCreated(
     `Branche: ${branchName}`,
     `${prUrl}`,
   ].join("\n");
-  await sendToTopic(DEV_THREAD_ID, message);
+  await enqueue({
+    type: "pr",
+    severity: "normal",
+    message,
+    data: { prUrl },
+  });
 }
 
-// ── Task Notifications → sprint topic ────────────────────────
+// ── Task Notifications → queue ───────────────────────────────
 
 export async function notifyTaskStarted(
   taskTitle: string,
   taskId: string
 ): Promise<void> {
   const message = `[${timestamp()}] Tache demarree: ${taskTitle} [${taskId.substring(0, 8)}]`;
-  await sendToTopic(SPRINT_THREAD_ID, message);
+  await enqueue({
+    type: "task",
+    severity: "normal",
+    message,
+    data: { taskId, taskStatus: "in_progress" },
+  });
 }
 
 export async function notifyTaskDone(
@@ -69,10 +79,15 @@ export async function notifyTaskDone(
   taskId: string
 ): Promise<void> {
   const message = `[${timestamp()}] Tache terminee: ${taskTitle} [${taskId.substring(0, 8)}]`;
-  await sendToTopic(SPRINT_THREAD_ID, message);
+  await enqueue({
+    type: "task",
+    severity: "normal",
+    message,
+    data: { taskId, taskStatus: "done" },
+  });
 }
 
-// ── Idea Notifications → sprint topic ───────────────────────
+// ── Idea Notifications → queue ───────────────────────────────
 
 export async function notifyIdeaCreated(
   ideaContent: string,
@@ -80,7 +95,11 @@ export async function notifyIdeaCreated(
 ): Promise<void> {
   const preview = ideaContent.length > 80 ? ideaContent.slice(0, 80) + "..." : ideaContent;
   const message = `[${timestamp()}] Nouvelle idee (${source}): ${preview}`;
-  await sendToTopic(SPRINT_THREAD_ID, message);
+  await enqueue({
+    type: "idea",
+    severity: "normal",
+    message,
+  });
 }
 
 export async function notifyIdeaPromoted(
@@ -89,6 +108,9 @@ export async function notifyIdeaPromoted(
 ): Promise<void> {
   const preview = ideaContent.length > 80 ? ideaContent.slice(0, 80) + "..." : ideaContent;
   const message = `[${timestamp()}] Idee promue en tache: ${preview}\nTache: ${taskTitle}`;
-  await sendToTopic(SPRINT_THREAD_ID, message);
+  await enqueue({
+    type: "idea",
+    severity: "normal",
+    message,
+  });
 }
-
