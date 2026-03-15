@@ -672,7 +672,7 @@ bot.command("help", async (ctx) => {
     "",
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
-    "  /orchestrate <id> [pipeline] [--blackboard] -- Pipeline multi-agents (full/quick/review)",
+    "  /orchestrate <id> [pipeline] [--blackboard] [--parallel] -- Pipeline multi-agents (full/quick/review)",
     "  /autopipeline <id> [full|fast] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
@@ -1219,24 +1219,26 @@ bot.command("orchestrate", async (ctx) => {
   }
 
   const args = ctx.match?.trim() || "";
-  // Parse: /orchestrate <taskId> [pipeline] [--blackboard]
+  // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--parallel]
   // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
   const useBlackboard = args.includes("--blackboard");
-  const cleanArgs = args.replace("--blackboard", "").trim();
+  const useParallel = args.includes("--parallel");
+  const cleanArgs = args.replace("--blackboard", "").replace("--parallel", "").trim();
   const parts = cleanArgs.split(/\s+/);
   const idPrefix = parts[0];
   const pipelineArg = parts[1] || "full";
 
   if (!idPrefix) {
     await ctx.reply(
-      "Usage: /orchestrate <id> [pipeline] [--blackboard]\n\n" +
+      "Usage: /orchestrate <id> [pipeline] [--blackboard] [--parallel]\n\n" +
       "Pipelines disponibles:\n" +
       "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
       "  quick — Dev -> QA\n" +
       "  review — QA -> Architect\n" +
       "  custom — ex: /orchestrate abc pm,dev,qa\n\n" +
       "Options:\n" +
-      "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)",
+      "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)\n" +
+      "  --parallel — Execution parallele DAG (agents independants en parallele)",
       threadOpts(ctx)
     );
     return;
@@ -1288,8 +1290,9 @@ bot.command("orchestrate", async (ctx) => {
   }
 
   const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
+  const parallelLabel = useParallel ? "\nMode: parallele (DAG)" : "";
   await ctx.reply(
-    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}\nCa peut prendre plusieurs minutes...`,
+    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${parallelLabel}\nCa peut prendre plusieurs minutes...`,
     threadOpts(ctx)
   );
 
@@ -1297,6 +1300,7 @@ bot.command("orchestrate", async (ctx) => {
     pipeline,
     stopOnFailure: true,
     useBlackboard,
+    parallel: useParallel,
     onProgress: async (msg) => {
       await ctx.reply(msg, threadOpts(ctx));
     },

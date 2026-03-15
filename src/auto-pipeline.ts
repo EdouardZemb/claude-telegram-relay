@@ -24,6 +24,7 @@ import {
 } from "./orchestrator.ts";
 import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
+import { Semaphore } from "./semaphore.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -62,6 +63,8 @@ export interface PipelineOptions {
   autoPipeline?: boolean;
   /** Max retries per agent (S22-04) */
   maxRetries?: number;
+  /** S25: Max concurrency for batch parallel execution (default: 2) */
+  maxConcurrency?: number;
 }
 
 // ── Auto Pipeline ────────────────────────────────────────────
@@ -248,34 +251,69 @@ export async function runAutoPipeline(
 // ── Batch Pipeline ───────────────────────────────────────────
 
 /**
- * Run auto-pipeline on multiple tasks sequentially.
- * Stops on first blocking failure.
+ * Run auto-pipeline on multiple tasks.
+ * S25: When maxConcurrency > 1, runs tasks in parallel via semaphore.
+ * Otherwise falls back to sequential execution.
+ * Parallel mode: no stop-on-first-failure (AC-020).
  */
 export async function runBatchPipeline(
   supabase: SupabaseClient | null,
   tasks: Task[],
   options: PipelineOptions = {}
 ): Promise<PipelineResult[]> {
-  const results: PipelineResult[] = [];
+  const maxConcurrency = options.maxConcurrency ?? 1;
 
-  for (const task of tasks) {
-    if (options.onProgress) {
-      await options.onProgress(`\nBatch: ${results.length + 1}/${tasks.length} — ${task.title}`);
-    }
-
-    const result = await runAutoPipeline(supabase, task, options);
-    results.push(result);
-
-    // Stop on blocking failure
-    if (!result.success && result.phase === "blocked") {
+  if (maxConcurrency <= 1) {
+    // Sequential (backward-compatible)
+    const results: PipelineResult[] = [];
+    for (const task of tasks) {
       if (options.onProgress) {
-        await options.onProgress(`Batch arrete: tache bloquee par gate.`);
+        await options.onProgress(`\nBatch: ${results.length + 1}/${tasks.length} — ${task.title}`);
       }
-      break;
+      const result = await runAutoPipeline(supabase, task, options);
+      results.push(result);
+      // Stop on blocking failure (sequential only)
+      if (!result.success && result.phase === "blocked") {
+        if (options.onProgress) {
+          await options.onProgress(`Batch arrete: tache bloquee par gate.`);
+        }
+        break;
+      }
     }
+    return results;
   }
 
-  return results;
+  // S25: Parallel batch execution
+  const semaphore = new Semaphore(maxConcurrency);
+
+  if (options.onProgress) {
+    await options.onProgress(`Batch parallele: ${tasks.length} taches, max concurrency: ${maxConcurrency}`);
+  }
+
+  const settled = await Promise.allSettled(
+    tasks.map(async (task, i) => {
+      await semaphore.acquire();
+      try {
+        if (options.onProgress) {
+          await options.onProgress(`Batch [${i + 1}/${tasks.length}]: ${task.title}`);
+        }
+        return await runAutoPipeline(supabase, task, options);
+      } finally {
+        semaphore.release();
+      }
+    })
+  );
+
+  return settled.map((r, i) => {
+    if (r.status === "fulfilled") return r.value;
+    return {
+      success: false,
+      phase: "blocked" as PipelinePhase,
+      task: tasks[i],
+      durationMs: 0,
+      message: `Erreur: ${String(r.reason)}`,
+    };
+  });
 }
 
 // ── Formatting ───────────────────────────────────────────────
