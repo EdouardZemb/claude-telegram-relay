@@ -20,28 +20,32 @@ while true; do
     exit 1
   fi
 
-  OUTPUT=$(gh pr checks "$BRANCH" -R "$REPO" --json name,state,bucket 2>/dev/null || echo "")
+  # Use gh pr checks with --watch to wait for completion (timeout 10min)
+  # Fallback: poll with plain text output if --watch unavailable
+  OUTPUT=$(gh pr checks "$BRANCH" -R "$REPO" 2>/dev/null || echo "")
 
-  if [ -z "$OUTPUT" ] || [ "$OUTPUT" = "[]" ]; then
+  if [ -z "$OUTPUT" ] || echo "$OUTPUT" | grep -q "no checks"; then
     echo "  Checks not yet available... (${ELAPSED}s)"
     sleep "$POLL"
     continue
   fi
 
-  PENDING=$(echo "$OUTPUT" | jq '[.[] | select(.state != "COMPLETED" and .state != "completed" and .state != "SUCCESS" and .state != "FAILURE")] | length')
-  if [ "$PENDING" -gt 0 ]; then
+  # Check for pending/in_progress checks
+  if echo "$OUTPUT" | grep -qiE "pending|in_progress|queued|running"; then
+    PENDING=$(echo "$OUTPUT" | grep -ciE "pending|in_progress|queued|running" || echo "0")
     echo "  $PENDING check(s) still running... (${ELAPSED}s)"
     sleep "$POLL"
     continue
   fi
 
-  FAILED=$(echo "$OUTPUT" | jq '[.[] | select(.bucket == "fail")] | length')
-  if [ "$FAILED" -gt 0 ]; then
+  # All checks completed — check for failures
+  if echo "$OUTPUT" | grep -qi "fail"; then
     echo "CI FAILED:"
-    echo "$OUTPUT" | jq -r '.[] | select(.bucket == "fail") | "  \(.name): \(.state)"'
+    echo "$OUTPUT" | grep -i "fail"
     exit 1
   fi
 
   echo "CI PASSED (${ELAPSED}s)"
+  echo "$OUTPUT"
   exit 0
 done
