@@ -59,6 +59,22 @@ import {
 } from "./adversarial-verifier.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
+import {
+  executeDag,
+  getDAG,
+  buildSequentialDAG,
+  type DAGNode,
+  type DAGExecutionResult,
+} from "./dag-executor.ts";
+import { Supervisor, type SupervisorReport } from "./supervisor.ts";
+import {
+  fanOut,
+  fanIn,
+  parseSubtasks,
+  shouldFanOut,
+  type FanOutResult,
+} from "./fan-out.ts";
+import { writeSectionWithRetry, mergeImplementationSection } from "./blackboard.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -81,6 +97,21 @@ export interface AgentStepResult {
   costUsd?: number;
 }
 
+/** S25: Parallel execution metrics */
+export interface ParallelMetrics {
+  total_wall_time_ms: number;
+  sequential_equivalent_ms: number;
+  speedup_ratio: number;
+  per_agent_timing: Array<{
+    agent: AgentRole;
+    startMs: number;
+    endMs: number;
+    durationMs: number;
+  }>;
+  fan_out_count: number;
+  concurrent_peak: number;
+}
+
 export interface OrchestratedResult {
   success: boolean;
   steps: AgentStepResult[];
@@ -93,6 +124,8 @@ export interface OrchestratedResult {
     driftReport: DriftReport | null;
     traceabilityReport: ReturnType<typeof generateTraceabilityReport> | null;
   };
+  /** S25: Parallel metrics (only present when parallel=true) */
+  parallelMetrics?: ParallelMetrics;
 }
 
 /** Maps agent roles to the workflow command they execute */
@@ -355,6 +388,10 @@ export interface OrchestrateOptions {
   autoPipeline?: boolean;
   /** Use blackboard for structured context passing (S24) */
   useBlackboard?: boolean;
+  /** S25: Enable parallel DAG-based execution */
+  parallel?: boolean;
+  /** S25: Max concurrent agents (default: 3) */
+  maxConcurrency?: number;
 }
 
 /**
@@ -483,149 +520,271 @@ export async function orchestrate(
     }
   }
 
-  for (const agentId of pipeline) {
-    const agent = getAgent(agentId);
-    const agentLabel = agent
-      ? `${agent.icon} ${agent.name} (${agent.title})`
-      : agentId;
+  // S25: Parallel or sequential execution
+  let supervisorReport: SupervisorReport | null = null;
+  let fanOutCount = 0;
+
+  if (options.parallel) {
+    // ── S25: DAG-based parallel execution ────────────────────
+    const pipelineTypeForDag = classifyPipeline(task);
+    const dag = getDAG(pipelineTypeForDag, pipeline);
+    const supervisor = new Supervisor({
+      maxAttempts: maxRetries + 1,
+    });
+
+    // Register all agents with supervisor
+    for (const agentId of dag.keys()) {
+      supervisor.register(agentId, agentId);
+    }
+    supervisor.startPipeline();
 
     if (options.onProgress) {
-      await options.onProgress(`${agentLabel} en cours...`);
+      await options.onProgress(`Execution parallele (DAG, max concurrency: ${options.maxConcurrency ?? 3})`);
     }
 
-    // Log workflow transition
-    if (tracker) {
-      const stepName = `orchestration_${agentId}`;
-      await tracker.transition(stepName, {
-        agent_notes: `Agent ${agentId} demarre dans le pipeline`,
-      });
-    }
+    const dagResult = await executeDag(dag, async (agentId, previousResults) => {
+      // Build messages from previous results
+      const prevMessages: AgentMessage[] = [];
+      for (const [prevId, prevResult] of previousResults) {
+        prevMessages.push({
+          agentId: prevId,
+          agentName: prevResult.agentName,
+          success: prevResult.success,
+          structured: prevResult.structured,
+          rawOutput: prevResult.output,
+          durationMs: prevResult.durationMs,
+          error: prevResult.error,
+        });
+      }
 
-    // S22-04: Retry loop with exponential backoff
-    let result: AgentStepResult | null = null;
-    let retryCount = 0;
+      supervisor.markStarted(agentId);
+      const result = await runAgentStep(agentId, task, prevMessages, shardedContext);
+      supervisor.markCompleted(agentId, result);
+      return result;
+    }, {
+      maxConcurrency: options.maxConcurrency ?? 3,
+      onNodeStarted: (agentId) => {
+        const agent = getAgent(agentId);
+        const label = agent ? `${agent.icon} ${agent.name}` : agentId;
+        options.onProgress?.(`${label} demarre (parallele)...`);
+      },
+      onNodeCompleted: (agentId, result) => {
+        const agent = getAgent(agentId);
+        const label = agent ? `${agent.icon} ${agent.name}` : agentId;
+        const status = result.success ? "OK" : "ECHEC";
+        const duration = Math.round(result.durationMs / 1000);
+        options.onProgress?.(`${label} : ${status} (${duration}s)`);
+      },
+      onNodeFailed: async (node) => {
+        return supervisor.decide(node.agent);
+      },
+    });
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      result = await runAgentStep(agentId, task, messages, shardedContext);
+    // Collect results from DAG
+    for (const node of dagResult.nodes) {
+      if (node.result) {
+        steps.push(node.result);
 
-      if (result.success) break;
+        // Build message for context
+        messages.push({
+          agentId: node.agent,
+          agentName: node.result.agentName,
+          success: node.result.success,
+          structured: node.result.structured,
+          rawOutput: node.result.output,
+          durationMs: node.result.durationMs,
+          error: node.result.error,
+        });
 
-      if (attempt < maxRetries) {
-        retryCount = attempt + 1;
-        const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
-        if (options.onProgress) {
-          await options.onProgress(
-            `${agentLabel} echoue, retry ${retryCount}/${maxRetries} dans ${backoffMs / 1000}s...`
-          );
+        // Persist artifacts
+        if (node.result.success && supabase) {
+          await persistAgentArtifact(supabase, task.id, node.agent, node.result.output);
         }
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+        // S24: Write to blackboard
+        if (options.useBlackboard && bbSessionId && node.result.success) {
+          const sectionMap: Record<string, SectionName> = {
+            analyst: "spec", pm: "tasks", architect: "plan",
+            dev: "implementation", qa: "verification",
+          };
+          const section = sectionMap[node.agent];
+          if (section) {
+            const sectionData = node.result.structured || { raw: node.result.output.substring(0, 30000) };
+            if (supabase && !bbFallback) {
+              const res = await writeSectionWithRetry(supabase, bbSessionId, section, sectionData, node.agent, bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            } else if (bbFallback) {
+              const res = bbFallback.write(bbSessionId, section, sectionData, node.agent, bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            }
+          }
+        }
+
+        // Log cost
+        if (supabase && node.result.tokensInput) {
+          logCost(supabase, {
+            taskId: task.id,
+            sprintId: task.sprint || undefined,
+            agentRole: node.agent,
+            agentName: node.result.agentName,
+            tokensInput: node.result.tokensInput || 0,
+            tokensOutput: node.result.tokensOutput || 0,
+            costUsd: node.result.costUsd || 0,
+            durationMs: node.result.durationMs,
+            retryAttempt: node.result.retryCount || 0,
+            context: "orchestration_parallel",
+          }).catch(() => {});
+        }
       }
     }
 
-    // result is never null here because maxRetries >= 0 guarantees at least one iteration
-    result!.retryCount = retryCount;
-    steps.push(result!);
+    supervisorReport = supervisor.generateReport();
+  } else {
+    // ── Sequential execution (existing behavior) ─────────────
+    for (const agentId of pipeline) {
+      const agent = getAgent(agentId);
+      const agentLabel = agent
+        ? `${agent.icon} ${agent.name} (${agent.title})`
+        : agentId;
 
-    // Build AgentMessage for downstream agents
-    const message: AgentMessage = {
-      agentId,
-      agentName: result!.agentName,
-      success: result!.success,
-      structured: result!.structured,
-      rawOutput: result!.output,
-      durationMs: result!.durationMs,
-      error: result!.error,
-    };
-    messages.push(message);
+      if (options.onProgress) {
+        await options.onProgress(`${agentLabel} en cours...`);
+      }
 
-    // Persist agent artifacts to the task in Supabase
-    if (result!.success && supabase) {
-      await persistAgentArtifact(supabase, task.id, agentId, result!.output);
-    }
+      // Log workflow transition
+      if (tracker) {
+        const stepName = `orchestration_${agentId}`;
+        await tracker.transition(stepName, {
+          agent_notes: `Agent ${agentId} demarre dans le pipeline`,
+        });
+      }
 
-    // S24: Write to blackboard section + gate evaluation
-    if (options.useBlackboard && bbSessionId && result!.success) {
-      const sectionMap: Record<string, SectionName> = {
-        analyst: "spec",
-        pm: "tasks",
-        architect: "plan",
-        dev: "implementation",
-        qa: "verification",
-      };
-      const section = sectionMap[agentId];
-      if (section) {
-        const sectionData = result!.structured || { raw: result!.output.substring(0, 30000) };
-        if (supabase && !bbFallback) {
-          const res = await writeSection(supabase, bbSessionId, section, sectionData, agentId, bbVersion);
-          if (res.success) bbVersion = res.newVersion;
-        } else if (bbFallback) {
-          const res = bbFallback.write(bbSessionId, section, sectionData, agentId, bbVersion);
-          if (res.success) bbVersion = res.newVersion;
+      // S22-04: Retry loop with exponential backoff
+      let result: AgentStepResult | null = null;
+      let retryCount = 0;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        result = await runAgentStep(agentId, task, messages, shardedContext);
+
+        if (result.success) break;
+
+        if (attempt < maxRetries) {
+          retryCount = attempt + 1;
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+          if (options.onProgress) {
+            await options.onProgress(
+              `${agentLabel} echoue, retry ${retryCount}/${maxRetries} dans ${backoffMs / 1000}s...`
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
         }
+      }
 
-        // Gate evaluation for pm, architect, dev (not analyst/qa)
-        const gateMap: Record<string, GateName> = {
+      // result is never null here because maxRetries >= 0 guarantees at least one iteration
+      result!.retryCount = retryCount;
+      steps.push(result!);
+
+      // Build AgentMessage for downstream agents
+      const message: AgentMessage = {
+        agentId,
+        agentName: result!.agentName,
+        success: result!.success,
+        structured: result!.structured,
+        rawOutput: result!.output,
+        durationMs: result!.durationMs,
+        error: result!.error,
+      };
+      messages.push(message);
+
+      // Persist agent artifacts to the task in Supabase
+      if (result!.success && supabase) {
+        await persistAgentArtifact(supabase, task.id, agentId, result!.output);
+      }
+
+      // S24: Write to blackboard section + gate evaluation
+      if (options.useBlackboard && bbSessionId && result!.success) {
+        const sectionMap: Record<string, SectionName> = {
+          analyst: "spec",
           pm: "tasks",
           architect: "plan",
           dev: "implementation",
+          qa: "verification",
         };
-        const gate = gateMap[agentId];
-        if (gate) {
-          if (options.onProgress) {
-            await options.onProgress(`Gate evaluation: ${gate}...`);
+        const section = sectionMap[agentId];
+        if (section) {
+          const sectionData = result!.structured || { raw: result!.output.substring(0, 30000) };
+          if (supabase && !bbFallback) {
+            const res = await writeSection(supabase, bbSessionId, section, sectionData, agentId, bbVersion);
+            if (res.success) bbVersion = res.newVersion;
+          } else if (bbFallback) {
+            const res = bbFallback.write(bbSessionId, section, sectionData, agentId, bbVersion);
+            if (res.success) bbVersion = res.newVersion;
           }
-          const evaluation = await evaluateGate(supabase, bbSessionId, gate, sectionData);
-          gateEvaluations.push(evaluation);
-          if (options.onProgress) {
-            const status = evaluation.pass ? "PASS" : "FAIL";
-            await options.onProgress(`Gate ${gate}: ${status} (${evaluation.score}/100)`);
+
+          // Gate evaluation for pm, architect, dev (not analyst/qa)
+          const gateMap: Record<string, GateName> = {
+            pm: "tasks",
+            architect: "plan",
+            dev: "implementation",
+          };
+          const gate = gateMap[agentId];
+          if (gate) {
+            if (options.onProgress) {
+              await options.onProgress(`Gate evaluation: ${gate}...`);
+            }
+            const evaluation = await evaluateGate(supabase, bbSessionId, gate, sectionData);
+            gateEvaluations.push(evaluation);
+            if (options.onProgress) {
+              const status = evaluation.pass ? "PASS" : "FAIL";
+              await options.onProgress(`Gate ${gate}: ${status} (${evaluation.score}/100)`);
+            }
           }
         }
       }
-    }
 
-    // Log cost (S23-05)
-    if (supabase && result!.tokensInput) {
-      logCost(supabase, {
-        taskId: task.id,
-        sprintId: task.sprint || undefined,
-        agentRole: agentId,
-        agentName: result!.agentName,
-        tokensInput: result!.tokensInput || 0,
-        tokensOutput: result!.tokensOutput || 0,
-        costUsd: result!.costUsd || 0,
-        durationMs: result!.durationMs,
-        retryAttempt: retryCount,
-        context: "orchestration",
-      }).catch(() => {});
-    }
+      // Log cost (S23-05)
+      if (supabase && result!.tokensInput) {
+        logCost(supabase, {
+          taskId: task.id,
+          sprintId: task.sprint || undefined,
+          agentRole: agentId,
+          agentName: result!.agentName,
+          tokensInput: result!.tokensInput || 0,
+          tokensOutput: result!.tokensOutput || 0,
+          costUsd: result!.costUsd || 0,
+          durationMs: result!.durationMs,
+          retryAttempt: retryCount,
+          context: "orchestration",
+        }).catch(() => {});
+      }
 
-    if (options.onProgress) {
-      const status = result!.success ? "OK" : "ECHEC";
-      const duration = Math.round(result!.durationMs / 1000);
-      const retryInfo = retryCount > 0 ? ` (${retryCount} retries)` : "";
-      await options.onProgress(
-        `${agentLabel} : ${status} (${duration}s)${retryInfo}`
-      );
-    }
-
-    // Log checkpoint (S22-05: include retry metrics)
-    if (tracker) {
-      await tracker.logCheckpoint(
-        result!.success ? "pass" : "fail",
-        `Agent ${agentId}: ${result!.success ? "succes" : "echec"} en ${result!.durationMs}ms` +
-          (retryCount > 0 ? ` (${retryCount} retries)` : "")
-      );
-    }
-
-    // Stop on failure if configured
-    if (!result!.success && options.stopOnFailure) {
       if (options.onProgress) {
+        const status = result!.success ? "OK" : "ECHEC";
+        const duration = Math.round(result!.durationMs / 1000);
+        const retryInfo = retryCount > 0 ? ` (${retryCount} retries)` : "";
         await options.onProgress(
-          `Pipeline arrete: ${agentLabel} a echoue.`
+          `${agentLabel} : ${status} (${duration}s)${retryInfo}`
         );
       }
-      break;
+
+      // Log checkpoint (S22-05: include retry metrics)
+      if (tracker) {
+        await tracker.logCheckpoint(
+          result!.success ? "pass" : "fail",
+          `Agent ${agentId}: ${result!.success ? "succes" : "echec"} en ${result!.durationMs}ms` +
+            (retryCount > 0 ? ` (${retryCount} retries)` : "")
+        );
+      }
+
+      // Stop on failure if configured
+      if (!result!.success && options.stopOnFailure) {
+        if (options.onProgress) {
+          await options.onProgress(
+            `Pipeline arrete: ${agentLabel} a echoue.`
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -712,6 +871,18 @@ export async function orchestrate(
       gateEvaluations,
       driftReport,
       traceabilityReport,
+    };
+  }
+
+  // S25: Attach parallel metrics
+  if (options.parallel && supervisorReport) {
+    orchestratedResult.parallelMetrics = {
+      total_wall_time_ms: supervisorReport.total_wall_time_ms,
+      sequential_equivalent_ms: supervisorReport.sequential_equivalent_ms,
+      speedup_ratio: supervisorReport.speedup_ratio,
+      per_agent_timing: supervisorReport.per_agent_timing,
+      fan_out_count: fanOutCount,
+      concurrent_peak: steps.length, // approximation
     };
   }
 
@@ -944,6 +1115,19 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     if (bb.traceabilityReport) {
       lines.push("");
       lines.push(formatTraceabilityReport(bb.traceabilityReport));
+    }
+  }
+
+  // S25: Parallel metrics
+  if (result.parallelMetrics) {
+    const pm = result.parallelMetrics;
+    lines.push("");
+    lines.push("--- Parallel Metrics ---");
+    lines.push(`Wall time: ${Math.round(pm.total_wall_time_ms / 1000)}s`);
+    lines.push(`Sequential equivalent: ${Math.round(pm.sequential_equivalent_ms / 1000)}s`);
+    lines.push(`Speedup: ${pm.speedup_ratio.toFixed(2)}x`);
+    if (pm.fan_out_count > 0) {
+      lines.push(`Fan-out: ${pm.fan_out_count} agents`);
     }
   }
 

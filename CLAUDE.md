@@ -17,8 +17,13 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
-| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection, cost tracking per agent, blackboard integration |
-| `blackboard.ts` | Shared structured workspace: versioned JSONB sections, optimistic locking, role authorization, traceability reports |
+| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection, cost tracking per agent, blackboard integration, parallel DAG execution |
+| `blackboard.ts` | Shared structured workspace: versioned JSONB sections, optimistic locking, role authorization, traceability reports, concurrent write retry, fan-in merge |
+| `dag-executor.ts` | DAG-based parallel agent scheduler: dependency resolution, semaphore-gated concurrency, pre-defined DAGs (DEFAULT, QUICK, REVIEW) |
+| `semaphore.ts` | Promise-based counting semaphore for concurrency control (default max 3) |
+| `supervisor.ts` | Deterministic TypeScript supervisor: agent status tracking, retry/skip/escalate decisions, timeout, structured report with speedup ratio |
+| `fan-out.ts` | Subtask parallelism: fan-out N Dev agents in worktrees, fan-in merge branches and blackboard sections, file overlap detection |
+| `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup. Branch isolation for parallel agents |
 | `gate-evaluator.ts` | Gate evaluation: LLM-based quality checks at pipeline gates, evaluate-rework loop (max 2 iterations) |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context |
@@ -120,6 +125,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Blackboard (S24):** Shared JSONB workspace per pipeline run (`blackboard` table). 5 sections: spec, plan, tasks, implementation, verification. Versioned with optimistic locking. Role-based write authorization. `useBlackboard: true` on orchestrate() enables the blackboard flow. Gate Evaluator checks quality at each gate (score 0-100, pass/fail). Evaluate-rework loop (max 2 iterations) self-corrects on failure. Adversarial Verifier detects spec drift in clean room (spec + implementation only, no plan/tasks). Traceability report maps FR->tasks->tests->files. `/orchestrate <id> [pipeline] --blackboard` activates the flow.
 
+**Parallel execution (S25):** DAG-based parallel scheduling replaces sequential for...of loop when `parallel: true`. Three levels: (1) independent agents run concurrently (analyst+PM in DEFAULT), (2) fan-out N Dev agents on subtasks (each in git worktree), (3) batch tasks in autopipeline. Supervisor (TypeScript, zero LLM cost) handles retry/skip/escalate. Semaphore limits max concurrency (default 3). Blackboard supports concurrent writes via `writeSectionWithRetry`. ParallelMetrics track speedup ratio. `/orchestrate <id> [pipeline] --parallel` activates parallel mode. Backward-compatible: `parallel: false` (default) = sequential.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -135,7 +142,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    30 TypeScript modules (core logic)
+src/                    36 TypeScript modules (core logic)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
@@ -152,7 +159,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (555 tests, all must pass before merge)
+- Tests: `bun test` (611 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI → merge to master
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting

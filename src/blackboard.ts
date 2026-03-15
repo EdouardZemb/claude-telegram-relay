@@ -49,6 +49,16 @@ const ROLE_WRITE_MAP: Record<string, SectionName[]> = {
   system: ["spec", "plan", "tasks", "implementation", "verification"],
 };
 
+/**
+ * Get the allowed sections for a role, including dynamic dev-sub-N roles (S25).
+ */
+function getAllowedSections(role: string): SectionName[] | undefined {
+  if (ROLE_WRITE_MAP[role]) return ROLE_WRITE_MAP[role];
+  // S25: dev-sub-N roles get same permissions as dev
+  if (/^dev-sub-\d+$/.test(role)) return ROLE_WRITE_MAP["dev"];
+  return undefined;
+}
+
 /** Max section size in bytes before truncation */
 const MAX_SECTION_SIZE = 50 * 1024; // 50KB
 
@@ -139,8 +149,8 @@ export async function writeSection(
   role: string,
   expectedVersion: number
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
-  // Check role authorization
-  const allowedSections = ROLE_WRITE_MAP[role];
+  // Check role authorization (S25: supports dev-sub-N roles)
+  const allowedSections = getAllowedSections(role);
   if (!allowedSections || !allowedSections.includes(section)) {
     return {
       success: false,
@@ -495,7 +505,7 @@ export class InMemoryBlackboard {
     const row = this.sessions.get(sessionId);
     if (!row) return { success: false, newVersion: expectedVersion, error: "Session not found" };
 
-    const allowedSections = ROLE_WRITE_MAP[role];
+    const allowedSections = getAllowedSections(role);
     if (!allowedSections || !allowedSections.includes(section)) {
       return { success: false, newVersion: expectedVersion, error: `Role "${role}" not authorized` };
     }
@@ -519,4 +529,75 @@ export class InMemoryBlackboard {
   get(sessionId: string): BlackboardRow | null {
     return this.sessions.get(sessionId) || null;
   }
+}
+
+// ── Concurrent Blackboard Extensions (S25 T5) ───────────────
+
+/**
+ * Write to a blackboard section with auto-retry on version conflict.
+ * Re-reads the latest version on conflict and retries (max 3 by default).
+ */
+export async function writeSectionWithRetry(
+  supabase: SupabaseClient,
+  sessionId: string,
+  section: SectionName,
+  data: any,
+  role: string,
+  expectedVersion: number,
+  maxRetries: number = 3
+): Promise<{ success: boolean; newVersion: number; error?: string }> {
+  let currentVersion = expectedVersion;
+
+  for (let i = 0; i <= maxRetries; i++) {
+    const result = await writeSection(supabase, sessionId, section, data, role, currentVersion);
+    if (result.success) return result;
+
+    if (result.error?.includes("Version conflict") && i < maxRetries) {
+      // Re-read latest version and retry
+      const latest = await getFullBlackboard(supabase, sessionId);
+      if (latest) {
+        currentVersion = latest.version;
+      }
+      continue;
+    }
+
+    return result; // non-retryable error or max retries exhausted
+  }
+
+  return { success: false, newVersion: currentVersion, error: "Max retries exceeded" };
+}
+
+/**
+ * Merge multiple agent implementation results into the blackboard (fan-in).
+ * Concatenates arrays (files, tests, summaries) instead of overwriting.
+ */
+export async function mergeImplementationSection(
+  supabase: SupabaseClient,
+  sessionId: string,
+  agentResults: Array<{ structured?: any; output?: string }>,
+  expectedVersion: number
+): Promise<{ success: boolean; newVersion: number; error?: string }> {
+  const existing = await readSection(supabase, sessionId, "implementation") || {};
+
+  const merged = {
+    files_modified: [...(existing.files_modified || [])],
+    tests_added: [...(existing.tests_added || [])],
+    summaries: [...(existing.summaries || [])],
+  };
+
+  for (const result of agentResults) {
+    const data = result.structured || {};
+    merged.files_modified.push(...(data.files_modified || data.files || []));
+    merged.tests_added.push(...(data.tests_added || data.tests || []));
+    merged.summaries.push(data.summary || (result.output || "").substring(0, 1000));
+  }
+
+  return writeSectionWithRetry(
+    supabase,
+    sessionId,
+    "implementation",
+    merged,
+    "system",
+    expectedVersion
+  );
 }
