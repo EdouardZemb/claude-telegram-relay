@@ -12,12 +12,15 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 26 Telegram commands, voice, photos, docs |
+| `relay.ts` | Main bot: message handling, 27 Telegram commands, voice, photos, docs |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
-| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection, cost tracking per agent |
+| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection, cost tracking per agent, blackboard integration |
+| `blackboard.ts` | Shared structured workspace: versioned JSONB sections, optimistic locking, role authorization, traceability reports |
+| `gate-evaluator.ts` | Gate evaluation: LLM-based quality checks at pipeline gates, evaluate-rework loop (max 2 iterations) |
+| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context |
 | `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent |
@@ -51,7 +54,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/start <id>` | Mark task in_progress |
 | `/done <id>` | Mark task complete |
 | `/exec <id>` | Launch Claude Code agent (requires Gate 1) |
-| `/orchestrate <id>` | Full BMad multi-agent pipeline |
+| `/orchestrate <id>` | Full BMad multi-agent pipeline (--blackboard for gated SDD flow) |
 | `/autopipeline <id>` | Autonomous end-to-end pipeline |
 | `/plan <request>` | Decompose request into subtasks |
 | `/planify` | Proactive planner: backlog reordering, pacing |
@@ -75,7 +78,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`, `bump_memory_access`
 
@@ -115,6 +118,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Workflow enforcement (S23):** `WorkflowTracker.transition()` accepts `enforce: true` to validate transitions against workflow.yaml. Retry policies are derived from checkpoint modes (off=0, light=1, strict=3).
 
+**Blackboard (S24):** Shared JSONB workspace per pipeline run (`blackboard` table). 5 sections: spec, plan, tasks, implementation, verification. Versioned with optimistic locking. Role-based write authorization. `useBlackboard: true` on orchestrate() enables the blackboard flow. Gate Evaluator checks quality at each gate (score 0-100, pass/fail). Evaluate-rework loop (max 2 iterations) self-corrects on failure. Adversarial Verifier detects spec drift in clean room (spec + implementation only, no plan/tasks). Traceability report maps FR->tasks->tests->files. `/orchestrate <id> [pipeline] --blackboard` activates the flow.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -130,7 +135,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    27 TypeScript modules (core logic)
+src/                    30 TypeScript modules (core logic)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
@@ -139,7 +144,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  508 tests (unit + integration)
+tests/                  555 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -147,7 +152,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (508 tests, all must pass before merge)
+- Tests: `bun test` (555 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI → merge to master
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting

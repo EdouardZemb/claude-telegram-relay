@@ -373,6 +373,43 @@ CREATE INDEX IF NOT EXISTS idx_cost_tracking_created ON cost_tracking(created_at
 CREATE INDEX IF NOT EXISTS idx_cost_tracking_project_id ON cost_tracking(project_id);
 
 -- ============================================================
+-- BLACKBOARD TABLE (Shared structured workspace for pipelines)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS blackboard (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  task_id UUID REFERENCES tasks(id),
+  session_id TEXT NOT NULL UNIQUE,
+  version INTEGER NOT NULL DEFAULT 1,
+  sections JSONB NOT NULL DEFAULT '{}',
+  history JSONB NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'completed', 'failed')),
+  pipeline_type TEXT,
+  project_id UUID REFERENCES projects(id)
+);
+
+COMMENT ON TABLE blackboard IS 'Shared structured workspace for multi-agent pipelines. Versioned JSONB sections with optimistic locking.';
+
+CREATE INDEX IF NOT EXISTS idx_blackboard_session ON blackboard(session_id);
+CREATE INDEX IF NOT EXISTS idx_blackboard_task ON blackboard(task_id);
+CREATE INDEX IF NOT EXISTS idx_blackboard_status ON blackboard(status);
+
+-- Auto-update updated_at on blackboard
+CREATE OR REPLACE FUNCTION update_blackboard_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+CREATE TRIGGER blackboard_updated_at
+  BEFORE UPDATE ON blackboard
+  FOR EACH ROW EXECUTE FUNCTION update_blackboard_updated_at();
+
+-- ============================================================
 -- WORKFLOW AUDIT TABLE (Configuration change tracking)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_audit (
@@ -426,6 +463,7 @@ ALTER TABLE document_shards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cost_tracking ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blackboard ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_archive ENABLE ROW LEVEL SECURITY;
 
 -- Project-scoped RLS helper function
@@ -509,6 +547,9 @@ CREATE POLICY "Allow all for authenticated" ON workflow_audit FOR ALL USING (tru
 
 -- Cost tracking: full access
 CREATE POLICY "Allow all for authenticated" ON cost_tracking FOR ALL USING (true);
+
+-- Blackboard: full access
+CREATE POLICY "Allow all for authenticated" ON blackboard FOR ALL USING (true);
 
 -- Memory archive: full access
 CREATE POLICY "Allow all for authenticated" ON memory_archive FOR ALL USING (true);

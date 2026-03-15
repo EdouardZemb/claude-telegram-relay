@@ -32,6 +32,33 @@ import {
   buildStructuredChainContext,
 } from "./agent-schemas.ts";
 import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
+import {
+  createBlackboard,
+  readSection,
+  writeSection,
+  getFullBlackboard,
+  updateBlackboardStatus,
+  generateTraceabilityReport,
+  formatTraceabilityReport,
+  InMemoryBlackboard,
+  type BlackboardRow,
+  type SectionName,
+} from "./blackboard.ts";
+import {
+  evaluateGate,
+  evaluateAndRework,
+  formatEvaluationFeedback,
+  type GateName,
+  type GateEvaluation,
+} from "./gate-evaluator.ts";
+import {
+  verifySpecVsImplementation,
+  persistDriftReport,
+  formatDriftReport,
+  type DriftReport,
+} from "./adversarial-verifier.ts";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -59,6 +86,13 @@ export interface OrchestratedResult {
   steps: AgentStepResult[];
   totalDurationMs: number;
   summary: string;
+  /** S24: Blackboard data (only present when useBlackboard=true) */
+  blackboard?: {
+    sessionId: string;
+    gateEvaluations: GateEvaluation[];
+    driftReport: DriftReport | null;
+    traceabilityReport: ReturnType<typeof generateTraceabilityReport> | null;
+  };
 }
 
 /** Maps agent roles to the workflow command they execute */
@@ -319,6 +353,8 @@ export interface OrchestrateOptions {
   maxRetries?: number;
   /** Use dynamic pipeline selection based on task analysis (S22-06) */
   autoPipeline?: boolean;
+  /** Use blackboard for structured context passing (S24) */
+  useBlackboard?: boolean;
 }
 
 /**
@@ -393,6 +429,60 @@ export async function orchestrate(
     });
   }
 
+  // S24: Blackboard initialization
+  let bbSessionId: string | null = null;
+  let bbVersion = 1;
+  let bbFallback: InMemoryBlackboard | null = null;
+  const gateEvaluations: GateEvaluation[] = [];
+  let driftReport: DriftReport | null = null;
+
+  if (options.useBlackboard) {
+    bbSessionId = `bb-${task.id}-${Date.now()}`;
+
+    if (supabase) {
+      const bb = await createBlackboard(
+        supabase,
+        task.id,
+        bbSessionId,
+        classifyPipeline(task),
+        task.project_id || undefined
+      );
+      if (!bb) {
+        // EC-008: fallback to in-memory
+        console.warn("orchestrate: Supabase blackboard creation failed, using in-memory fallback");
+        bbFallback = new InMemoryBlackboard();
+        bbFallback.create(task.id, bbSessionId, classifyPipeline(task));
+      }
+    } else {
+      // No supabase: in-memory fallback
+      bbFallback = new InMemoryBlackboard();
+      bbFallback.create(task.id, bbSessionId, classifyPipeline(task));
+    }
+
+    // Load SDD spec template into blackboard.spec (AC-023, FR-008)
+    const specTemplatePath = join(
+      process.env.PROJECT_DIR || process.cwd(),
+      "config",
+      "spec-template.md"
+    );
+    try {
+      const template = readFileSync(specTemplatePath, "utf-8");
+      if (supabase && !bbFallback) {
+        const res = await writeSection(supabase, bbSessionId, "spec", { template, task_title: task.title, task_description: task.description }, "system", bbVersion);
+        if (res.success) bbVersion = res.newVersion;
+      } else if (bbFallback) {
+        const res = bbFallback.write(bbSessionId, "spec", { template, task_title: task.title, task_description: task.description }, "system", bbVersion);
+        if (res.success) bbVersion = res.newVersion;
+      }
+    } catch {
+      // Template not available, proceed without
+    }
+
+    if (options.onProgress) {
+      await options.onProgress("Blackboard initialise" + (bbFallback ? " (in-memory fallback)" : ""));
+    }
+  }
+
   for (const agentId of pipeline) {
     const agent = getAgent(agentId);
     const agentLabel = agent
@@ -453,6 +543,47 @@ export async function orchestrate(
       await persistAgentArtifact(supabase, task.id, agentId, result!.output);
     }
 
+    // S24: Write to blackboard section + gate evaluation
+    if (options.useBlackboard && bbSessionId && result!.success) {
+      const sectionMap: Record<string, SectionName> = {
+        analyst: "spec",
+        pm: "tasks",
+        architect: "plan",
+        dev: "implementation",
+        qa: "verification",
+      };
+      const section = sectionMap[agentId];
+      if (section) {
+        const sectionData = result!.structured || { raw: result!.output.substring(0, 30000) };
+        if (supabase && !bbFallback) {
+          const res = await writeSection(supabase, bbSessionId, section, sectionData, agentId, bbVersion);
+          if (res.success) bbVersion = res.newVersion;
+        } else if (bbFallback) {
+          const res = bbFallback.write(bbSessionId, section, sectionData, agentId, bbVersion);
+          if (res.success) bbVersion = res.newVersion;
+        }
+
+        // Gate evaluation for pm, architect, dev (not analyst/qa)
+        const gateMap: Record<string, GateName> = {
+          pm: "tasks",
+          architect: "plan",
+          dev: "implementation",
+        };
+        const gate = gateMap[agentId];
+        if (gate) {
+          if (options.onProgress) {
+            await options.onProgress(`Gate evaluation: ${gate}...`);
+          }
+          const evaluation = await evaluateGate(supabase, bbSessionId, gate, sectionData);
+          gateEvaluations.push(evaluation);
+          if (options.onProgress) {
+            const status = evaluation.pass ? "PASS" : "FAIL";
+            await options.onProgress(`Gate ${gate}: ${status} (${evaluation.score}/100)`);
+          }
+        }
+      }
+    }
+
     // Log cost (S23-05)
     if (supabase && result!.tokensInput) {
       logCost(supabase, {
@@ -500,6 +631,65 @@ export async function orchestrate(
 
   const totalDurationMs = Date.now() - startTime;
 
+  // S24: Adversarial verifier + traceability (after all agents done)
+  let traceabilityReport: ReturnType<typeof generateTraceabilityReport> | null = null;
+
+  if (options.useBlackboard && bbSessionId) {
+    // Adversarial verifier (skip for QUICK — EC-006)
+    const pipelineTypeLabel = classifyPipeline(task);
+    if (pipelineTypeLabel !== "QUICK") {
+      if (options.onProgress) {
+        await options.onProgress("Adversarial verification en cours...");
+      }
+
+      let spec: any = null;
+      let impl: any = null;
+      if (supabase && !bbFallback) {
+        spec = await readSection(supabase, bbSessionId, "spec");
+        impl = await readSection(supabase, bbSessionId, "implementation");
+      } else if (bbFallback) {
+        spec = bbFallback.read(bbSessionId, "spec");
+        impl = bbFallback.read(bbSessionId, "implementation");
+      }
+
+      driftReport = await verifySpecVsImplementation(spec, impl, pipelineTypeLabel);
+
+      if (driftReport && supabase) {
+        await persistDriftReport(supabase, bbSessionId, task.id, driftReport);
+      }
+
+      if (options.onProgress && driftReport) {
+        await options.onProgress(
+          `Adversarial verification: ${driftReport.coverage_score}% coverage — ${driftReport.overall_verdict.toUpperCase()}`
+        );
+      }
+    }
+
+    // Traceability report
+    let sections: any = null;
+    if (supabase && !bbFallback) {
+      const bb = await getFullBlackboard(supabase, bbSessionId);
+      if (bb) sections = bb.sections;
+    } else if (bbFallback) {
+      const bb = bbFallback.get(bbSessionId);
+      if (bb) sections = bb.sections;
+    }
+
+    if (sections) {
+      traceabilityReport = generateTraceabilityReport(sections);
+      if (options.onProgress) {
+        await options.onProgress(
+          `Traceability: ${traceabilityReport.coverage_percentage}% FR coverage`
+        );
+      }
+    }
+
+    // Mark blackboard as completed
+    if (supabase && !bbFallback) {
+      await updateBlackboardStatus(supabase, bbSessionId, steps.every(s => s.success) ? "completed" : "failed");
+    }
+  }
+
   // Build summary
   const summary = buildOrchestrationSummary(steps, totalDurationMs);
 
@@ -508,12 +698,24 @@ export async function orchestrate(
     await logOrchestrationResult(supabase, task.id, steps, totalDurationMs, pipelineLabel);
   }
 
-  return {
+  const orchestratedResult: OrchestratedResult = {
     success: steps.every((s) => s.success),
     steps,
     totalDurationMs,
     summary,
   };
+
+  // Attach blackboard data if used
+  if (options.useBlackboard && bbSessionId) {
+    orchestratedResult.blackboard = {
+      sessionId: bbSessionId,
+      gateEvaluations,
+      driftReport,
+      traceabilityReport,
+    };
+  }
+
+  return orchestratedResult;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -713,6 +915,36 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     const retryTag = step.retryCount ? ` (${step.retryCount} retries)` : "";
     const costTag = step.costUsd ? ` ~$${step.costUsd.toFixed(4)}` : "";
     lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}${costTag}`);
+  }
+
+  // S24: Blackboard results
+  if (result.blackboard) {
+    const bb = result.blackboard;
+    lines.push("");
+    lines.push("--- Blackboard ---");
+
+    if (bb.gateEvaluations.length > 0) {
+      lines.push("Gates:");
+      for (const gate of bb.gateEvaluations) {
+        const status = gate.pass ? "PASS" : "FAIL";
+        lines.push(`  ${gate.gate_name}: ${status} (${gate.score}/100)`);
+        if (gate.issues.length > 0) {
+          for (const issue of gate.issues.slice(0, 3)) {
+            lines.push(`    [${issue.severity}] ${issue.description}`);
+          }
+        }
+      }
+    }
+
+    if (bb.driftReport) {
+      lines.push("");
+      lines.push(formatDriftReport(bb.driftReport));
+    }
+
+    if (bb.traceabilityReport) {
+      lines.push("");
+      lines.push(formatTraceabilityReport(bb.traceabilityReport));
+    }
   }
 
   // Add last agent's output as the main result
