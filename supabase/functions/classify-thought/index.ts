@@ -38,9 +38,19 @@ Rules:
 - people: array of names mentioned (empty if none)
 - action_items: array of actionable items detected (empty if none)
 - is_memorable: true if this message contains a fact, decision, preference, or important information worth remembering long-term. false for greetings, small talk, simple questions, or transient messages.
+- is_idea: true if the message expresses a new idea, suggestion, proposal, improvement, feature request, or "what if" scenario. Be AGGRESSIVE with idea detection — when in doubt, flag it as an idea.
 - summary: one sentence summary of the message content (in the same language as the message)
 
-Be conservative with is_memorable — only flag truly important information.`;
+Idea detection guidelines (be aggressive):
+- "on pourrait..." / "we could..." / "it would be nice to..." → idea
+- "et si on..." / "what if..." / "imagine..." → idea
+- Any suggestion for improvement, new feature, or change → idea
+- Brainstorming, proposals, hypothetical scenarios → idea
+- "il faudrait..." / "we should..." when proposing something new → idea
+- When type is "idea", ALWAYS set is_idea: true AND is_memorable: true
+- Prefer classifying as "idea" over "observation" when the message contains a forward-looking suggestion
+
+Be conservative with is_memorable — only flag truly important information. Exception: ideas are always memorable.`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",

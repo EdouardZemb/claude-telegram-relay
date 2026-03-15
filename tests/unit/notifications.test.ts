@@ -14,7 +14,7 @@ process.env.DEV_THREAD_ID = "100";
 process.env.SPRINT_THREAD_ID = "200";
 
 // Force re-import with env vars set
-const { initNotifications, notifyPRCreated, notifyTaskStarted, notifyTaskDone } = await import("../../src/notifications");
+const { initNotifications, notifyPRCreated, notifyTaskStarted, notifyTaskDone, notifyIdeaCreated, notifyIdeaPromoted } = await import("../../src/notifications");
 
 function createMockBot(shouldFail = false) {
   return {
@@ -120,6 +120,86 @@ describe("notifyTaskDone", () => {
     const message = bot.api.sendMessage.mock.calls[0][1];
     expect(message).toContain("[12345678]");
     expect(message).not.toContain("1234567890");
+  });
+});
+
+describe("notifyIdeaCreated", () => {
+  it("sends idea created notification with source", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    await notifyIdeaCreated("Ajouter un mode sombre au dashboard", "manual");
+
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    const args = bot.api.sendMessage.mock.calls[0];
+    expect(typeof args[0]).toBe("number");
+    expect(args[1]).toContain("Nouvelle idee");
+    expect(args[1]).toContain("manual");
+    expect(args[1]).toContain("mode sombre");
+    expect(args[2]).toHaveProperty("message_thread_id");
+  });
+
+  it("truncates long idea content to 80 chars", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    const longIdea = "A".repeat(120);
+    await notifyIdeaCreated(longIdea, "auto-detect");
+
+    const message = bot.api.sendMessage.mock.calls[0][1];
+    expect(message).toContain("...");
+    expect(message).not.toContain("A".repeat(120));
+  });
+
+  it("includes timestamp in HH:MM format", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    await notifyIdeaCreated("Some idea", "intent-tag");
+
+    const message = bot.api.sendMessage.mock.calls[0][1];
+    expect(message).toMatch(/\[\d{2}:\d{2}\]/);
+  });
+});
+
+describe("notifyIdeaPromoted", () => {
+  it("sends idea promoted notification with task title", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    await notifyIdeaPromoted("Ajouter des tests E2E", "Ajouter des tests E2E");
+
+    expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    const args = bot.api.sendMessage.mock.calls[0];
+    expect(typeof args[0]).toBe("number");
+    expect(args[1]).toContain("Idee promue en tache");
+    expect(args[1]).toContain("tests E2E");
+    expect(args[1]).toContain("Tache:");
+    expect(args[2]).toHaveProperty("message_thread_id");
+  });
+
+  it("truncates long idea content in promotion notification", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    const longIdea = "B".repeat(120);
+    await notifyIdeaPromoted(longIdea, "Task from long idea");
+
+    const message = bot.api.sendMessage.mock.calls[0][1];
+    expect(message).toContain("...");
+    expect(message).toContain("Task from long idea");
+  });
+
+  it("formats message with line breaks", async () => {
+    const bot = createMockBot();
+    initNotifications(bot);
+
+    await notifyIdeaPromoted("Mon idee", "Ma tache");
+
+    const message = bot.api.sendMessage.mock.calls[0][1];
+    const lines = message.split("\n");
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toBe("Tache: Ma tache");
   });
 });
 

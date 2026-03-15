@@ -59,17 +59,21 @@ CREATE TABLE IF NOT EXISTS memory (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  type TEXT NOT NULL CHECK (type IN ('fact', 'goal', 'completed_goal', 'preference')),
+  type TEXT NOT NULL CHECK (type IN ('fact', 'goal', 'completed_goal', 'preference', 'idea')),
   content TEXT NOT NULL,
   deadline TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
   priority INTEGER DEFAULT 0,
+  idea_status TEXT CHECK (idea_status IS NULL OR idea_status IN ('new', 'reviewed', 'promoted', 'archived')),
   metadata JSONB DEFAULT '{}',
   embedding VECTOR(1536)
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory(type);
 CREATE INDEX IF NOT EXISTS idx_memory_created_at ON memory(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_idea_status ON memory(idea_status) WHERE idea_status IS NOT NULL;
+
+COMMENT ON COLUMN memory.idea_status IS 'Lifecycle status for idea-type memories: new → reviewed → promoted → archived';
 
 -- ============================================================
 -- LOGS TABLE (Observability)
