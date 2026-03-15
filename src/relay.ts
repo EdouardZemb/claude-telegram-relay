@@ -111,6 +111,11 @@ import {
   formatPipelineResult,
 } from "./auto-pipeline.ts";
 import {
+  getSprintCostSummary,
+  getTotalCost,
+  formatCostSummary,
+} from "./cost-tracking.ts";
+import {
   loadFeedbackRules,
   processRetroFeedback,
 } from "./feedback-loop.ts";
@@ -667,7 +672,7 @@ bot.command("help", async (ctx) => {
     "",
     "EXECUTION",
     "  /exec <id> -- Lancer l'agent Dev (Amelia)",
-    "  /orchestrate <id> [pipeline] -- Pipeline multi-agents (full/quick/review)",
+    "  /orchestrate <id> [pipeline] [--blackboard] -- Pipeline multi-agents (full/quick/review)",
     "  /autopipeline <id> [full|fast] -- Pipeline auto BMad complet",
     "  /workflow -- Voir le processus BMad complet",
     "",
@@ -677,6 +682,7 @@ bot.command("help", async (ctx) => {
     "  /patterns -- Analyse multi-sprints (Analyste Mary)",
     "  /alerts -- Alertes proactives (QA Quinn)",
     "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
+    "  /cost [sprint|total] -- Suivi couts tokens par agent/tache/sprint",
     "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
     "  /ideas [list|add|review|promote|archive] -- Gerer les idees",
     "",
@@ -1213,20 +1219,24 @@ bot.command("orchestrate", async (ctx) => {
   }
 
   const args = ctx.match?.trim() || "";
-  // Parse: /orchestrate <taskId> [pipeline]
+  // Parse: /orchestrate <taskId> [pipeline] [--blackboard]
   // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
-  const parts = args.split(/\s+/);
+  const useBlackboard = args.includes("--blackboard");
+  const cleanArgs = args.replace("--blackboard", "").trim();
+  const parts = cleanArgs.split(/\s+/);
   const idPrefix = parts[0];
   const pipelineArg = parts[1] || "full";
 
   if (!idPrefix) {
     await ctx.reply(
-      "Usage: /orchestrate <id> [pipeline]\n\n" +
+      "Usage: /orchestrate <id> [pipeline] [--blackboard]\n\n" +
       "Pipelines disponibles:\n" +
       "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
       "  quick — Dev -> QA\n" +
       "  review — QA -> Architect\n" +
-      "  custom — ex: /orchestrate abc pm,dev,qa",
+      "  custom — ex: /orchestrate abc pm,dev,qa\n\n" +
+      "Options:\n" +
+      "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)",
       threadOpts(ctx)
     );
     return;
@@ -1277,14 +1287,16 @@ bot.command("orchestrate", async (ctx) => {
     pipeline = customAgents as AgentRole[];
   }
 
+  const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
   await ctx.reply(
-    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}\nCa peut prendre plusieurs minutes...`,
+    `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}\nCa peut prendre plusieurs minutes...`,
     threadOpts(ctx)
   );
 
   const result = await orchestrate(supabase, task, {
     pipeline,
     stopOnFailure: true,
+    useBlackboard,
     onProgress: async (msg) => {
       await ctx.reply(msg, threadOpts(ctx));
     },
@@ -1838,6 +1850,36 @@ bot.command("alerts", async (ctx) => {
   await ctx.replyWithChatAction("typing");
   const alerts = await runAllChecks(supabase, sprintId);
   await sendResponse(ctx, formatAlerts(alerts));
+});
+
+// /cost — token usage and cost tracking (S23-07)
+bot.command("cost", async (ctx) => {
+  const blocked = commandGuard(ctx, "cost");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const arg = ctx.match?.trim();
+
+  if (arg === "total" || arg === "all") {
+    const total = await getTotalCost(supabase);
+    await sendResponse(ctx,
+      `Couts totaux\n\nTokens: ${total.totalTokens}\nCout estime: $${total.totalCostUsd.toFixed(4)}\nExecutions: ${total.executions}`
+    );
+    return;
+  }
+
+  const sprintId = arg || await getCurrentSprint(supabase);
+  if (!sprintId) {
+    await ctx.reply("Aucun sprint actif. Usage: /cost S22 ou /cost total", threadOpts(ctx));
+    return;
+  }
+
+  await ctx.replyWithChatAction("typing");
+  const summary = await getSprintCostSummary(supabase, sprintId);
+  await sendResponse(ctx, formatCostSummary(summary));
 });
 
 // /planify — proactive backlog analysis with recommendations
