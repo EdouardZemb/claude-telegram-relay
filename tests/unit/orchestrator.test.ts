@@ -2,6 +2,7 @@
  * Unit Tests — src/orchestrator.ts
  *
  * Tests for the multi-agent orchestration framework.
+ * S22: Structured message passing, retry loop, dynamic pipeline selection.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -10,10 +11,13 @@ import {
   QUICK_PIPELINE,
   REVIEW_PIPELINE,
   formatOrchestrationResult,
+  selectPipeline,
+  classifyPipeline,
   type AgentRole,
   type OrchestratedResult,
   type AgentStepResult,
 } from "../../src/orchestrator";
+import type { Task } from "../../src/tasks";
 
 describe("Pipeline Definitions", () => {
   it("DEFAULT_PIPELINE includes all main agents in order", () => {
@@ -44,9 +48,18 @@ describe("formatOrchestrationResult", () => {
     agentName: string,
     success: boolean,
     output: string = "test output",
-    durationMs: number = 5000
+    durationMs: number = 5000,
+    opts?: { structured?: any; retryCount?: number }
   ): AgentStepResult {
-    return { agentId, agentName, success, output, durationMs };
+    return {
+      agentId,
+      agentName,
+      success,
+      output,
+      structured: opts?.structured ?? null,
+      durationMs,
+      retryCount: opts?.retryCount,
+    };
   }
 
   it("formats a successful orchestration", () => {
@@ -141,5 +154,198 @@ describe("formatOrchestrationResult", () => {
     expect(formatted).toContain("15s");
     expect(formatted).toContain("30s");
     expect(formatted).toContain("120s");
+  });
+
+  // S22 — Structured output and retry display
+
+  it("shows [JSON] tag for steps with structured output", () => {
+    const result: OrchestratedResult = {
+      success: true,
+      steps: [
+        makeStep("analyst", "Mary", true, "Done", 5000, {
+          structured: { role: "analyst", analysis: "ok", risks: [], recommendations: [], dependencies: [], feasibility: "high" },
+        }),
+        makeStep("dev", "Amelia", true, "Done", 10000),
+      ],
+      totalDurationMs: 15000,
+      summary: "Done",
+    };
+
+    const formatted = formatOrchestrationResult(result);
+    expect(formatted).toContain("[JSON]");
+    // Dev should NOT have [JSON]
+    const lines = formatted.split("\n");
+    const ameliaLine = lines.find((l) => l.includes("Amelia"));
+    expect(ameliaLine).not.toContain("[JSON]");
+  });
+
+  it("shows retry count in formatted output", () => {
+    const result: OrchestratedResult = {
+      success: true,
+      steps: [
+        makeStep("dev", "Amelia", true, "Done", 15000, { retryCount: 2 }),
+      ],
+      totalDurationMs: 15000,
+      summary: "Done after retries",
+    };
+
+    const formatted = formatOrchestrationResult(result);
+    expect(formatted).toContain("2 retries");
+    expect(formatted).toContain("Retries: 2");
+  });
+
+  it("does not show retries when count is 0", () => {
+    const result: OrchestratedResult = {
+      success: true,
+      steps: [makeStep("dev", "Amelia", true, "Done")],
+      totalDurationMs: 5000,
+      summary: "Done",
+    };
+
+    const formatted = formatOrchestrationResult(result);
+    expect(formatted).not.toContain("retries");
+    expect(formatted).not.toContain("Retries:");
+  });
+
+  it("shows total retries across multiple agents", () => {
+    const result: OrchestratedResult = {
+      success: true,
+      steps: [
+        makeStep("analyst", "Mary", true, "Done", 5000, { retryCount: 1 }),
+        makeStep("dev", "Amelia", true, "Done", 10000, { retryCount: 2 }),
+      ],
+      totalDurationMs: 15000,
+      summary: "Done",
+    };
+
+    const formatted = formatOrchestrationResult(result);
+    expect(formatted).toContain("Retries: 3");
+  });
+});
+
+// ── S22-06: Dynamic Pipeline Selection ───────────────────────
+
+describe("selectPipeline", () => {
+  function makeTask(overrides: Partial<Task> = {}): Task {
+    return {
+      id: "test-id",
+      title: "Test task",
+      status: "backlog",
+      priority: 2,
+      created_at: new Date().toISOString(),
+      project: "test",
+      ...overrides,
+    } as Task;
+  }
+
+  it("returns explicit pipeline when provided", () => {
+    const task = makeTask({ title: "Fix bug" });
+    const pipeline = selectPipeline(task, ["dev", "qa"]);
+    expect(pipeline).toEqual(["dev", "qa"]);
+  });
+
+  it("selects QUICK for bug fix tasks", () => {
+    const bugTitles = [
+      "Fix crash on startup",
+      "Bug: messages not delivered",
+      "Hotfix for login error",
+      "Corriger le crash du dashboard",
+      "Patch regression S21",
+    ];
+
+    for (const title of bugTitles) {
+      const task = makeTask({ title });
+      expect(selectPipeline(task)).toEqual(QUICK_PIPELINE);
+    }
+  });
+
+  it("selects REVIEW for review/audit tasks", () => {
+    const reviewTitles = [
+      "Code review module orchestrator",
+      "Audit securite des endpoints",
+      "Refactor memory module",
+      "Nettoyage du code mort",
+    ];
+
+    for (const title of reviewTitles) {
+      const task = makeTask({ title });
+      expect(selectPipeline(task)).toEqual(REVIEW_PIPELINE);
+    }
+  });
+
+  it("selects QUICK for documentation tasks", () => {
+    const docTitles = [
+      "Update README documentation",
+      "Ajouter le changelog",
+      "Guide de setup pour nouveaux devs",
+    ];
+
+    for (const title of docTitles) {
+      const task = makeTask({ title });
+      expect(selectPipeline(task)).toEqual(QUICK_PIPELINE);
+    }
+  });
+
+  it("selects QUICK for simple low-priority tasks", () => {
+    const task = makeTask({
+      title: "Add button",
+      priority: 3,
+      subtasks: null,
+    });
+    expect(selectPipeline(task)).toEqual(QUICK_PIPELINE);
+  });
+
+  it("selects DEFAULT for complex feature tasks", () => {
+    const task = makeTask({
+      title: "Implement multi-agent parallel execution with worktrees",
+      priority: 1,
+    });
+    expect(selectPipeline(task)).toEqual(DEFAULT_PIPELINE);
+  });
+
+  it("checks description as well as title", () => {
+    const task = makeTask({
+      title: "Update module",
+      description: "Fix the crash that happens on reload",
+    });
+    expect(selectPipeline(task)).toEqual(QUICK_PIPELINE);
+  });
+
+  it("does not classify P1/P2 short titles without keywords as QUICK", () => {
+    const task = makeTask({
+      title: "Add new feature",
+      priority: 1,
+    });
+    expect(selectPipeline(task)).toEqual(DEFAULT_PIPELINE);
+  });
+});
+
+describe("classifyPipeline", () => {
+  function makeTask(overrides: Partial<Task> = {}): Task {
+    return {
+      id: "test-id",
+      title: "Test task",
+      status: "backlog",
+      priority: 2,
+      created_at: new Date().toISOString(),
+      project: "test",
+      ...overrides,
+    } as Task;
+  }
+
+  it("classifies bug tasks as QUICK", () => {
+    expect(classifyPipeline(makeTask({ title: "Fix bug" }))).toBe("QUICK");
+  });
+
+  it("classifies review tasks as REVIEW", () => {
+    expect(classifyPipeline(makeTask({ title: "Code review" }))).toBe("REVIEW");
+  });
+
+  it("classifies doc tasks as DOC", () => {
+    expect(classifyPipeline(makeTask({ title: "Update documentation" }))).toBe("DOC");
+  });
+
+  it("classifies feature tasks as DEFAULT", () => {
+    expect(classifyPipeline(makeTask({ title: "Implement new auth system", priority: 1 }))).toBe("DEFAULT");
   });
 });

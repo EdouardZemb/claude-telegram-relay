@@ -17,10 +17,11 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
-| `orchestrator.ts` | Multi-agent pipeline: chains analyst → pm → architect → dev → qa |
+| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection |
+| `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context |
 | `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent |
-| `auto-pipeline.ts` | Autonomous end-to-end pipeline (PRD → arch → dev → review → done) |
+| `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto pipeline selection and retries |
 | `workflow.ts` | Workflow engine: loads config/workflow.yaml, tracks state transitions |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
@@ -97,8 +98,14 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Pipelines:**
 - DEFAULT: analyst → pm → architect → dev → qa
-- QUICK: dev → qa
-- REVIEW: qa → architect
+- QUICK: dev → qa (auto-selected for bugs, fixes, docs, simple P3 tasks)
+- REVIEW: qa → architect (auto-selected for review/audit/refactor tasks)
+
+**Pipeline selection (S22):** `autoPipeline: true` enables dynamic selection based on task title/description keywords and priority. Manual override via explicit `pipeline` option.
+
+**Structured message passing (S22):** Agents produce typed JSON output (<<<JSON>>>...<<<END>>> markers). Each role has a defined schema (analyst: risks/feasibility, pm: subtasks/priorities, architect: design/decisions, dev: files/summary, qa: score/findings, sm: summary/next_steps). Downstream agents receive structured context instead of raw text.
+
+**Retry loop (S22):** `maxRetries` option (default 0). Failed agents are retried with exponential backoff (1s, 2s, 4s... max 30s). Retry metrics logged to workflow_logs.
 
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
@@ -124,7 +131,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  383 tests (unit + integration)
+tests/                  440 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -132,7 +139,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (383 tests, all must pass before merge)
+- Tests: `bun test` (440 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI → merge to master
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting

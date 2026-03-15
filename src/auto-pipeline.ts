@@ -15,7 +15,13 @@ import type { Task } from "./tasks.ts";
 import { updateTaskStatus } from "./tasks.ts";
 import { executeTask } from "./agent.ts";
 import { checkGatesWithOverrides } from "./gates.ts";
-import { orchestrate, type AgentRole, type OrchestratedResult } from "./orchestrator.ts";
+import {
+  orchestrate,
+  selectPipeline,
+  classifyPipeline,
+  type AgentRole,
+  type OrchestratedResult,
+} from "./orchestrator.ts";
 import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
 
@@ -52,6 +58,10 @@ export interface PipelineOptions {
   includeAnalysis?: boolean;
   /** Skip gate checks (for overridden tasks) */
   skipGates?: boolean;
+  /** Use dynamic pipeline selection (S22-06) */
+  autoPipeline?: boolean;
+  /** Max retries per agent (S22-04) */
+  maxRetries?: number;
 }
 
 // ── Auto Pipeline ────────────────────────────────────────────
@@ -73,13 +83,21 @@ export async function runAutoPipeline(
   options: PipelineOptions = {}
 ): Promise<PipelineResult> {
   const startTime = Date.now();
-  const { onProgress, includeAnalysis = true, skipGates = false } = options;
+  const {
+    onProgress,
+    includeAnalysis = true,
+    skipGates = false,
+    autoPipeline = false,
+    maxRetries = 0,
+  } = options;
 
   const progress = async (msg: string) => {
     if (onProgress) await onProgress(msg);
   };
 
-  await progress(`AUTO-PIPELINE demarre pour: ${task.title}`);
+  // S22-06: Log pipeline classification
+  const pipelineType = autoPipeline ? classifyPipeline(task) : "DEFAULT";
+  await progress(`AUTO-PIPELINE demarre pour: ${task.title} (pipeline: ${pipelineType})`);
 
   // Track workflow
   let tracker: WorkflowTracker | undefined;
@@ -136,10 +154,15 @@ export async function runAutoPipeline(
     await progress("Phase 3/5: Analyse multi-agents (Analyst -> PM -> Architect)...");
     if (tracker) await tracker.transition("decomposition");
 
+    const analysisPipeline = autoPipeline
+      ? selectPipeline(task).filter((r) => r !== "dev" && r !== "qa")
+      : (["analyst", "pm", "architect"] as AgentRole[]);
+
     const analysisResult = await orchestrate(supabase, task, {
-      pipeline: ["analyst", "pm", "architect"] as AgentRole[],
+      pipeline: analysisPipeline,
       onProgress,
       stopOnFailure: false,
+      maxRetries,
     });
 
     const analysisOk = analysisResult.steps.filter((s) => s.success).length;
