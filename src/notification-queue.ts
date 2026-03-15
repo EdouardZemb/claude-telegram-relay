@@ -6,7 +6,7 @@
  * Persistence via JSON file for crash recovery.
  */
 
-import { readFile, writeFile, rename } from "fs/promises";
+import { readFile, writeFile, rename, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { InlineKeyboard } from "grammy";
 import type { Bot } from "grammy";
@@ -64,6 +64,7 @@ export async function loadQueue(): Promise<void> {
 }
 
 async function saveQueue(): Promise<void> {
+  await mkdir(RELAY_DIR, { recursive: true });
   const tmp = QUEUE_FILE + ".tmp";
   await writeFile(tmp, JSON.stringify(queue, null, 2));
   await rename(tmp, QUEUE_FILE);

@@ -165,7 +165,8 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 
 - Runtime: Bun
 - Tests: `bun test` (640 tests, all must pass before merge)
-- Git workflow: feature branch → PR → CI → merge to master
+- Git workflow: feature branch → PR → CI (must pass) → merge to master
+- CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting
 - Voice messages: always respond with voice + text (dual format)

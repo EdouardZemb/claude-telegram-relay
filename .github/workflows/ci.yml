@@ -18,6 +18,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Setup test environment
+        run: mkdir -p ~/.claude-relay
+
       - name: Type check
         run: |
           for f in src/*.ts dashboard/server.ts; do
@@ -52,7 +55,7 @@ jobs:
             echo "ERROR: $FAIL_COUNT tests failed"
             exit 1
           fi
-          if [ "$PASS_COUNT" -lt 264 ]; then
-            echo "WARNING: Expected at least 264 tests, got $PASS_COUNT"
+          if [ "$PASS_COUNT" -lt 600 ]; then
+            echo "WARNING: Expected at least 600 tests, got $PASS_COUNT"
             exit 1
           fi
