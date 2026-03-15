@@ -72,3 +72,23 @@ export async function notifyTaskDone(
   await sendToTopic(SPRINT_THREAD_ID, message);
 }
 
+// ── Idea Notifications → sprint topic ───────────────────────
+
+export async function notifyIdeaCreated(
+  ideaContent: string,
+  source: string
+): Promise<void> {
+  const preview = ideaContent.length > 80 ? ideaContent.slice(0, 80) + "..." : ideaContent;
+  const message = `[${timestamp()}] Nouvelle idee (${source}): ${preview}`;
+  await sendToTopic(SPRINT_THREAD_ID, message);
+}
+
+export async function notifyIdeaPromoted(
+  ideaContent: string,
+  taskTitle: string
+): Promise<void> {
+  const preview = ideaContent.length > 80 ? ideaContent.slice(0, 80) + "..." : ideaContent;
+  const message = `[${timestamp()}] Idee promue en tache: ${preview}\nTache: ${taskTitle}`;
+  await sendToTopic(SPRINT_THREAD_ID, message);
+}
+

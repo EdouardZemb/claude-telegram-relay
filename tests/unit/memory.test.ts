@@ -14,6 +14,13 @@ import {
   classifyMessage,
   autoRemember,
   archiveOldMemories,
+  findDuplicateIdea,
+  listIdeas,
+  getIdea,
+  reviewIdea,
+  promoteIdea,
+  archiveIdea,
+  formatIdeasList,
 } from "../../src/memory";
 
 describe("processMemoryIntents", () => {
@@ -262,6 +269,44 @@ describe("autoRemember", () => {
     expect(memory[0].metadata.source).toBe("auto-detect");
   });
 
+  it("stores idea when is_idea is true", async () => {
+    const classification = {
+      type: "observation",
+      topics: ["feature"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      is_idea: true,
+      summary: "On pourrait ajouter un mode sombre",
+    };
+
+    await autoRemember(supabase, "On pourrait ajouter un mode sombre au dashboard", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("idea");
+    expect(memory[0].idea_status).toBe("new");
+    expect(memory[0].content).toBe("On pourrait ajouter un mode sombre");
+  });
+
+  it("stores idea when type is idea even without is_idea flag", async () => {
+    const classification = {
+      type: "idea",
+      topics: ["ui"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      summary: "Ajouter des graphiques au dashboard",
+    };
+
+    await autoRemember(supabase, "Et si on ajoutait des graphiques?", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("idea");
+    expect(memory[0].idea_status).toBe("new");
+  });
+
   it("does not store when is_memorable is false", async () => {
     const classification = {
       type: "greeting",
@@ -290,6 +335,455 @@ describe("autoRemember", () => {
 
     // Should not throw
     await autoRemember(null, "test", classification);
+  });
+
+  it("routes preference type to preference memory", async () => {
+    const classification = {
+      type: "preference",
+      topics: ["communication"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      summary: "Prefers responses in French",
+    };
+
+    await autoRemember(supabase, "Je prefere les reponses en francais", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("preference");
+    expect(memory[0].content).toBe("Prefers responses in French");
+  });
+
+  it("auto-creates goals from action_items", async () => {
+    const classification = {
+      type: "decision",
+      topics: ["deployment"],
+      people: [],
+      action_items: ["Deploy to staging", "Update documentation"],
+      is_memorable: true,
+      summary: "Decided to deploy next week",
+    };
+
+    await autoRemember(supabase, "On deploie la semaine prochaine", classification);
+
+    const memory = supabase._getTable("memory");
+    // 1 fact + 2 goals from action_items
+    expect(memory.length).toBe(3);
+    expect(memory[0].type).toBe("fact");
+    expect(memory[1].type).toBe("goal");
+    expect(memory[1].content).toBe("Deploy to staging");
+    expect(memory[1].metadata.source).toBe("action-item");
+    expect(memory[2].type).toBe("goal");
+    expect(memory[2].content).toBe("Update documentation");
+  });
+
+  it("stores original_content in idea metadata for deduplication", async () => {
+    const classification = {
+      type: "idea",
+      topics: ["dashboard"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      is_idea: true,
+      summary: "Ajouter un mode sombre au dashboard",
+    };
+
+    await autoRemember(supabase, "Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("idea");
+    expect(memory[0].content).toBe("Ajouter un mode sombre au dashboard");
+    expect(memory[0].metadata.original_content).toBe("Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.");
+  });
+
+  it("does not store original_content when summary matches content", async () => {
+    const classification = {
+      type: "idea",
+      topics: ["feature"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      is_idea: true,
+      summary: "Ajouter un cache Redis",
+    };
+
+    await autoRemember(supabase, "Ajouter un cache Redis", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory[0].metadata.original_content).toBeUndefined();
+  });
+
+  it("does not create goals when action_items is empty", async () => {
+    const classification = {
+      type: "observation",
+      topics: ["code"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      summary: "Le code est bien structure",
+    };
+
+    await autoRemember(supabase, "Le code est bien structure", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("fact");
+  });
+});
+
+describe("findDuplicateIdea", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  it("returns matching idea content when duplicate found", async () => {
+    supabase._registerFunction("search", (opts: any) => {
+      expect(opts.body.table).toBe("memory");
+      expect(opts.body.match_threshold).toBe(0.85);
+      return [{ content: "Ajouter un mode sombre", type: "idea", similarity: 0.92 }];
+    });
+
+    const result = await findDuplicateIdea(supabase, "Et si on ajoutait un dark mode?");
+    expect(result).toBe("Ajouter un mode sombre");
+  });
+
+  it("returns null when no similar idea exists", async () => {
+    supabase._registerFunction("search", () => []);
+
+    const result = await findDuplicateIdea(supabase, "Une idee totalement nouvelle");
+    expect(result).toBeNull();
+  });
+
+  it("ignores non-idea matches", async () => {
+    supabase._registerFunction("search", () => [
+      { content: "Similar fact", type: "fact", similarity: 0.90 },
+    ]);
+
+    const result = await findDuplicateIdea(supabase, "Some idea");
+    expect(result).toBeNull();
+  });
+
+  it("returns null for null supabase", async () => {
+    const result = await findDuplicateIdea(null, "test");
+    expect(result).toBeNull();
+  });
+
+  it("returns null for empty content", async () => {
+    const result = await findDuplicateIdea(supabase, "");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when search function fails", async () => {
+    supabase._registerFunction("search", () => { throw new Error("Network error"); });
+
+    const result = await findDuplicateIdea(supabase, "test");
+    expect(result).toBeNull();
+  });
+});
+
+describe("autoRemember deduplication", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  it("skips duplicate idea in autoRemember", async () => {
+    supabase._registerFunction("search", () => [
+      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.90 },
+    ]);
+
+    const classification = {
+      type: "idea",
+      topics: ["ui"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      is_idea: true,
+      summary: "Ajouter un dark mode au dashboard",
+    };
+
+    await autoRemember(supabase, "Et si on ajoutait un dark mode?", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(0);
+  });
+
+  it("inserts idea when no duplicate found", async () => {
+    supabase._registerFunction("search", () => []);
+
+    const classification = {
+      type: "idea",
+      topics: ["feature"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      is_idea: true,
+      summary: "Ajouter un cache Redis",
+    };
+
+    await autoRemember(supabase, "Ajouter un cache Redis", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("idea");
+  });
+
+  it("still inserts facts without deduplication", async () => {
+    // No search function registered — facts should not trigger deduplication
+    const classification = {
+      type: "decision",
+      topics: ["database"],
+      people: [],
+      action_items: [],
+      is_memorable: true,
+      summary: "Use PostgreSQL",
+    };
+
+    await autoRemember(supabase, "We decided to use PostgreSQL", classification);
+
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("fact");
+  });
+});
+
+describe("processMemoryIntents deduplication", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  it("skips duplicate IDEA tag", async () => {
+    supabase._registerFunction("search", () => [
+      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.90 },
+    ]);
+
+    const input = "Voila une idee: [IDEA: Ajouter un dark mode au dashboard]";
+    const result = await processMemoryIntents(supabase, input);
+
+    expect(result).toBe("Voila une idee:");
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(0);
+  });
+
+  it("inserts IDEA tag when no duplicate", async () => {
+    supabase._registerFunction("search", () => []);
+
+    const input = "[IDEA: Nouvelle idee unique]";
+    const result = await processMemoryIntents(supabase, input);
+
+    expect(result).toBe("");
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].type).toBe("idea");
+  });
+});
+
+describe("listIdeas", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase({
+      memory: [
+        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: { topics: ["ui"] }, created_at: "2026-03-14T10:00:00Z" },
+        { id: "i2", type: "idea", content: "Cache Redis", idea_status: "reviewed", metadata: { topics: ["perf"] }, created_at: "2026-03-14T11:00:00Z" },
+        { id: "i3", type: "idea", content: "Old idea", idea_status: "archived", metadata: {}, created_at: "2026-03-10T10:00:00Z" },
+        { id: "i4", type: "idea", content: "Promoted one", idea_status: "promoted", metadata: {}, created_at: "2026-03-13T10:00:00Z" },
+        { id: "f1", type: "fact", content: "Not an idea", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      ],
+    });
+  });
+
+  it("returns new and reviewed ideas by default", async () => {
+    const ideas = await listIdeas(supabase);
+    expect(ideas.length).toBe(2);
+    expect(ideas.every((i: any) => ["new", "reviewed"].includes(i.idea_status))).toBe(true);
+  });
+
+  it("filters by custom status", async () => {
+    const ideas = await listIdeas(supabase, ["archived"]);
+    expect(ideas.length).toBe(1);
+    expect(ideas[0].content).toBe("Old idea");
+  });
+
+  it("returns all statuses when all requested", async () => {
+    const ideas = await listIdeas(supabase, ["new", "reviewed", "promoted", "archived"]);
+    expect(ideas.length).toBe(4);
+  });
+
+  it("excludes non-idea types", async () => {
+    const ideas = await listIdeas(supabase, ["new", "reviewed", "promoted", "archived"]);
+    expect(ideas.every((i: any) => i.type === undefined || i.id !== "f1")).toBe(true);
+  });
+
+  it("returns empty array for null supabase", async () => {
+    const ideas = await listIdeas(null);
+    expect(ideas).toEqual([]);
+  });
+});
+
+describe("getIdea", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase({
+      memory: [
+        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: { topics: ["ui"] }, created_at: "2026-03-14T10:00:00Z" },
+        { id: "f1", type: "fact", content: "Not an idea", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      ],
+    });
+  });
+
+  it("returns idea by id", async () => {
+    const idea = await getIdea(supabase, "i1");
+    expect(idea).not.toBeNull();
+    expect(idea!.content).toBe("Mode sombre");
+    expect(idea!.idea_status).toBe("new");
+  });
+
+  it("returns null for non-idea type", async () => {
+    const idea = await getIdea(supabase, "f1");
+    expect(idea).toBeNull();
+  });
+
+  it("returns null for non-existent id", async () => {
+    const idea = await getIdea(supabase, "nonexistent");
+    expect(idea).toBeNull();
+  });
+
+  it("returns null for null supabase", async () => {
+    const idea = await getIdea(null, "i1");
+    expect(idea).toBeNull();
+  });
+
+  it("returns null for empty id", async () => {
+    const idea = await getIdea(supabase, "");
+    expect(idea).toBeNull();
+  });
+});
+
+describe("reviewIdea", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase({
+      memory: [
+        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      ],
+    });
+  });
+
+  it("marks idea as reviewed", async () => {
+    const result = await reviewIdea(supabase, "i1");
+    expect(result).toBe(true);
+    const memory = supabase._getTable("memory");
+    expect(memory[0].idea_status).toBe("reviewed");
+  });
+
+  it("returns false for null supabase", async () => {
+    const result = await reviewIdea(null, "i1");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for empty id", async () => {
+    const result = await reviewIdea(supabase, "");
+    expect(result).toBe(false);
+  });
+});
+
+describe("promoteIdea", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase({
+      memory: [
+        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "reviewed", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      ],
+    });
+  });
+
+  it("promotes idea and returns content", async () => {
+    const content = await promoteIdea(supabase, "i1");
+    expect(content).toBe("Mode sombre");
+    const memory = supabase._getTable("memory");
+    expect(memory[0].idea_status).toBe("promoted");
+  });
+
+  it("returns null for null supabase", async () => {
+    const content = await promoteIdea(null, "i1");
+    expect(content).toBeNull();
+  });
+
+  it("returns null for empty id", async () => {
+    const content = await promoteIdea(supabase, "");
+    expect(content).toBeNull();
+  });
+});
+
+describe("archiveIdea", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase({
+      memory: [
+        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      ],
+    });
+  });
+
+  it("archives idea", async () => {
+    const result = await archiveIdea(supabase, "i1");
+    expect(result).toBe(true);
+    const memory = supabase._getTable("memory");
+    expect(memory[0].idea_status).toBe("archived");
+  });
+
+  it("returns false for null supabase", async () => {
+    const result = await archiveIdea(null, "i1");
+    expect(result).toBe(false);
+  });
+
+  it("returns false for empty id", async () => {
+    const result = await archiveIdea(supabase, "");
+    expect(result).toBe(false);
+  });
+});
+
+describe("formatIdeasList", () => {
+  it("formats ideas with status, id, content, topics, date", () => {
+    const ideas = [
+      { id: "abcd1234-5678-9abc-def0-123456789abc", content: "Mode sombre", idea_status: "new" as const, metadata: { topics: ["ui", "dashboard"] }, created_at: "2026-03-14T10:00:00Z" },
+      { id: "efgh5678-9abc-def0-1234-56789abcdef0", content: "Cache Redis", idea_status: "reviewed" as const, metadata: {}, created_at: "2026-03-13T10:00:00Z" },
+    ];
+
+    const result = formatIdeasList(ideas);
+    expect(result).toContain("IDEES (2)");
+    expect(result).toContain("NEW | abcd1234");
+    expect(result).toContain("Mode sombre");
+    expect(result).toContain("[ui, dashboard]");
+    expect(result).toContain("REVIEWED | efgh5678");
+    expect(result).toContain("Cache Redis");
+  });
+
+  it("returns message when no ideas", () => {
+    const result = formatIdeasList([]);
+    expect(result).toBe("Aucune idee trouvee.");
+  });
+
+  it("handles ideas without topics", () => {
+    const ideas = [
+      { id: "abcd1234-0000-0000-0000-000000000000", content: "Simple idea", idea_status: "new" as const, metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+    ];
+
+    const result = formatIdeasList(ideas);
+    expect(result).toContain("Simple idea");
+    expect(result).not.toContain("[");
   });
 });
 

@@ -12,10 +12,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 24 Telegram commands, voice, photos, docs |
+| `relay.ts` | Main bot: message handling, 25 Telegram commands, voice, photos, docs |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
-| `memory.ts` | Persistent facts/goals via intent tags ([REMEMBER:], [GOAL:], [DONE:]) |
+| `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
 | `orchestrator.ts` | Multi-agent pipeline: chains analyst → pm → architect → dev → qa |
 | `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates |
@@ -33,10 +33,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
 | `proactive-planner.ts` | Daily backlog analysis + recommendations |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
-| `notifications.ts` | Proactive Telegram notifications to forum topics |
+| `notifications.ts` | Proactive Telegram notifications to forum topics (tasks, ideas) |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
-| `alert-cron.ts` | Hourly scheduled alert runner |
+| `alert-cron.ts` | Hourly scheduled alert runner + memory archival |
 
 ### Telegram Commands
 
@@ -67,14 +67,26 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/workflow` | BMad workflow overview |
 | `/agents` | List BMad agents |
 | `/export` | Export tasks/metrics |
+| `/brain` | Memory synthesis: patterns, health, ideas, suggestions |
+| `/ideas` | Ideas pipeline: list, add, review, promote, archive |
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`
 
-RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`
+RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`
 
-Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search)
+Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search), `classify-thought` (GPT-4o-mini message classification with idea detection), `memory-mcp` (memory CRUD + semantic search API)
+
+### MCP Memory Server (`mcp/`)
+
+Local MCP server exposing memory tools to Claude Code sessions:
+- `search_thoughts` — Semantic search via embeddings
+- `list_thoughts` — List recent memories by type
+- `thought_stats` — Memory statistics
+- `capture_thought` — Insert new memory
+
+Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 ### BMad Workflow
 
@@ -110,8 +122,9 @@ config/
   workflow.yaml         Workflow state machine
   bmad-templates/       Agent YAML definitions + workflow templates
 db/schema.sql           Authoritative database schema
-supabase/functions/     Edge Functions (embed, search)
-tests/                  244 tests (unit + integration)
+mcp/                    MCP memory server (memory-server.ts)
+supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
+tests/                  383 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -119,7 +132,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (244 tests, all must pass before merge)
+- Tests: `bun test` (383 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI → merge to master
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
 - Telegram responses: plain text only, no markdown formatting

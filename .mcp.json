@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "memory": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        "run",
+        "mcp/memory-server.ts"
+      ],
+      "env": {
+        "SUPABASE_URL": "https://lixbsfufgijnzkvxjfji.supabase.co",
+        "SUPABASE_ANON_KEY": "sb_publishable_lJ_Y8ENpK9jrcSuN5pVZTA_ebBj5kJX"
+      }
+    }
+  }
+}

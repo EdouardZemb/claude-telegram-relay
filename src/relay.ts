@@ -23,6 +23,12 @@ import {
   getRecentMessages,
   classifyMessage,
   autoRemember,
+  listIdeas,
+  getIdea,
+  reviewIdea,
+  promoteIdea,
+  archiveIdea,
+  formatIdeasList,
 } from "./memory.ts";
 import {
   addTask,
@@ -49,6 +55,8 @@ import {
   notifyPRCreated,
   notifyTaskStarted,
   notifyTaskDone,
+  notifyIdeaCreated,
+  notifyIdeaPromoted,
 } from "./notifications.ts";
 import {
   collectSprintMetrics,
@@ -301,56 +309,47 @@ async function notifyError(error: unknown, context: string): Promise<void> {
 }
 
 // ============================================================
-// LOCK FILE (prevent multiple instances)
+// LOCK FILE (PID marker — mutual exclusion handled by flock in start-relay.sh)
 // ============================================================
 
 const LOCK_FILE = join(RELAY_DIR, "bot.lock");
 
-async function acquireLock(): Promise<boolean> {
+async function writePidFile(): Promise<void> {
+  await writeFile(LOCK_FILE, process.pid.toString());
+  console.log(`PID file written (${process.pid})`);
+}
+
+async function removePidFile(): Promise<void> {
   try {
-    const existingLock = await readFile(LOCK_FILE, "utf-8").catch(() => null);
-
-    if (existingLock) {
-      const pid = parseInt(existingLock);
-      try {
-        process.kill(pid, 0); // Check if process exists
-        console.log(`Another instance running (PID: ${pid})`);
-        return false;
-      } catch {
-        console.log("Stale lock found, taking over...");
-      }
+    const content = await readFile(LOCK_FILE, "utf-8").catch(() => "");
+    if (content.trim() === process.pid.toString()) {
+      await unlink(LOCK_FILE).catch(() => {});
     }
-
-    await writeFile(LOCK_FILE, process.pid.toString());
-    return true;
-  } catch (error) {
-    console.error("Lock error:", error);
-    return false;
-  }
+  } catch {}
 }
 
-async function releaseLock(): Promise<void> {
-  await unlink(LOCK_FILE).catch(() => {});
+// Graceful shutdown
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, shutting down gracefully...`);
+  try { bot?.stop(); } catch {}
+  await removePidFile();
+  process.exit(0);
 }
 
-// Cleanup on exit
 process.on("exit", () => {
   try {
-    require("fs").unlinkSync(LOCK_FILE);
+    const fs = require("fs");
+    const content = fs.readFileSync(LOCK_FILE, "utf-8").trim();
+    if (content === process.pid.toString()) {
+      fs.unlinkSync(LOCK_FILE);
+    }
   } catch {}
 });
-process.on("SIGINT", async () => {
-  console.log("SIGINT received, shutting down gracefully...");
-  try { bot?.stop(); } catch {}
-  await releaseLock();
-  process.exit(0);
-});
-process.on("SIGTERM", async () => {
-  console.log("SIGTERM received, shutting down gracefully...");
-  try { bot?.stop(); } catch {}
-  await releaseLock();
-  process.exit(0);
-});
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 // ============================================================
 // SETUP
@@ -396,11 +395,8 @@ async function saveMessage(
   }
 }
 
-// Acquire lock
-if (!(await acquireLock())) {
-  console.error("Could not acquire lock. Another instance may be running.");
-  process.exit(1);
-}
+// Write PID file (mutual exclusion is handled by flock in start-relay.sh)
+await writePidFile();
 
 const bot = new Bot(BOT_TOKEN);
 initNotifications(bot);
@@ -682,6 +678,7 @@ bot.command("help", async (ctx) => {
     "  /alerts -- Alertes proactives (QA Quinn)",
     "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
     "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
+    "  /ideas [list|add|review|promote|archive] -- Gerer les idees",
     "",
     "PROJETS",
     "  /projects -- Tous les projets",
@@ -1872,19 +1869,28 @@ bot.command("brain", async (ctx) => {
   await ctx.replyWithChatAction("typing");
 
   try {
-    // Gather recent facts and all memory stats
-    const [factsResult, goalsResult, recentFacts] = await Promise.all([
+    // Gather recent facts, goals, ideas, and all memory stats
+    const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas] = await Promise.all([
       supabase.rpc("get_facts"),
       supabase.rpc("get_active_goals"),
       supabase.from("memory")
         .select("type, content, metadata, created_at")
         .order("created_at", { ascending: false })
         .limit(50),
+      listIdeas(supabase, ["new", "reviewed"]),
+      listIdeas(supabase, ["new", "reviewed", "promoted", "archived"]),
     ]);
 
     const facts = factsResult.data || [];
     const goals = goalsResult.data || [];
     const recent = recentFacts.data || [];
+
+    // Idea stats
+    const ideaStatusCounts: Record<string, number> = {};
+    for (const idea of allIdeas) {
+      const status = idea.idea_status || "new";
+      ideaStatusCounts[status] = (ideaStatusCounts[status] || 0) + 1;
+    }
 
     // Count by type
     const typeCounts: Record<string, number> = {};
@@ -1929,6 +1935,15 @@ bot.command("brain", async (ctx) => {
       "",
       autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
       ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
+      "",
+      `IDEES (${allIdeas.length} total: ${Object.entries(ideaStatusCounts).map(([s, c]) => `${c} ${s}`).join(", ") || "aucune"})`,
+      ...(activeIdeas.length > 0
+        ? [`IDEES ACTIVES (new + reviewed):`, ...activeIdeas.slice(0, 10).map((idea: any) => {
+            const status = idea.idea_status || "new";
+            const topics = idea.metadata?.topics?.join(", ") || "";
+            return `- [${status}] ${idea.content}${topics ? ` (${topics})` : ""}`;
+          })]
+        : ["Aucune idee active."]),
     ].filter(Boolean).join("\n");
 
     const prompt = `Tu es un assistant de synthese memoire. Analyse les donnees suivantes et produis une synthese hebdomadaire concise en francais.
@@ -1939,8 +1954,9 @@ Produis:
 1. RESUME: ce qui s'est passe recemment (2-3 phrases)
 2. DECISIONS CLES: les decisions importantes prises
 3. PATTERNS: les sujets recurrents ou tendances
-4. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
-5. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
+4. IDEES: synthese des idees actives, lesquelles meritent d'etre promues en taches, lesquelles sont redondantes ou obsoletes
+5. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
+6. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
 
 Reponds en texte brut, sans markdown.`;
 
@@ -1951,6 +1967,185 @@ Reponds en texte brut, sans markdown.`;
     await ctx.reply("Erreur lors de la synthese memoire.", threadOpts(ctx));
   }
 });
+
+// /ideas — manage ideas (list, add, review, promote, archive)
+bot.command("ideas", async (ctx) => {
+  const blocked = commandGuard(ctx, "ideas");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+  if (!supabase) {
+    await ctx.reply("Supabase non configure.", threadOpts(ctx));
+    return;
+  }
+
+  const input = ctx.match?.trim() || "";
+  const parts = input.split(/\s+/);
+  const subcommand = parts[0]?.toLowerCase() || "list";
+  const arg = parts.slice(1).join(" ");
+
+  // /ideas or /ideas list — show new + reviewed ideas
+  if (subcommand === "list" || (!input && subcommand === "list")) {
+    const ideas = await listIdeas(supabase);
+    await sendResponse(ctx, formatIdeasList(ideas));
+    return;
+  }
+
+  // /ideas all — show all ideas including archived
+  if (subcommand === "all") {
+    const ideas = await listIdeas(supabase, ["new", "reviewed", "promoted", "archived"]);
+    await sendResponse(ctx, formatIdeasList(ideas));
+    return;
+  }
+
+  // /ideas add <text> — manually add an idea
+  if (subcommand === "add") {
+    if (!arg) {
+      await ctx.reply("Usage: /ideas add <texte de l'idee>", threadOpts(ctx));
+      return;
+    }
+    const { error } = await supabase.from("memory").insert({
+      type: "idea",
+      content: arg,
+      idea_status: "new",
+      metadata: { source: "manual" },
+    });
+    if (error) {
+      console.error("ideas add error:", error);
+      await ctx.reply("Erreur lors de l'ajout de l'idee.", threadOpts(ctx));
+    } else {
+      await ctx.reply(`Idee ajoutee : ${arg}`, threadOpts(ctx));
+      await notifyIdeaCreated(arg, "manual");
+    }
+    return;
+  }
+
+  // /ideas review <id> — mark as reviewed
+  if (subcommand === "review") {
+    if (!arg) {
+      await ctx.reply("Usage: /ideas review <id>", threadOpts(ctx));
+      return;
+    }
+    const idea = await findIdeaByPrefix(supabase, arg);
+    if (!idea) {
+      await ctx.reply(`Aucune idee trouvee avec l'ID "${arg}".`, threadOpts(ctx));
+      return;
+    }
+    const ok = await reviewIdea(supabase, idea.id);
+    await ctx.reply(
+      ok ? `Idee "${idea.content.slice(0, 60)}" marquee comme reviewed.` : "Erreur lors du review.",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  // /ideas promote <id> — promote idea to task
+  if (subcommand === "promote") {
+    if (!arg) {
+      await ctx.reply("Usage: /ideas promote <id>", threadOpts(ctx));
+      return;
+    }
+    const idea = await findIdeaByPrefix(supabase, arg);
+    if (!idea) {
+      await ctx.reply(`Aucune idee trouvee avec l'ID "${arg}".`, threadOpts(ctx));
+      return;
+    }
+    const content = await promoteIdea(supabase, idea.id);
+    if (!content) {
+      await ctx.reply("Erreur lors de la promotion.", threadOpts(ctx));
+      return;
+    }
+    // Create a task from the promoted idea
+    const currentProject = await resolveProjectContext(supabase, ctx.message?.message_thread_id);
+    const task = await addTask(supabase, content, {
+      ...(currentProject ? { project_id: currentProject.id } : {}),
+      tags: ["from-idea"],
+    });
+    if (task) {
+      await ctx.reply(
+        `Idee promue en tache !\nTache: ${task.title}\nID: ${task.id.slice(0, 8)}`,
+        threadOpts(ctx)
+      );
+      await notifyIdeaPromoted(content, task.title);
+    } else {
+      await ctx.reply(`Idee promue mais erreur creation tache. Contenu : ${content}`, threadOpts(ctx));
+    }
+    return;
+  }
+
+  // /ideas archive <id> or /ideas done <id> — archive an idea
+  if (subcommand === "archive" || subcommand === "done") {
+    if (!arg) {
+      await ctx.reply(`Usage: /ideas ${subcommand} <id>`, threadOpts(ctx));
+      return;
+    }
+    const idea = await findIdeaByPrefix(supabase, arg);
+    if (!idea) {
+      await ctx.reply(`Aucune idee trouvee avec l'ID "${arg}".`, threadOpts(ctx));
+      return;
+    }
+    const ok = await archiveIdea(supabase, idea.id);
+    await ctx.reply(
+      ok ? `Idee "${idea.content.slice(0, 60)}" archivee.` : "Erreur lors de l'archivage.",
+      threadOpts(ctx)
+    );
+    return;
+  }
+
+  // /ideas <id> — show idea detail
+  if (subcommand.length <= 8 && /^[a-f0-9]+$/.test(subcommand)) {
+    const idea = await findIdeaByPrefix(supabase, subcommand);
+    if (!idea) {
+      await ctx.reply(`Aucune idee trouvee avec l'ID "${subcommand}".`, threadOpts(ctx));
+      return;
+    }
+    const topics = Array.isArray(idea.metadata?.topics)
+      ? (idea.metadata.topics as string[]).join(", ")
+      : "";
+    const date = new Date(idea.created_at).toLocaleDateString("fr-FR");
+    const detail = [
+      `IDEE ${idea.idea_status.toUpperCase()} [${idea.id.slice(0, 8)}]`,
+      idea.content,
+      topics ? `Topics: ${topics}` : "",
+      `Date: ${date}`,
+    ].filter(Boolean).join("\n");
+    await sendResponse(ctx, detail);
+    return;
+  }
+
+  // Unknown subcommand → treat as a new idea
+  const { error } = await supabase.from("memory").insert({
+    type: "idea",
+    content: input,
+    idea_status: "new",
+    metadata: { source: "manual" },
+  });
+  if (error) {
+    console.error("ideas add error:", error);
+    await ctx.reply("Erreur lors de l'ajout de l'idee.", threadOpts(ctx));
+  } else {
+    await ctx.reply(`Idee ajoutee : ${input}`, threadOpts(ctx));
+    await notifyIdeaCreated(input, "manual");
+  }
+});
+
+/**
+ * Helper: find an idea by UUID prefix.
+ * Searches ideas matching the given prefix.
+ */
+async function findIdeaByPrefix(supabase: SupabaseClient, prefix: string) {
+  // Try exact match first (for full UUIDs)
+  const exact = await getIdea(supabase, prefix);
+  if (exact) return exact;
+
+  // Search by prefix in ideas
+  const { data } = await supabase
+    .from("memory")
+    .select("id, content, idea_status, metadata, created_at")
+    .eq("type", "idea")
+    .ilike("id", `${prefix}%`)
+    .limit(1);
+
+  return data?.[0] || null;
+}
 
 // /profile — analyze and evolve user profile
 bot.command("profile", async (ctx) => {
