@@ -22,7 +22,7 @@ export class E2EFramework {
 
   async setup(): Promise<void> {
     // Create bot with a dummy token (API calls are intercepted)
-    this.bot = createBot("0:fake-token-for-e2e-tests");
+    this.bot = await createBot("0:fake-token-for-e2e-tests");
 
     // Intercept ALL outgoing API calls
     this.bot.api.config.use(async (_prev, method, payload, _signal) => {

@@ -11,6 +11,9 @@ if [ -f .env ]; then
   set +a
 fi
 
+# Ensure npm-global bin is in PATH (needed for claude CLI)
+export PATH="$HOME/.npm-global/bin:$HOME/.bun/bin:$HOME/.nvm/versions/node/v22.14.0/bin:$PATH"
+
 # Use flock for process-level mutual exclusion.
 # During PM2 reload, the new instance blocks here until the old one exits
 # and the kernel auto-releases the flock. No race condition possible.
