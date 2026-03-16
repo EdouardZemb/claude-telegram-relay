@@ -7,5 +7,6 @@
   "feature_monitoring": true,
   "intent_detection": false,
   "llm_router": false,
-  "model_cascade": false
+  "model_cascade": false,
+  "auto_gate_approval": false
 }

@@ -2,6 +2,7 @@
  * @module gate-evaluator
  * @description Gate evaluation: deterministic checks + LLM-based rubric scoring at pipeline gates,
  * evaluate-rework loop (max 2 iterations). S34: dual verification + structured rubric.
+ * S35: trust score updates, gate persistence, auto-approval, double-loop learning.
  */
 
 /**
@@ -18,6 +19,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { readSection, writeSection, type BlackboardSections, type SectionName } from "./blackboard.ts";
 import { spawnClaude } from "./agent.ts";
 import { spawnSync } from "bun";
+import { updateTrustScore, shouldAutoApprove } from "./trust-scores.ts";
+import { persistGateEvaluation, runDoubleLoopAnalysis } from "./gate-persistence.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
 const DETERMINISTIC_CHECK_TIMEOUT = 30_000; // 30s per check (S34 EC-001)
@@ -48,6 +52,8 @@ export interface GateEvaluation {
   rubric?: RubricDimension[];
   /** S34: Deterministic check results (implementation gates only) */
   deterministicChecks?: DeterministicCheckResult[];
+  /** S35: Whether this gate was auto-approved based on trust score */
+  autoApproved?: boolean;
 }
 
 export type GateName = "spec" | "plan" | "tasks" | "implementation";
@@ -266,10 +272,25 @@ function buildRubricJsonSchema(gateName: GateName): string {
 
 // ── Evaluator ────────────────────────────────────────────────
 
+/** S35: Options for gate evaluation */
+export interface EvaluateGateOptions {
+  /** S34: Working directory for deterministic checks */
+  cwd?: string;
+  /** S35: Agent role for trust score lookup */
+  agentRole?: string;
+  /** S35: Task priority for auto-approval check */
+  taskPriority?: number;
+  /** S35: Task ID for persistence */
+  taskId?: string;
+  /** S35: Sprint ID for persistence */
+  sprintId?: string;
+}
+
 /**
  * Evaluate a gate by calling Claude CLI with the gate-specific criteria.
  * S34: Implementation gates run deterministic checks first (FR-001).
  * S34: All gates use structured rubric scoring (FR-002).
+ * S35: Auto-approval for high-trust agents on low-priority tasks.
  *
  * On timeout (EC-004): returns pass with warning.
  */
@@ -278,9 +299,64 @@ export async function evaluateGate(
   sessionId: string,
   gateName: GateName,
   sectionData: any,
-  /** S34: Working directory for deterministic checks */
-  cwd?: string
+  /** S34: Working directory for deterministic checks (or S35 options) */
+  cwdOrOptions?: string | EvaluateGateOptions
 ): Promise<GateEvaluation> {
+  // S35: Normalize options
+  const opts: EvaluateGateOptions = typeof cwdOrOptions === "string"
+    ? { cwd: cwdOrOptions }
+    : (cwdOrOptions || {});
+  const cwd = opts.cwd;
+
+  // S35: Auto-approval check for high-trust agents on low-priority tasks
+  if (
+    opts.agentRole &&
+    opts.taskPriority !== undefined &&
+    isFeatureEnabled("auto_gate_approval") &&
+    shouldAutoApprove(opts.agentRole, gateName, opts.taskPriority)
+  ) {
+    // For implementation gates, still run deterministic checks
+    if (gateName === "implementation") {
+      const detResults = runDeterministicChecks(cwd);
+      const allPassed = detResults.every((r) => r.passed);
+      if (!allPassed) {
+        // Deterministic checks failed — no auto-approval (EC-004)
+        const failedChecks = detResults.filter((r) => !r.passed);
+        return {
+          pass: false,
+          score: 0,
+          issues: failedChecks.map((r) => ({
+            severity: "critical" as const,
+            description: `Deterministic check "${r.check}" failed${r.timedOut ? " (timeout)" : ""}`,
+            suggestion: r.output.substring(0, 500),
+          })),
+          gate_name: gateName,
+          deterministicChecks: detResults,
+        };
+      }
+      // Deterministic checks passed — auto-approve without LLM
+      console.log(`evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based, deterministic OK)`);
+      return {
+        pass: true,
+        score: 100,
+        issues: [],
+        gate_name: gateName,
+        deterministicChecks: detResults,
+        autoApproved: true,
+      };
+    }
+
+    // Non-implementation gates: auto-approve entirely
+    console.log(`evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based)`);
+    return {
+      pass: true,
+      score: 100,
+      issues: [],
+      gate_name: gateName,
+      autoApproved: true,
+    };
+  }
+
   // S34 FR-001: Run deterministic checks for implementation gates
   let deterministicResults: DeterministicCheckResult[] | undefined;
 
@@ -479,12 +555,28 @@ export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimen
 
 // ── Evaluate-Rework Loop (T4 — FR-004) ──────────────────────
 
+/** S35: Options for evaluateAndRework */
+export interface EvaluateAndReworkOptions {
+  maxIterations?: number;
+  /** Override evaluator for testing */
+  customEvaluator?: (data: any) => Promise<GateEvaluation>;
+  /** S35: Task ID for persistence */
+  taskId?: string;
+  /** S35: Sprint ID for persistence */
+  sprintId?: string;
+  /** S35: Task priority for auto-approval */
+  taskPriority?: number;
+  /** S35: Working directory for deterministic checks */
+  cwd?: string;
+}
+
 /**
  * Run the evaluate-rework loop for a gate.
  *
  * 1. Evaluate the current output
  * 2. If rejected, re-run the producing agent with feedback
  * 3. Max 2 iterations, then continue with warning (AC-012)
+ * S35: Updates trust scores, persists evaluations, runs double-loop.
  *
  * @param runAgent - function to re-run the agent (receives feedback string)
  */
@@ -495,21 +587,62 @@ export async function evaluateAndRework(
   gateName: GateName,
   sectionData: any,
   runAgent: (feedback: string) => Promise<any>,
-  maxIterations: number = 2,
-  /** Override evaluator for testing */
+  maxIterationsOrOpts?: number | EvaluateAndReworkOptions,
+  /** Override evaluator for testing (legacy compat) */
   customEvaluator?: (data: any) => Promise<GateEvaluation>
 ): Promise<EvaluateReworkResult> {
+  // S35: Normalize options (backward compatible)
+  const opts: EvaluateAndReworkOptions = typeof maxIterationsOrOpts === "number"
+    ? { maxIterations: maxIterationsOrOpts, customEvaluator }
+    : (maxIterationsOrOpts || {});
+  if (customEvaluator && !opts.customEvaluator) opts.customEvaluator = customEvaluator;
+  const maxIterations = opts.maxIterations ?? 2;
+
   let currentData = sectionData;
   let iterations = 0;
   let passedAtIteration: number | null = null;
 
   for (let i = 0; i <= maxIterations; i++) {
-    const evaluation = customEvaluator
-      ? await customEvaluator(currentData)
-      : await evaluateGate(supabase, sessionId, gateName, currentData);
+    const evaluation = opts.customEvaluator
+      ? await opts.customEvaluator(currentData)
+      : await evaluateGate(supabase, sessionId, gateName, currentData, {
+          cwd: opts.cwd,
+          agentRole,
+          taskPriority: opts.taskPriority,
+          taskId: opts.taskId,
+          sprintId: opts.sprintId,
+        });
+
+    // S35: Persist gate evaluation
+    persistGateEvaluation(supabase, {
+      sessionId,
+      taskId: opts.taskId,
+      sprintId: opts.sprintId,
+      agentRole,
+      gateName,
+      score: evaluation.score,
+      passed: evaluation.pass,
+      rubricDimensions: evaluation.rubric,
+      deterministicChecks: evaluation.deterministicChecks,
+      reworkIteration: i,
+      reworkTriggered: !evaluation.pass && i < maxIterations,
+      autoApproved: evaluation.autoApproved || false,
+    }).catch((err) => console.error("Gate persistence error:", err));
 
     if (evaluation.pass) {
       passedAtIteration = i;
+      const hadRework = i > 0;
+
+      // S35: Update trust score
+      updateTrustScore(supabase, agentRole, { passed: true, hadRework })
+        .catch((err) => console.error("Trust score update error:", err));
+
+      // S35: Run double-loop analysis (non-blocking)
+      if (supabase) {
+        runDoubleLoopAnalysis(supabase, agentRole)
+          .catch((err) => console.error("Double-loop analysis error:", err));
+      }
+
       return { finalEvaluation: evaluation, iterations: i, passedAtIteration };
     }
 
@@ -523,6 +656,17 @@ export async function evaluateAndRework(
         description: `Gate "${gateName}" did not pass after ${maxIterations} rework iterations`,
         suggestion: "Manual review recommended",
       });
+
+      // S35: Update trust score (failure)
+      updateTrustScore(supabase, agentRole, { passed: false, hadRework: true })
+        .catch((err) => console.error("Trust score update error:", err));
+
+      // S35: Run double-loop analysis (non-blocking)
+      if (supabase) {
+        runDoubleLoopAnalysis(supabase, agentRole)
+          .catch((err) => console.error("Double-loop analysis error:", err));
+      }
+
       return { finalEvaluation: evaluation, iterations: i, passedAtIteration: null };
     }
 

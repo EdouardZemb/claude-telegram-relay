@@ -290,7 +290,9 @@ CREATE TABLE IF NOT EXISTS feedback_rules (
   instruction TEXT NOT NULL,
   occurrences INTEGER DEFAULT 1,
   sprints TEXT[] DEFAULT '{}',
-  active BOOLEAN DEFAULT FALSE
+  active BOOLEAN DEFAULT FALSE,
+  source TEXT DEFAULT 'retro'
+    CHECK (source IN ('retro', 'double_loop'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_rules_agent_active ON feedback_rules(agent_id, active);
@@ -450,6 +452,50 @@ CREATE TRIGGER pipeline_runs_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_pipeline_runs_updated_at();
 
 -- ============================================================
+-- GATE EVALUATIONS TABLE (S35: Gate evaluation persistence)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS gate_evaluations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  session_id TEXT NOT NULL,
+  task_id UUID REFERENCES tasks(id),
+  sprint_id TEXT,
+  agent_role TEXT NOT NULL,
+  gate_name TEXT NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  passed BOOLEAN NOT NULL DEFAULT FALSE,
+  rubric_dimensions JSONB,
+  deterministic_checks JSONB,
+  rework_iteration INTEGER NOT NULL DEFAULT 0,
+  rework_triggered BOOLEAN NOT NULL DEFAULT FALSE,
+  auto_approved BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+COMMENT ON TABLE gate_evaluations IS 'Persisted gate evaluation results for trust scoring and double-loop learning (S35).';
+
+CREATE INDEX IF NOT EXISTS idx_gate_evaluations_agent_role ON gate_evaluations(agent_role);
+CREATE INDEX IF NOT EXISTS idx_gate_evaluations_gate_name ON gate_evaluations(gate_name);
+CREATE INDEX IF NOT EXISTS idx_gate_evaluations_session ON gate_evaluations(session_id);
+CREATE INDEX IF NOT EXISTS idx_gate_evaluations_created ON gate_evaluations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gate_evaluations_sprint ON gate_evaluations(sprint_id);
+
+-- ============================================================
+-- TRUST SCORES TABLE (S35: Trust per agent role)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS trust_scores (
+  agent_role TEXT PRIMARY KEY,
+  score INTEGER NOT NULL DEFAULT 50,
+  consecutive_passes INTEGER NOT NULL DEFAULT 0,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  total_evaluations INTEGER NOT NULL DEFAULT 0,
+  total_passes INTEGER NOT NULL DEFAULT 0,
+  last_evaluation_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE trust_scores IS 'Trust scores per agent role for progressive autonomy (S35).';
+
+-- ============================================================
 -- WORKFLOW AUDIT TABLE (Configuration change tracking)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_audit (
@@ -593,6 +639,14 @@ CREATE POLICY "Allow all for authenticated" ON blackboard FOR ALL USING (true);
 
 -- Memory archive: full access
 CREATE POLICY "Allow all for authenticated" ON memory_archive FOR ALL USING (true);
+
+-- Gate evaluations: full access
+ALTER TABLE gate_evaluations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON gate_evaluations FOR ALL USING (true);
+
+-- Trust scores: full access
+ALTER TABLE trust_scores ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON trust_scores FOR ALL USING (true);
 
 -- ============================================================
 -- HELPER FUNCTIONS (RPCs)

@@ -262,20 +262,40 @@ export async function processRetroFeedback(
 /**
  * Build a feedback context block to append to an agent's prompt.
  * Only includes rules that are active (2+ occurrences).
+ * S35: Also includes double-loop rules from gate evaluations.
  */
 export function buildFeedbackContext(agentId: AgentRole): string {
   const rules = getFeedbackRulesForAgent(agentId);
   if (rules.length === 0) return "";
 
-  const lines: string[] = [
-    "",
-    "APPRENTISSAGES DES RETROS PRECEDENTES:",
-    "(ces patterns ont ete detectes dans 2+ sprints, sois particulierement attentif)",
-    "",
-  ];
+  // Separate retro rules from double-loop rules
+  const retroRules = rules.filter((r) => !r.pattern.startsWith("double_loop:"));
+  const doubleLoopRules = rules.filter((r) => r.pattern.startsWith("double_loop:"));
 
-  for (const rule of rules) {
-    lines.push(`- [${rule.occurrences}x] ${rule.instruction}`);
+  const lines: string[] = [];
+
+  if (retroRules.length > 0) {
+    lines.push(
+      "",
+      "APPRENTISSAGES DES RETROS PRECEDENTES:",
+      "(ces patterns ont ete detectes dans 2+ sprints, sois particulierement attentif)",
+      "",
+    );
+    for (const rule of retroRules) {
+      lines.push(`- [${rule.occurrences}x] ${rule.instruction}`);
+    }
+  }
+
+  if (doubleLoopRules.length > 0) {
+    lines.push(
+      "",
+      "CORRECTIONS AUTOMATIQUES (double-loop learning):",
+      "(faiblesses detectees dans les evaluations de gate precedentes)",
+      "",
+    );
+    for (const rule of doubleLoopRules) {
+      lines.push(`- [${rule.occurrences}x] ${rule.instruction}`);
+    }
   }
 
   return lines.join("\n");
