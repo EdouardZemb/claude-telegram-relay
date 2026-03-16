@@ -510,6 +510,114 @@ CREATE TABLE IF NOT EXISTS workflow_audit (
 );
 
 -- ============================================================
+-- MEMORY LINKS TABLE (Semantic links between memories, S36-01)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_links (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  source_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+  target_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
+  similarity FLOAT NOT NULL CHECK (similarity >= 0 AND similarity <= 1),
+  link_type TEXT NOT NULL DEFAULT 'semantic',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (source_id, target_id),
+  CHECK (source_id != target_id)
+);
+
+COMMENT ON TABLE memory_links IS 'Bidirectional semantic links between memories. Each pair (A,B) stored as 2 rows (A→B, B→A) for query simplicity.';
+
+CREATE INDEX IF NOT EXISTS idx_memory_links_source ON memory_links(source_id);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target ON memory_links(target_id);
+
+-- link_memory() RPC: finds similar memories and creates bidirectional links
+CREATE OR REPLACE FUNCTION link_memory(
+  p_memory_id UUID,
+  p_threshold FLOAT DEFAULT 0.65,
+  p_max_links INT DEFAULT 5
+)
+RETURNS INTEGER AS $$
+DECLARE
+  v_embedding VECTOR(1536);
+  v_existing_count INT;
+  v_match RECORD;
+  v_links_created INT := 0;
+  v_target_count INT;
+BEGIN
+  -- Fetch the memory's embedding
+  SELECT embedding INTO v_embedding
+  FROM public.memory
+  WHERE id = p_memory_id;
+
+  IF v_embedding IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  -- Count existing outgoing links
+  SELECT COUNT(*) INTO v_existing_count
+  FROM public.memory_links
+  WHERE source_id = p_memory_id;
+
+  IF v_existing_count >= p_max_links THEN
+    RETURN 0;
+  END IF;
+
+  -- Find similar memories (inline vector similarity, no match_memory call)
+  FOR v_match IN
+    SELECT m.id, 1 - (m.embedding <=> v_embedding) AS sim
+    FROM public.memory m
+    WHERE m.embedding IS NOT NULL
+      AND m.id != p_memory_id
+      AND 1 - (m.embedding <=> v_embedding) > p_threshold
+    ORDER BY m.embedding <=> v_embedding
+    LIMIT p_max_links - v_existing_count
+  LOOP
+    -- Insert forward link (source → target)
+    INSERT INTO public.memory_links (source_id, target_id, similarity, link_type)
+    VALUES (p_memory_id, v_match.id, v_match.sim, 'semantic')
+    ON CONFLICT (source_id, target_id) DO NOTHING;
+
+    IF FOUND THEN
+      v_links_created := v_links_created + 1;
+    END IF;
+
+    -- Insert reverse link (target → source) if target not at max
+    SELECT COUNT(*) INTO v_target_count
+    FROM public.memory_links
+    WHERE source_id = v_match.id;
+
+    IF v_target_count < p_max_links THEN
+      INSERT INTO public.memory_links (source_id, target_id, similarity, link_type)
+      VALUES (v_match.id, p_memory_id, v_match.sim, 'semantic')
+      ON CONFLICT (source_id, target_id) DO NOTHING;
+
+      IF FOUND THEN
+        v_links_created := v_links_created + 1;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN v_links_created;
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'link_memory error: %', SQLERRM;
+  RETURN v_links_created;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+-- auto_link_memory() trigger: fires when embedding transitions NULL → non-NULL
+CREATE OR REPLACE FUNCTION auto_link_memory()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM public.link_memory(NEW.id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+CREATE TRIGGER memory_auto_link
+  AFTER UPDATE OF embedding ON memory
+  FOR EACH ROW
+  WHEN (OLD.embedding IS NULL AND NEW.embedding IS NOT NULL)
+  EXECUTE FUNCTION auto_link_memory();
+
+-- ============================================================
 -- MEMORY ARCHIVE TABLE (Old memories for retention management)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS memory_archive (
@@ -639,6 +747,10 @@ CREATE POLICY "Allow all for authenticated" ON blackboard FOR ALL USING (true);
 
 -- Memory archive: full access
 CREATE POLICY "Allow all for authenticated" ON memory_archive FOR ALL USING (true);
+
+-- Memory links: full access
+ALTER TABLE memory_links ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON memory_links FOR ALL USING (true);
 
 -- Gate evaluations: full access
 ALTER TABLE gate_evaluations ENABLE ROW LEVEL SECURITY;

@@ -431,6 +431,42 @@ export async function findDuplicateIdea(
   }
 }
 
+// ── Memory Linking (S36-01) ───────────────────────────────────
+
+/**
+ * Create semantic links between a memory and its nearest neighbors.
+ * Wraps the link_memory RPC. The DB trigger handles auto-linking on
+ * embedding creation; this function is for manual/on-demand use.
+ *
+ * @returns Number of links created (forward + reverse)
+ */
+export async function linkMemories(
+  supabase: SupabaseClient | null,
+  memoryId: string,
+  threshold: number = 0.65,
+  maxLinks: number = 5
+): Promise<number> {
+  if (!supabase || !memoryId) return 0;
+
+  try {
+    const { data, error } = await supabase.rpc("link_memory", {
+      p_memory_id: memoryId,
+      p_threshold: threshold,
+      p_max_links: maxLinks,
+    });
+
+    if (error) {
+      console.error("link_memory error:", error);
+      return 0;
+    }
+
+    return data || 0;
+  } catch (error) {
+    console.error("link_memory error:", error);
+    return 0;
+  }
+}
+
 // ── Contradiction Detection (S23-04) ─────────────────────────
 
 /**
