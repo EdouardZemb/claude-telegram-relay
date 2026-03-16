@@ -1,4 +1,9 @@
 /**
+ * @module transcribe
+ * @description Voice transcription (Groq cloud or whisper-cpp local).
+ */
+
+/**
  * Voice Transcription Module
  *
  * Routes to Groq (cloud) or whisper.cpp (local) based on VOICE_PROVIDER env var.

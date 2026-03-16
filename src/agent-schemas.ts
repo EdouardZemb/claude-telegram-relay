@@ -1,4 +1,9 @@
 /**
+ * @module agent-schemas
+ * @description Typed JSON output schemas per agent role, parsing, structured chain context.
+ */
+
+/**
  * Structured Agent Message Schemas — S22-01/02
  *
  * Defines typed JSON output schemas for each BMad agent role.

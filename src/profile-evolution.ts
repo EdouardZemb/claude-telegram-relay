@@ -1,4 +1,9 @@
 /**
+ * @module profile-evolution
+ * @description Auto-learns user style, activity patterns, autonomy level.
+ */
+
+/**
  * Profile Evolution — S12 Intelligence Reflexive
  *
  * Analyse les interactions pour mettre a jour le profil

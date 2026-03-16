@@ -1,4 +1,9 @@
 /**
+ * @module feedback-loop
+ * @description Learning from retros -> permanent agent prompt enrichment.
+ */
+
+/**
  * Feedback Loop — S16-03
  *
  * Learns from retros and workflow logs to enrich agent prompts.

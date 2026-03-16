@@ -1,4 +1,10 @@
 /**
+ * @module workflow
+ * @description Workflow engine: loads config/workflow.yaml, tracks state transitions,
+ * transition enforcement, retry policies.
+ */
+
+/**
  * Workflow Engine — S11 Amelioration Continue
  *
  * Charge le workflow configurable depuis config/workflow.yaml,

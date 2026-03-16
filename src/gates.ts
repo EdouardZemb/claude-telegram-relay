@@ -1,4 +1,9 @@
 /**
+ * @module gates
+ * @description BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review).
+ */
+
+/**
  * BMad Gates — Strict workflow validation
  *
  * Enforces the BMad methodology gates:

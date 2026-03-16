@@ -1,4 +1,9 @@
 /**
+ * @module agent
+ * @description Sub-agent execution: launches Claude Code with branch-PR workflow.
+ */
+
+/**
  * Agentic Task Execution
  *
  * Launches Claude Code as a sub-agent to execute tasks autonomously.
@@ -72,7 +77,7 @@ async function waitForCIChecks(
 
   while (Date.now() - startTime < maxWaitMs) {
     const result = spawnSync(
-      ["gh", "pr", "checks", branchName, "-R", GITHUB_REPO, "--json", "name,state,conclusion"],
+      ["gh", "pr", "checks", branchName, "-R", GITHUB_REPO, "--json", "name,state,bucket"],
       { cwd: PROJECT_DIR }
     );
     const output = new TextDecoder().decode(result.stdout).trim();
@@ -87,7 +92,7 @@ async function waitForCIChecks(
       const checks = JSON.parse(output) as Array<{
         name: string;
         state: string;
-        conclusion: string;
+        bucket: string;
       }>;
 
       if (checks.length === 0) {
@@ -97,7 +102,7 @@ async function waitForCIChecks(
       }
 
       const allCompleted = checks.every(
-        (c) => c.state === "COMPLETED" || c.state === "completed"
+        (c) => c.bucket === "pass" || c.bucket === "fail" || c.bucket === "skipping"
       );
 
       if (!allCompleted) {
@@ -106,17 +111,11 @@ async function waitForCIChecks(
       }
 
       const allPassed = checks.every(
-        (c) =>
-          c.conclusion === "SUCCESS" ||
-          c.conclusion === "success" ||
-          c.conclusion === "NEUTRAL" ||
-          c.conclusion === "neutral" ||
-          c.conclusion === "SKIPPED" ||
-          c.conclusion === "skipped"
+        (c) => c.bucket === "pass" || c.bucket === "skipping"
       );
 
       const details = checks
-        .map((c) => `${c.name}: ${c.conclusion}`)
+        .map((c) => `${c.name}: ${c.bucket}`)
         .join(", ");
 
       if (allPassed) {
@@ -125,17 +124,9 @@ async function waitForCIChecks(
         }
         return { passed: true, details };
       } else {
-        const failed = checks.filter(
-          (c) =>
-            c.conclusion !== "SUCCESS" &&
-            c.conclusion !== "success" &&
-            c.conclusion !== "NEUTRAL" &&
-            c.conclusion !== "neutral" &&
-            c.conclusion !== "SKIPPED" &&
-            c.conclusion !== "skipped"
-        );
+        const failed = checks.filter((c) => c.bucket === "fail");
         const failDetails = failed
-          .map((c) => `${c.name}: ${c.conclusion}`)
+          .map((c) => `${c.name}: ${c.bucket}`)
           .join(", ");
         if (onProgress) {
           await onProgress(`CI echouee: ${failDetails}`);

@@ -1,4 +1,10 @@
 /**
+ * @module memory
+ * @description Intelligent memory: intent tags, auto-classification, semantic archive,
+ * ideas pipeline, importance scoring with temporal decay, contradiction detection.
+ */
+
+/**
  * Memory Module
  *
  * Persistent facts, goals, and preferences stored in Supabase.

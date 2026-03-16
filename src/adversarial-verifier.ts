@@ -1,4 +1,9 @@
 /**
+ * @module adversarial-verifier
+ * @description Clean room spec-vs-implementation drift detection, coverage scoring.
+ */
+
+/**
  * Adversarial Verifier — S24 Gated Blackboard & SDD
  *
  * Clean room verification: receives ONLY spec + implementation (not plan/tasks).

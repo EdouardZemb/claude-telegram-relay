@@ -1,4 +1,10 @@
 /**
+ * @module fan-out
+ * @description Subtask parallelism: fan-out N Dev agents in worktrees,
+ * fan-in merge branches and blackboard sections, file overlap detection.
+ */
+
+/**
  * Fan-Out / Fan-In — S25 T6
  *
  * Handles subtask parallelism for Dev agents.

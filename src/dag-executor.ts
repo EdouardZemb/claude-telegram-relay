@@ -1,4 +1,10 @@
 /**
+ * @module dag-executor
+ * @description DAG-based parallel agent scheduler: dependency resolution,
+ * semaphore-gated concurrency, pre-defined DAGs (DEFAULT, QUICK, REVIEW).
+ */
+
+/**
  * DAG Executor — S25 T2
  *
  * Replaces sequential for...of with a DAG-based parallel executor.

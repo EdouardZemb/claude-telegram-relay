@@ -1,4 +1,9 @@
 /**
+ * @module projects
+ * @description Multi-project CRUD with topic-based routing.
+ */
+
+/**
  * Multi-Project Management
  *
  * CRUD operations for the `projects` table.

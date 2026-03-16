@@ -1,4 +1,9 @@
 /**
+ * @module relay
+ * @description Main bot: message handling, 28 Telegram commands, voice, photos, docs.
+ */
+
+/**
  * Claude Code Telegram Relay
  *
  * Minimal relay that connects Telegram to Claude Code CLI.
@@ -58,6 +63,14 @@ import {
   notifyIdeaCreated,
   notifyIdeaPromoted,
 } from "./notifications.ts";
+import { startQueue, stopQueue } from "./notification-queue.ts";
+import {
+  loadPrefs,
+  savePrefs,
+  getPrefs,
+  formatPrefs,
+  type NotificationType,
+} from "./notification-prefs.ts";
 import {
   collectSprintMetrics,
   getSprintMetrics,
@@ -405,6 +418,7 @@ await writePidFile();
 
 const bot = new Bot(BOT_TOKEN);
 initNotifications(bot);
+await startQueue(bot);
 
 // ============================================================
 // TOPIC FORUM HELPERS
@@ -695,6 +709,7 @@ bot.command("help", async (ctx) => {
     "  /remind <heure> <texte> -- Rappel",
     "  /speak [texte] -- Synthese vocale",
     "  /profile -- Profil utilisateur",
+    "  /notify [status|quiet|on|off|immediate] -- Preferences notifications",
     "  /export -- Export donnees",
     "",
     "Envoie un texte ou vocal pour discuter librement.",
@@ -1713,8 +1728,194 @@ bot.on("callback_query:data", async (ctx) => {
     return;
   }
 
+  // Notification action callbacks (S26)
+  if (data.startsWith("notif_")) {
+    const [action, id] = data.split(":");
+
+    try {
+      if (action === "notif_start" && id && supabase) {
+        const updated = await updateTaskStatus(supabase, id, "in_progress");
+        if (updated) {
+          await ctx.answerCallbackQuery({ text: "Tache demarree !" });
+          await ctx.editMessageText(`Tache demarree : ${updated.title}`);
+        } else {
+          await ctx.answerCallbackQuery({ text: "Action expiree." });
+        }
+      } else if (action === "notif_done" && id && supabase) {
+        const updated = await updateTaskStatus(supabase, id, "done");
+        if (updated) {
+          await ctx.answerCallbackQuery({ text: "Tache terminee !" });
+          await ctx.editMessageText(`Tache terminee : ${updated.title}`);
+        } else {
+          await ctx.answerCallbackQuery({ text: "Action expiree." });
+        }
+      } else if (action === "notif_view" && id && supabase) {
+        const { data: tasks } = await supabase
+          .from("tasks")
+          .select("*")
+          .or(`id.eq.${id},id.like.${id}%`)
+          .limit(1);
+        if (tasks && tasks[0]) {
+          const t = tasks[0];
+          await ctx.answerCallbackQuery();
+          await ctx.editMessageText(
+            `${t.title}\nStatut: ${t.status}\nPriorite: ${t.priority || "N/A"}\nSprint: ${t.sprint || "N/A"}\n${t.description || ""}`
+          );
+        } else {
+          await ctx.answerCallbackQuery({ text: "Tache introuvable." });
+        }
+      } else if (action === "notif_viewtask" && id && supabase) {
+        const { data: tasks } = await supabase
+          .from("tasks")
+          .select("*")
+          .or(`id.eq.${id},id.like.${id}%`)
+          .limit(1);
+        if (tasks && tasks[0]) {
+          const t = tasks[0];
+          await ctx.answerCallbackQuery();
+          await ctx.editMessageText(
+            `${t.title}\nStatut: ${t.status}\nPriorite: ${t.priority || "N/A"}`
+          );
+        } else {
+          await ctx.answerCallbackQuery({ text: "Tache introuvable." });
+        }
+      } else if (action === "notif_promote" && id && supabase) {
+        const idea = await getIdea(supabase, id);
+        if (idea) {
+          const result = await promoteIdea(supabase, id);
+          if (result) {
+            await ctx.answerCallbackQuery({ text: "Idee promue !" });
+            await ctx.editMessageText(`Idee promue en tache : ${result.title || idea.content?.substring(0, 60)}`);
+          } else {
+            await ctx.answerCallbackQuery({ text: "Erreur lors de la promotion." });
+          }
+        } else {
+          await ctx.answerCallbackQuery({ text: "Action expiree." });
+        }
+      } else if (action === "notif_archive" && id && supabase) {
+        const idea = await getIdea(supabase, id);
+        if (idea) {
+          await archiveIdea(supabase, id);
+          await ctx.answerCallbackQuery({ text: "Idee archivee." });
+          await ctx.editMessageText("Idee archivee.");
+        } else {
+          await ctx.answerCallbackQuery({ text: "Action expiree." });
+        }
+      } else if (action === "notif_sprint") {
+        if (supabase) {
+          const sprintId = await getCurrentSprint(supabase);
+          if (sprintId) {
+            const summary = await getSprintSummary(supabase, sprintId);
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText(summary ? formatSprintSummary(summary) : "Sprint non trouve.");
+          } else {
+            await ctx.answerCallbackQuery({ text: "Pas de sprint actif." });
+          }
+        }
+      } else if (action === "notif_dismiss") {
+        await ctx.answerCallbackQuery({ text: "Ignore." });
+        await ctx.editMessageText("Notification ignoree.");
+      } else {
+        await ctx.answerCallbackQuery();
+      }
+    } catch (error) {
+      console.error("Notification callback error:", error);
+      await ctx.answerCallbackQuery({ text: "Action expiree." });
+    }
+    return;
+  }
+
   // Unknown callback
   await ctx.answerCallbackQuery();
+});
+
+// /notify — notification preferences
+bot.command("notify", async (ctx) => {
+  const args = ctx.match?.trim() || "";
+
+  if (!args || args === "status") {
+    const prefs = getPrefs();
+    await ctx.reply(formatPrefs(prefs), threadOpts(ctx));
+    return;
+  }
+
+  const parts = args.split(/\s+/);
+  const action = parts[0];
+
+  if (action === "quiet" && parts[1]) {
+    const match = parts[1].match(/^(\d{1,2})h?-(\d{1,2})h?$/);
+    if (!match) {
+      await ctx.reply("Format: /notify quiet 22h-8h", threadOpts(ctx));
+      return;
+    }
+    const prefs = getPrefs();
+    prefs.quietStart = parseInt(match[1]);
+    prefs.quietEnd = parseInt(match[2]);
+    await savePrefs(prefs);
+    await ctx.reply(`Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`, threadOpts(ctx));
+    return;
+  }
+
+  if (action === "off" && parts[1]) {
+    const type = parts[1] as NotificationType;
+    if (!["task", "pr", "idea", "alert"].includes(type)) {
+      await ctx.reply("Types valides : task, pr, idea, alert", threadOpts(ctx));
+      return;
+    }
+    const prefs = getPrefs();
+    prefs.types[type].enabled = false;
+    await savePrefs(prefs);
+    await ctx.reply(`Notifications ${type} desactivees.`, threadOpts(ctx));
+    return;
+  }
+
+  if (action === "on" && parts[1]) {
+    const type = parts[1] as NotificationType;
+    if (!["task", "pr", "idea", "alert"].includes(type)) {
+      await ctx.reply("Types valides : task, pr, idea, alert", threadOpts(ctx));
+      return;
+    }
+    const prefs = getPrefs();
+    prefs.types[type].enabled = true;
+    await savePrefs(prefs);
+    await ctx.reply(`Notifications ${type} activees.`, threadOpts(ctx));
+    return;
+  }
+
+  if (parts[1] === "immediate" || action === "immediate") {
+    const type = (action === "immediate" ? parts[1] : parts[0]) as NotificationType;
+    const targetType = action === "immediate" ? (parts[1] as NotificationType) : (parts[0] as NotificationType);
+    // Handle: /notify alerts immediate OR /notify immediate alerts
+    const resolvedType = ["task", "pr", "idea", "alert"].includes(action)
+      ? (action as NotificationType)
+      : (parts[1] as NotificationType);
+    if (!["task", "pr", "idea", "alert"].includes(resolvedType)) {
+      await ctx.reply("Types valides : task, pr, idea, alert", threadOpts(ctx));
+      return;
+    }
+    const prefs = getPrefs();
+    prefs.types[resolvedType].immediate = true;
+    await savePrefs(prefs);
+    await ctx.reply(`Notifications ${resolvedType} en mode immediat.`, threadOpts(ctx));
+    return;
+  }
+
+  if (parts[1] === "batch" || action === "batch") {
+    const resolvedType = ["task", "pr", "idea", "alert"].includes(action)
+      ? (action as NotificationType)
+      : (parts[1] as NotificationType);
+    if (!["task", "pr", "idea", "alert"].includes(resolvedType)) {
+      await ctx.reply("Types valides : task, pr, idea, alert", threadOpts(ctx));
+      return;
+    }
+    const prefs = getPrefs();
+    prefs.types[resolvedType].immediate = false;
+    await savePrefs(prefs);
+    await ctx.reply(`Notifications ${resolvedType} en mode batch.`, threadOpts(ctx));
+    return;
+  }
+
+  await ctx.reply("Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]", threadOpts(ctx));
 });
 
 // /status — server and bot status

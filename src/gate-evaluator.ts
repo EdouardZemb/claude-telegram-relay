@@ -1,4 +1,10 @@
 /**
+ * @module gate-evaluator
+ * @description Gate evaluation: LLM-based quality checks at pipeline gates,
+ * evaluate-rework loop (max 2 iterations).
+ */
+
+/**
  * Gate Evaluator — S24 Gated Blackboard & SDD
  *
  * Evaluates the output of each pipeline phase against defined criteria.

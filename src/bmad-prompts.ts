@@ -1,4 +1,9 @@
 /**
+ * @module bmad-prompts
+ * @description Context-aware prompt builder per agent.
+ */
+
+/**
  * BMad Agent Prompts — Specialized system prompts loaded from YAML templates
  *
  * Each agent gets context-aware prompts that change based on:
