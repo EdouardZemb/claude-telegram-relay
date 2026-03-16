@@ -166,4 +166,7 @@ async function main() {
   }
 }
 
-main();
+// Only run main when executed directly (not when imported for testing)
+if (import.meta.main) {
+  main();
+}

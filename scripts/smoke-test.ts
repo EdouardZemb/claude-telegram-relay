@@ -260,4 +260,7 @@ async function main() {
 export { checkPM2, checkDashboard, checkSupabase, checkClaudeCLI, checkTelegram };
 export type { SmokeResult };
 
-main();
+// Only run main when executed directly (not when imported for testing)
+if (import.meta.main) {
+  main();
+}
