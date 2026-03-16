@@ -27,6 +27,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
 | `commands/zz-messages.ts` | Composer: message:text, message:voice, message:photo, message:document handlers (loaded last) |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
+| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile with token budgets per role |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |

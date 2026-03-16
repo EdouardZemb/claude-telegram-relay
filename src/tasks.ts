@@ -39,6 +39,7 @@ export interface Task {
   dev_notes: string | null;
   architecture_ref: string | null;
   subtasks: Subtask[];
+  project_id: string | null;
 }
 
 // ── Queries ──────────────────────────────────────────────────
