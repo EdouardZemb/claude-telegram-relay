@@ -263,6 +263,44 @@ export async function getTotalCost(
   }
 }
 
+// ── Historical Average (S29) ─────────────────────────────────
+
+/**
+ * Get the average cost per sprint from the last N sprints.
+ * Used by cost-estimate.ts for comparison.
+ */
+export async function getHistoricalSprintAverage(
+  supabase: SupabaseClient | null,
+  n: number = 3
+): Promise<number | null> {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("cost_tracking")
+      .select("sprint_id, cost_usd");
+
+    if (error || !data?.length) return null;
+
+    const sprintCosts: Record<string, number> = {};
+    for (const row of data) {
+      if (!row.sprint_id) continue;
+      sprintCosts[row.sprint_id] = (sprintCosts[row.sprint_id] || 0) + (Number(row.cost_usd) || 0);
+    }
+
+    const sprints = Object.entries(sprintCosts)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .slice(0, n);
+
+    if (sprints.length === 0) return null;
+
+    const total = sprints.reduce((sum, [, cost]) => sum + cost, 0);
+    return Math.round((total / sprints.length) * 10000) / 10000;
+  } catch {
+    return null;
+  }
+}
+
 // ── Formatting ───────────────────────────────────────────────
 
 /**

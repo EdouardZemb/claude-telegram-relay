@@ -30,20 +30,23 @@ jobs:
             npx pm2 restart claude-relay --update-env
             npx pm2 restart claude-dashboard --update-env
 
-            # Smoke test: wait for services to start, then check health
+            # Wait for services to start
             sleep 5
-            RELAY_STATUS=$(npx pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="claude-relay") | .pm2_env.status')
-            DASHBOARD_STATUS=$(npx pm2 jlist 2>/dev/null | jq -r '.[] | select(.name=="claude-dashboard") | .pm2_env.status')
-            HEALTH=$(curl -sf http://localhost:3456/api/health | jq -r '.status' 2>/dev/null || echo "unreachable")
 
-            if [ "$RELAY_STATUS" != "online" ] || [ "$HEALTH" != "ok" ]; then
-              echo "SMOKE TEST FAILED: relay=$RELAY_STATUS dashboard=$DASHBOARD_STATUS health=$HEALTH"
-              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "failure" "Smoke test failed: relay=$RELAY_STATUS health=$HEALTH"
+            # S29: Full smoke test suite (replaces mini health check)
+            COMMIT=$(git log --oneline -1)
+
+            if bun run smoke; then
+              echo "Deploy complete: $COMMIT (smoke test OK)"
+              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"
+
+              # Generate and send post-merge checklist
+              bun run scripts/generate-checklist.ts 2>/dev/null || true
+            else
+              echo "SMOKE TEST FAILED — rolling back"
+              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "failure" "Smoke test failed for $COMMIT — auto-rollback"
+
+              # Auto-rollback (S29-T6)
+              bash /home/edouard/claude-telegram-relay/scripts/rollback.sh "smoke test failed after deploy"
               exit 1
             fi
-
-            COMMIT=$(git log --oneline -1)
-            echo "Deploy complete: $COMMIT (smoke test OK)"
-
-            # Notify serveur topic
-            bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"

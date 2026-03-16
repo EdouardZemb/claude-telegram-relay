@@ -25,7 +25,7 @@ import {
 } from "../../src/workflow";
 import { addTask, updateTaskStatus, getBacklog, getCurrentSprint } from "../../src/tasks";
 import { analyzePatterns, formatPatterns } from "../../src/patterns";
-import { runAllChecks, formatAlerts, checkStuckTasks, checkReworkRate, checkSprintPace } from "../../src/alerts";
+import { runAllChecks, formatAlerts, checkStuckTasks, checkReworkRate, checkSprintPace, resetMonitoringState } from "../../src/alerts";
 import { processMemoryIntents, getMemoryContext, getRecentMessages } from "../../src/memory";
 import { readFileSync as _readFileSync, writeFileSync as _writeFileSync } from "fs";
 import { join as _join } from "path";
@@ -418,6 +418,7 @@ describe("System: Alert Cron End-to-End Simulation", () => {
   });
 
   it("reports no alerts when everything is healthy", async () => {
+    resetMonitoringState(); // S29: clear accumulated monitoring state from other tests
     const supabase = createMockSupabase({
       tasks: [
         { id: "ok1", title: "Done task", status: "done", updated_at: new Date().toISOString(), sprint: "S13" },

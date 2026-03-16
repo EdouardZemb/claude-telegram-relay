@@ -70,5 +70,16 @@ module.exports = {
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
     },
+    {
+      name: "claude-system-alerts",
+      script: "./scripts/system-alerts.sh",
+      cwd: "/home/edouard/claude-telegram-relay",
+      autorestart: false,
+      cron_restart: "*/15 * * * *",
+      error_file: "/home/edouard/.claude-relay/logs/system-alerts-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/system-alerts-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
   ],
 };

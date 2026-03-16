@@ -319,7 +319,213 @@ export async function runAllChecks(
   const staleAlerts = await checkStaleTasks(supabase);
   alerts.push(...staleAlerts);
 
+  // S29: Feature-level monitoring checks (no DB required)
+  const rtAlerts = checkResponseTime();
+  alerts.push(...rtAlerts);
+
+  const spawnAlerts = checkSpawnFailures();
+  alerts.push(...spawnAlerts);
+
+  const moduleAlerts = checkModuleErrors();
+  alerts.push(...moduleAlerts);
+
   return alerts;
+}
+
+// ── Feature-Level Monitoring (S29-T10) ──────────────────────
+
+/**
+ * Ring buffer for response time measurements (in-memory, lost on restart).
+ */
+const RESPONSE_TIME_BUFFER_SIZE = 100;
+const responseTimeBuffer: number[] = [];
+
+/** Record a bot response time in milliseconds */
+export function recordResponseTime(ms: number): void {
+  responseTimeBuffer.push(ms);
+  if (responseTimeBuffer.length > RESPONSE_TIME_BUFFER_SIZE) {
+    responseTimeBuffer.shift();
+  }
+}
+
+/** Get response time stats (p50, p95, p99, count) */
+export function getResponseTimeStats(): { p50: number; p95: number; p99: number; count: number } {
+  if (responseTimeBuffer.length === 0) {
+    return { p50: 0, p95: 0, p99: 0, count: 0 };
+  }
+  const sorted = [...responseTimeBuffer].sort((a, b) => a - b);
+  const len = sorted.length;
+  return {
+    p50: sorted[Math.floor(len * 0.5)],
+    p95: sorted[Math.floor(len * 0.95)],
+    p99: sorted[Math.floor(len * 0.99)],
+    count: len,
+  };
+}
+
+/**
+ * Spawn success/failure counters per agent role.
+ */
+const spawnCounters: Record<string, { success: number; failure: number }> = {};
+
+export function recordSpawnResult(role: string, success: boolean): void {
+  if (!spawnCounters[role]) spawnCounters[role] = { success: 0, failure: 0 };
+  if (success) spawnCounters[role].success++;
+  else spawnCounters[role].failure++;
+}
+
+export function getSpawnStats(): Record<string, { success: number; failure: number; failureRate: number }> {
+  const stats: Record<string, { success: number; failure: number; failureRate: number }> = {};
+  for (const [role, counts] of Object.entries(spawnCounters)) {
+    const total = counts.success + counts.failure;
+    stats[role] = {
+      ...counts,
+      failureRate: total > 0 ? Math.round((counts.failure / total) * 100) : 0,
+    };
+  }
+  return stats;
+}
+
+/**
+ * Module error counters (last hour window).
+ */
+const moduleErrors: Array<{ module: string; timestamp: number }> = [];
+
+export function recordModuleError(moduleName: string): void {
+  moduleErrors.push({ module: moduleName, timestamp: Date.now() });
+  // Prune entries older than 1 hour
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  while (moduleErrors.length > 0 && moduleErrors[0].timestamp < cutoff) {
+    moduleErrors.shift();
+  }
+}
+
+export function getModuleErrorCounts(): Record<string, number> {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const counts: Record<string, number> = {};
+  for (const entry of moduleErrors) {
+    if (entry.timestamp >= cutoff) {
+      counts[entry.module] = (counts[entry.module] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Reset all monitoring counters (for testing).
+ */
+export function resetMonitoringState(): void {
+  responseTimeBuffer.length = 0;
+  for (const key of Object.keys(spawnCounters)) delete spawnCounters[key];
+  moduleErrors.length = 0;
+}
+
+/**
+ * Check response time — alert if p95 > 30s.
+ */
+export function checkResponseTime(): Alert[] {
+  const stats = getResponseTimeStats();
+  if (stats.count < 5) return []; // Not enough data
+  const alerts: Alert[] = [];
+
+  if (stats.p95 > 30000) {
+    alerts.push({
+      type: "long_running_step",
+      severity: stats.p95 > 60000 ? "critical" : "warning",
+      message: `Temps de reponse eleve: p95=${Math.round(stats.p95 / 1000)}s, p50=${Math.round(stats.p50 / 1000)}s (${stats.count} mesures)`,
+      data: { p50: stats.p50, p95: stats.p95, p99: stats.p99, count: stats.count },
+    });
+  }
+
+  return alerts;
+}
+
+/**
+ * Check spawn failure rate — alert if any role > 20%.
+ */
+export function checkSpawnFailures(): Alert[] {
+  const stats = getSpawnStats();
+  const alerts: Alert[] = [];
+
+  for (const [role, data] of Object.entries(stats)) {
+    const total = data.success + data.failure;
+    if (total >= 3 && data.failureRate > 20) {
+      alerts.push({
+        type: "agent_failure_pattern",
+        severity: data.failureRate > 50 ? "critical" : "warning",
+        message: `Agent ${role}: taux echec spawn ${data.failureRate}% (${data.failure}/${total})`,
+        data: { role, ...data, total },
+      });
+    }
+  }
+
+  return alerts;
+}
+
+/**
+ * Check module error counts — alert if any module > 10 errors/hour.
+ */
+export function checkModuleErrors(): Alert[] {
+  const counts = getModuleErrorCounts();
+  const alerts: Alert[] = [];
+
+  for (const [mod, count] of Object.entries(counts)) {
+    if (count > 10) {
+      alerts.push({
+        type: "agent_failure_pattern",
+        severity: count > 25 ? "critical" : "warning",
+        message: `Module ${mod}: ${count} erreurs dans la derniere heure`,
+        data: { module: mod, errorCount: count },
+      });
+    }
+  }
+
+  return alerts;
+}
+
+/**
+ * Format monitoring stats for /monitor command (plain text).
+ */
+export function formatMonitoringStats(): string {
+  const lines: string[] = ["Monitoring Production", ""];
+
+  // Response time
+  const rtStats = getResponseTimeStats();
+  lines.push("Temps de reponse:");
+  if (rtStats.count === 0) {
+    lines.push("  Pas de mesures");
+  } else {
+    lines.push(`  p50: ${Math.round(rtStats.p50 / 1000)}s, p95: ${Math.round(rtStats.p95 / 1000)}s, p99: ${Math.round(rtStats.p99 / 1000)}s`);
+    lines.push(`  ${rtStats.count} mesures`);
+  }
+
+  // Spawn stats
+  const spawnStats = getSpawnStats();
+  lines.push("");
+  lines.push("Spawn Claude par role:");
+  if (Object.keys(spawnStats).length === 0) {
+    lines.push("  Aucune execution");
+  } else {
+    for (const [role, data] of Object.entries(spawnStats)) {
+      const total = data.success + data.failure;
+      lines.push(`  ${role}: ${data.success}/${total} OK (${data.failureRate}% echec)`);
+    }
+  }
+
+  // Module errors
+  const modErrors = getModuleErrorCounts();
+  lines.push("");
+  lines.push("Erreurs modules (derniere heure):");
+  const sorted = Object.entries(modErrors).sort(([, a], [, b]) => b - a).slice(0, 5);
+  if (sorted.length === 0) {
+    lines.push("  Aucune erreur");
+  } else {
+    for (const [mod, count] of sorted) {
+      lines.push(`  ${mod}: ${count}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // ── Formatting ───────────────────────────────────────────────
