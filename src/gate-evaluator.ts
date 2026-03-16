@@ -1,7 +1,7 @@
 /**
  * @module gate-evaluator
- * @description Gate evaluation: LLM-based quality checks at pipeline gates,
- * evaluate-rework loop (max 2 iterations).
+ * @description Gate evaluation: deterministic checks + LLM-based rubric scoring at pipeline gates,
+ * evaluate-rework loop (max 2 iterations). S34: dual verification + structured rubric.
  */
 
 /**
@@ -11,13 +11,17 @@
  * Returns pass/fail with structured feedback.
  * T3: Gate Evaluator agent (FR-003)
  * T4: Evaluate-rework loop (FR-004)
+ * S34: Dual verification (deterministic + LLM), structured rubric scoring
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readSection, writeSection, type BlackboardSections, type SectionName } from "./blackboard.ts";
 import { spawnClaude } from "./agent.ts";
+import { spawnSync } from "bun";
 
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
+const DETERMINISTIC_CHECK_TIMEOUT = 30_000; // 30s per check (S34 EC-001)
+const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -27,11 +31,23 @@ export interface EvaluationIssue {
   suggestion: string;
 }
 
+/** S34: Rubric dimension score */
+export interface RubricDimension {
+  name: string;
+  score: number; // 0-25
+  feedback: string;
+  critical: boolean; // true if score < 10
+}
+
 export interface GateEvaluation {
   pass: boolean;
   score: number;
   issues: EvaluationIssue[];
   gate_name: string;
+  /** S34: Structured rubric dimensions */
+  rubric?: RubricDimension[];
+  /** S34: Deterministic check results (implementation gates only) */
+  deterministicChecks?: DeterministicCheckResult[];
 }
 
 export type GateName = "spec" | "plan" | "tasks" | "implementation";
@@ -40,6 +56,121 @@ export interface EvaluateReworkResult {
   finalEvaluation: GateEvaluation;
   iterations: number;
   passedAtIteration: number | null;
+}
+
+/** S34: Result of a deterministic check */
+export interface DeterministicCheckResult {
+  check: string;
+  passed: boolean;
+  output: string;
+  durationMs: number;
+  timedOut?: boolean;
+}
+
+// ── Rubric Dimensions per Gate Type (S34 FR-002) ────────────
+
+export const CODE_RUBRIC_DIMENSIONS = [
+  "error_handling",
+  "test_coverage",
+  "code_style",
+  "spec_conformity",
+] as const;
+
+export const SPEC_RUBRIC_DIMENSIONS = [
+  "completeness",
+  "traceability",
+  "clarity",
+  "feasibility",
+] as const;
+
+export type CodeRubricDimension = typeof CODE_RUBRIC_DIMENSIONS[number];
+export type SpecRubricDimension = typeof SPEC_RUBRIC_DIMENSIONS[number];
+
+function getRubricDimensions(gateName: GateName): readonly string[] {
+  if (gateName === "implementation") return CODE_RUBRIC_DIMENSIONS;
+  return SPEC_RUBRIC_DIMENSIONS;
+}
+
+// ── Deterministic Checks (S34 FR-001) ────────────────────────
+
+/**
+ * Run a single deterministic check with timeout.
+ * Returns the result regardless of pass/fail.
+ */
+export function runSingleCheck(
+  command: string[],
+  checkName: string,
+  timeout: number = DETERMINISTIC_CHECK_TIMEOUT,
+  cwd: string = PROJECT_DIR
+): DeterministicCheckResult {
+  const start = Date.now();
+
+  try {
+    const result = spawnSync(command, {
+      cwd,
+      timeout,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stdout = new TextDecoder().decode(result.stdout).trim();
+    const stderr = new TextDecoder().decode(result.stderr).trim();
+    const output = stdout || stderr;
+    const durationMs = Date.now() - start;
+
+    // Check if timed out (exitCode is null or process was killed)
+    if (result.exitCode === null) {
+      return {
+        check: checkName,
+        passed: false,
+        output: `Timeout after ${timeout}ms`,
+        durationMs,
+        timedOut: true,
+      };
+    }
+
+    return {
+      check: checkName,
+      passed: result.exitCode === 0,
+      output: output.substring(0, 2000),
+      durationMs,
+    };
+  } catch (error) {
+    return {
+      check: checkName,
+      passed: false,
+      output: `Error: ${String(error)}`.substring(0, 2000),
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
+/**
+ * Run deterministic checks for implementation gates.
+ * S34 FR-001: tsc + bun test before LLM evaluation.
+ * EC-001: 30s timeout per check.
+ * EC-007: reports which check failed.
+ */
+export function runDeterministicChecks(cwd?: string): DeterministicCheckResult[] {
+  const results: DeterministicCheckResult[] = [];
+
+  // Check 1: TypeScript type check
+  results.push(runSingleCheck(
+    ["npx", "tsc", "--noEmit"],
+    "tsc",
+    DETERMINISTIC_CHECK_TIMEOUT,
+    cwd
+  ));
+
+  // Check 2: Run tests
+  results.push(runSingleCheck(
+    ["bun", "test"],
+    "bun_test",
+    DETERMINISTIC_CHECK_TIMEOUT,
+    cwd
+  ));
+
+  return results;
 }
 
 // ── Gate Criteria ────────────────────────────────────────────
@@ -97,11 +228,48 @@ const GATE_CRITERIA: Record<GateName, string> = {
   ].join("\n"),
 };
 
+// ── Rubric Prompt Builder (S34 FR-002) ───────────────────────
+
+function buildRubricPrompt(gateName: GateName): string {
+  const dimensions = getRubricDimensions(gateName);
+  const dimList = dimensions.map((d, i) => `${i + 1}. ${d} (0-25)`).join("\n");
+
+  return [
+    "",
+    "RUBRIC SCORING: Score each dimension independently from 0 to 25.",
+    "The total score (0-100) is the sum of all 4 dimensions.",
+    "If any dimension scores below 10, flag it as a critical weakness.",
+    "",
+    "Dimensions:",
+    dimList,
+  ].join("\n");
+}
+
+function buildRubricJsonSchema(gateName: GateName): string {
+  const dimensions = getRubricDimensions(gateName);
+  const rubricFields = dimensions
+    .map((d) => `    "${d}": { "score": 0-25, "feedback": "..." }`)
+    .join(",\n");
+
+  return [
+    '{',
+    '  "pass": true/false,',
+    '  "score": 0-100,',
+    '  "rubric": {',
+    rubricFields,
+    '  },',
+    '  "issues": [{"severity": "critical|major|minor", "description": "...", "suggestion": "..."}],',
+    '  "gate_name": "' + gateName + '"',
+    '}',
+  ].join("\n");
+}
+
 // ── Evaluator ────────────────────────────────────────────────
 
 /**
  * Evaluate a gate by calling Claude CLI with the gate-specific criteria.
- * Returns a structured GateEvaluation.
+ * S34: Implementation gates run deterministic checks first (FR-001).
+ * S34: All gates use structured rubric scoring (FR-002).
  *
  * On timeout (EC-004): returns pass with warning.
  */
@@ -109,26 +277,61 @@ export async function evaluateGate(
   supabase: SupabaseClient | null,
   sessionId: string,
   gateName: GateName,
-  sectionData: any
+  sectionData: any,
+  /** S34: Working directory for deterministic checks */
+  cwd?: string
 ): Promise<GateEvaluation> {
+  // S34 FR-001: Run deterministic checks for implementation gates
+  let deterministicResults: DeterministicCheckResult[] | undefined;
+
+  if (gateName === "implementation") {
+    deterministicResults = runDeterministicChecks(cwd);
+    const allPassed = deterministicResults.every((r) => r.passed);
+
+    // AC-003: If deterministic checks fail, skip LLM (cost saving)
+    if (!allPassed) {
+      const failedChecks = deterministicResults.filter((r) => !r.passed);
+      const issues: EvaluationIssue[] = failedChecks.map((r) => ({
+        severity: "critical" as const,
+        description: `Deterministic check "${r.check}" failed${r.timedOut ? " (timeout)" : ""}`,
+        suggestion: r.output.substring(0, 500),
+      }));
+
+      return {
+        pass: false,
+        score: 0,
+        issues,
+        gate_name: gateName,
+        deterministicChecks: deterministicResults,
+      };
+    }
+  }
+
+  // AC-005: Non-implementation gates skip deterministic checks
   const criteria = GATE_CRITERIA[gateName];
+  const rubricPrompt = buildRubricPrompt(gateName);
+  const rubricSchema = buildRubricJsonSchema(gateName);
+
+  // AC-004: Pass deterministic check results as context to LLM
+  const checkContext = deterministicResults
+    ? `\n\nDETERMINISTIC CHECKS (all passed):\n${deterministicResults
+        .map((r) => `- ${r.check}: PASS (${r.durationMs}ms)`)
+        .join("\n")}`
+    : "";
 
   const prompt = [
     "You are a quality evaluator for a software development pipeline.",
     "Your task is to evaluate the following output and return a structured JSON evaluation.",
     "",
     criteria,
+    rubricPrompt,
+    checkContext,
     "",
     "OUTPUT TO EVALUATE:",
     JSON.stringify(sectionData, null, 2).substring(0, 30000),
     "",
     "Return ONLY a JSON object with this exact structure:",
-    '{',
-    '  "pass": true/false,',
-    '  "score": 0-100,',
-    '  "issues": [{"severity": "critical|major|minor", "description": "...", "suggestion": "..."}],',
-    '  "gate_name": "' + gateName + '"',
-    '}',
+    rubricSchema,
     "",
     "No other text. Only valid JSON.",
   ].join("\n");
@@ -154,11 +357,13 @@ export async function evaluateGate(
         score: 50,
         issues: [{ severity: "minor", description: "Evaluator timed out", suggestion: "Review manually" }],
         gate_name: gateName,
+        deterministicChecks: deterministicResults,
       };
     }
 
     // Parse JSON from output
     const evaluation = parseEvaluationOutput(result.stdout, gateName);
+    evaluation.deterministicChecks = deterministicResults;
     return evaluation;
   } catch (error) {
     console.error(`evaluateGate error for gate "${gateName}":`, error);
@@ -168,12 +373,14 @@ export async function evaluateGate(
       score: 50,
       issues: [{ severity: "minor", description: `Evaluator error: ${String(error)}`, suggestion: "Review manually" }],
       gate_name: gateName,
+      deterministicChecks: deterministicResults,
     };
   }
 }
 
 /**
  * Parse the evaluator output into a GateEvaluation.
+ * S34: Now parses rubric dimensions from the output.
  */
 export function parseEvaluationOutput(output: string, gateName: string): GateEvaluation {
   // Try direct JSON parse
@@ -205,7 +412,17 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
 }
 
 function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
-  const score = typeof obj.score === "number" ? Math.min(100, Math.max(0, obj.score)) : 50;
+  // S34: Parse rubric dimensions if present
+  const rubric = parseRubricFromOutput(obj, gateName as GateName);
+
+  // If rubric is present, compute score from rubric dimensions
+  let score: number;
+  if (rubric && rubric.length === 4) {
+    score = rubric.reduce((sum, d) => sum + d.score, 0);
+  } else {
+    score = typeof obj.score === "number" ? Math.min(100, Math.max(0, obj.score)) : 50;
+  }
+
   const pass = obj.pass !== undefined ? Boolean(obj.pass) : score >= 60;
   const issues = Array.isArray(obj.issues)
     ? obj.issues.map((i: any) => ({
@@ -215,7 +432,49 @@ function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
       }))
     : [];
 
-  return { pass, score, issues, gate_name: gateName };
+  // S34 AC-009: Flag critical weaknesses (dimension below 10)
+  if (rubric) {
+    for (const dim of rubric) {
+      if (dim.critical && !issues.some((i: EvaluationIssue) => i.description.includes(dim.name))) {
+        issues.push({
+          severity: "critical",
+          description: `Critical weakness in "${dim.name}" (score: ${dim.score}/25)`,
+          suggestion: dim.feedback || `Improve ${dim.name}`,
+        });
+      }
+    }
+  }
+
+  return { pass, score, issues, gate_name: gateName, rubric };
+}
+
+/**
+ * Parse rubric dimensions from the LLM evaluation output.
+ * S34 FR-002: Extracts 4 dimension scores.
+ */
+export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimension[] | undefined {
+  if (!obj.rubric || typeof obj.rubric !== "object") return undefined;
+
+  const dimensions = getRubricDimensions(gateName);
+  const rubric: RubricDimension[] = [];
+
+  for (const dim of dimensions) {
+    const dimData = obj.rubric[dim];
+    if (!dimData) continue;
+
+    const score = typeof dimData.score === "number"
+      ? Math.min(25, Math.max(0, Math.round(dimData.score)))
+      : 0;
+
+    rubric.push({
+      name: dim,
+      score,
+      feedback: String(dimData.feedback || ""),
+      critical: score < 10,
+    });
+  }
+
+  return rubric.length > 0 ? rubric : undefined;
 }
 
 // ── Evaluate-Rework Loop (T4 — FR-004) ──────────────────────
@@ -288,14 +547,37 @@ export async function evaluateAndRework(
 
 /**
  * Format evaluation feedback for the agent rework prompt.
+ * S34: Includes rubric dimension details when available.
  */
 export function formatEvaluationFeedback(evaluation: GateEvaluation): string {
   const lines = [
     `EVALUATION FEEDBACK (Gate: ${evaluation.gate_name})`,
     `Score: ${evaluation.score}/100 — ${evaluation.pass ? "PASS" : "FAIL"}`,
-    "",
-    "Issues to address:",
   ];
+
+  // S34: Include rubric breakdown
+  if (evaluation.rubric && evaluation.rubric.length > 0) {
+    lines.push("");
+    lines.push("Rubric breakdown:");
+    for (const dim of evaluation.rubric) {
+      const marker = dim.critical ? " [CRITICAL]" : "";
+      lines.push(`  ${dim.name}: ${dim.score}/25${marker}`);
+      if (dim.feedback) lines.push(`    ${dim.feedback}`);
+    }
+  }
+
+  // S34: Include deterministic check results
+  if (evaluation.deterministicChecks && evaluation.deterministicChecks.length > 0) {
+    lines.push("");
+    lines.push("Deterministic checks:");
+    for (const check of evaluation.deterministicChecks) {
+      const status = check.passed ? "PASS" : "FAIL";
+      lines.push(`  ${check.check}: ${status} (${check.durationMs}ms)`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Issues to address:");
 
   for (const issue of evaluation.issues) {
     lines.push(`  [${issue.severity}] ${issue.description}`);

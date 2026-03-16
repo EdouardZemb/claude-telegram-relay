@@ -5,5 +5,7 @@
   "model_routing": true,
   "cost_estimate": true,
   "feature_monitoring": true,
-  "intent_detection": false
+  "intent_detection": false,
+  "llm_router": false,
+  "model_cascade": false
 }
