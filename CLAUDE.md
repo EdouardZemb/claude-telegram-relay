@@ -67,6 +67,9 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `alert-cron.ts` | Hourly scheduled alert runner + memory archival + morning digest flush |
 | `feature-flags.ts` | Feature flags: file-based toggle system, hot-reload, /feature command |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets and historical data |
+| `mcp-config.ts` | Per-role MCP tool configuration: tool allowlists, system prompt instructions for agent MCP access |
+| `pipeline-state.ts` | Pipeline checkpoint/resume: persists execution state after each agent step, enables resuming from last success |
+| `intent-detection.ts` | Intent detection spike: pattern-based natural language to command mapping, behind feature flag |
 
 ### Telegram Commands
 
@@ -108,7 +111,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`, `bump_memory_access`
 
@@ -163,6 +166,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 **CI/CD & E2E Testing (S30):** Self-hosted GitHub Actions runner on the server (systemd, HTTPS outbound only — no firewall issues). CI (`ci.yml`) and deploy (`deploy.yml`) run on `[self-hosted, linux]`. Deploy is local (git pull + pm2 restart + smoke test + auto-rollback), replacing SSH-based deploy. Auto-deploy polling (`auto-deploy.sh`, `claude-autodeploy` PM2 service) removed — redundant with runner. E2E tests use Grammy's `bot.handleUpdate()` to inject synthetic Telegram updates into the bot's handler pipeline. `relay.ts` exports `createBot(token)` factory function; `import.meta.main` guards startup side effects (bot.start, PID file, intervals, process handlers). E2E framework (`tests/e2e/framework.ts`) intercepts `ctx.reply()` via Grammy API transformer — no real Telegram API calls. 8 E2E tests cover /help, /status, /feature, /workflow, /agents, /monitor, /estimate, /notify. Data isolation via `[E2E-<runId>]` prefix tags, cleanup after each test. E2E job in CI depends on check job, uses RELAY_DIR in /tmp.
 
 **Composer Extensibility (S31):** Refactored relay.ts (3216→243 lines) using Grammy's native Composer pattern. `src/bot-context.ts` provides a typed `BotContext` dependency object (callClaude, sendResponse, buildPrompt, supabase, session, topic helpers) injected into all Composers. `src/loader.ts` auto-discovers `src/commands/*.ts` via Bun Glob, imports each module, and mounts Composers with per-module errorBoundary. 10 Composer modules cover all 33 commands + 4 message handlers + callbacks. `src/topic-config.ts` extracts per-topic system prompts and command allowlists. Adding a new feature = creating a new file in `src/commands/`, no relay.ts modification needed. Zero new dependencies. ADR-007.
+
+**Advanced Multi-Agent Architecture (S33):** Three architectural improvements plus intent detection spike. (1) MCP Dynamic: `src/mcp-config.ts` defines per-role MCP tool allowlists (analyst: read-only context, dev/architect: full blackboard access, qa: read-only, sm: memory-only). `spawnClaude()` accepts `mcpRole` option, injects MCP tool instructions into agent system prompt via `buildMcpToolInstructions()`. Agents inherit MCP server access from project `.mcp.json` automatically. (2) Checkpoint/Resume: `pipeline_runs` table tracks pipeline execution state. `src/pipeline-state.ts` saves state after each agent step (`savePipelineStep()`), enables resume from last successful agent (`buildResumeContext()`). `/orchestrate <id> --resume [sessionId]` resumes failed pipelines. In-memory fallback when Supabase unavailable. (3) Intent Detection: `src/intent-detection.ts` maps natural language to commands via regex patterns with confidence scoring (0.7-0.95). Behind `intent_detection` feature flag (disabled by default). Integrated in `zz-messages.ts` text handler — suggests matching command when confidence >= 0.8.
 
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
