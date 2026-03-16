@@ -11,8 +11,8 @@
  * T5: Adversarial Verifier (FR-005)
  */
 
-import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { spawnClaude } from "./agent.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -28,7 +28,6 @@ export interface DriftReport {
   overall_verdict: "pass" | "fail" | "warning";
 }
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const VERIFIER_TIMEOUT = 180_000; // 3 minutes
 
 // ── Verifier ─────────────────────────────────────────────────
@@ -89,24 +88,19 @@ export async function verifySpecVsImplementation(
   ].join("\n");
 
   try {
-    const proc = spawn(
-      [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: process.env.PROJECT_DIR || process.cwd(),
-        env: { ...process.env },
-      }
-    );
-
-    const timeoutPromise = new Promise<string>((resolve) => {
-      setTimeout(() => resolve("__TIMEOUT__"), VERIFIER_TIMEOUT);
+    // S28: Use centralized spawnClaude with effort=medium for verifier
+    const resultPromise = spawnClaude({
+      prompt,
+      effort: "medium",
     });
 
-    const outputPromise = new Response(proc.stdout).text();
-    const output = await Promise.race([outputPromise, timeoutPromise]);
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), VERIFIER_TIMEOUT);
+    });
 
-    if (output === "__TIMEOUT__") {
+    const result = await Promise.race([resultPromise, timeoutPromise]);
+
+    if (!result) {
       console.warn("adversarial-verifier: timed out");
       return {
         coverage_score: 50,
@@ -115,9 +109,7 @@ export async function verifySpecVsImplementation(
       };
     }
 
-    await proc.exited;
-
-    return parseDriftReport(output.trim());
+    return parseDriftReport(result.stdout);
   } catch (error) {
     console.error("adversarial-verifier error:", error);
     return {

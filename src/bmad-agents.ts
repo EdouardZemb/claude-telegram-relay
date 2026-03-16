@@ -33,6 +33,11 @@ export interface BmadAgent {
   principles: string;
   criticalActions: string[];
   commands: BmadCommand[];
+  /** S28: CLI optimization flags */
+  effort?: "low" | "medium" | "high" | "max";
+  model?: string;
+  fallbackModel?: string;
+  maxBudgetUsd?: number;
 }
 
 export interface BmadCommand {
@@ -64,6 +69,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "TR", description: "Technical Research: faisabilite technique, options archi" },
       { trigger: "CB", description: "Create Brief: cadrer l'idee produit en brief executif" },
     ],
+    effort: "medium",
+    model: "claude-sonnet-4-6",
+    fallbackModel: "claude-haiku-4-5",
+    maxBudgetUsd: 0.50,
   },
   {
     id: "pm",
@@ -86,6 +95,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "IR", description: "Implementation Readiness: alignement PRD/UX/Archi/Stories" },
       { trigger: "CC", description: "Course Correction: gerer un changement majeur en cours d'implementation" },
     ],
+    effort: "medium",
+    model: "claude-sonnet-4-6",
+    fallbackModel: "claude-haiku-4-5",
+    maxBudgetUsd: 0.50,
   },
   {
     id: "architect",
@@ -104,6 +117,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "CA", description: "Create Architecture: documenter les decisions techniques" },
       { trigger: "IR", description: "Implementation Readiness: alignement complet avant implementation" },
     ],
+    effort: "high",
+    model: "claude-opus-4-6",
+    fallbackModel: "claude-sonnet-4-6",
+    maxBudgetUsd: 1.00,
   },
   {
     id: "sm",
@@ -124,6 +141,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "ER", description: "Epic Retrospective: revue de tout le travail d'un epic" },
       { trigger: "CC", description: "Course Correction: gerer un changement majeur" },
     ],
+    effort: "low",
+    model: "claude-haiku-4-5",
+    fallbackModel: "claude-haiku-4-5",
+    maxBudgetUsd: 0.25,
   },
   {
     id: "dev",
@@ -150,6 +171,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "DS", description: "Dev Story: ecrire tests et code pour la prochaine story" },
       { trigger: "CR", description: "Code Review: revue de code adversariale multi-facettes" },
     ],
+    effort: "high",
+    model: "claude-opus-4-6",
+    fallbackModel: "claude-sonnet-4-6",
+    maxBudgetUsd: 2.00,
   },
   {
     id: "qa",
@@ -172,6 +197,10 @@ const AGENTS: BmadAgent[] = [
     commands: [
       { trigger: "QA", description: "Automate: generer des tests pour les features existantes" },
     ],
+    effort: "high",
+    model: "claude-sonnet-4-6",
+    fallbackModel: "claude-haiku-4-5",
+    maxBudgetUsd: 1.00,
   },
 ];
 

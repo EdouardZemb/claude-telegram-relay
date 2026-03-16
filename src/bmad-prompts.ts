@@ -98,10 +98,10 @@ export function loadAllAgents(): Map<string, AgentYaml> {
 // ── Prompt Builders ──────────────────────────────────────────
 
 /**
- * Build a full system prompt for an agent from its YAML definition.
- * Enriched with Telegram-specific instructions and context.
+ * Build the system prompt portion for an agent (identity, role, principles, instructions).
+ * S28: Separated from task context for --append-system-prompt support.
  */
-export function buildFullAgentPrompt(
+export function buildAgentSystemPromptPart(
   agentId: string,
   context: AgentPromptContext
 ): string {
@@ -141,11 +141,27 @@ export function buildFullAgentPrompt(
   parts.push("");
   parts.push(getCommandInstructions(agentId, context));
 
+  // Feedback from retros (S16-03)
+  const feedback = buildFeedbackContext(agentId as any);
+  if (feedback) {
+    parts.push(feedback);
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Build the task prompt portion for an agent (task context, AC, subtasks, docs).
+ * S28: Separated from system prompt for --append-system-prompt support.
+ */
+export function buildAgentTaskPromptPart(
+  agentId: string,
+  context: AgentPromptContext
+): string {
+  const parts: string[] = [];
+
   // Task context
   if (context.taskTitle) {
-    parts.push("");
-    parts.push("---");
-    parts.push("");
     parts.push(`TACHE: ${context.taskTitle}`);
     if (context.taskDescription) {
       parts.push(`DESCRIPTION: ${context.taskDescription}`);
@@ -198,13 +214,27 @@ export function buildFullAgentPrompt(
     parts.push(context.shardedContext);
   }
 
-  // Feedback from retros (S16-03)
-  const feedback = buildFeedbackContext(agentId as any);
-  if (feedback) {
-    parts.push(feedback);
-  }
-
   return parts.join("\n");
+}
+
+/**
+ * Build a full system prompt for an agent from its YAML definition.
+ * Enriched with Telegram-specific instructions and context.
+ * S28: Now a wrapper that concatenates system + task portions for backward compat.
+ */
+export function buildFullAgentPrompt(
+  agentId: string,
+  context: AgentPromptContext
+): string {
+  const systemPart = buildAgentSystemPromptPart(agentId, context);
+  if (!systemPart) return "";
+
+  const taskPart = buildAgentTaskPromptPart(agentId, context);
+
+  if (taskPart) {
+    return `${systemPart}\n\n---\n\n${taskPart}`;
+  }
+  return systemPart;
 }
 
 /**

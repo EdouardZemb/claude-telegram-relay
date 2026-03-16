@@ -13,11 +13,10 @@
  * T4: Evaluate-rework loop (FR-004)
  */
 
-import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readSection, writeSection, type BlackboardSections, type SectionName } from "./blackboard.ts";
+import { spawnClaude } from "./agent.ts";
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
 
 // ── Types ────────────────────────────────────────────────────
@@ -135,25 +134,20 @@ export async function evaluateGate(
   ].join("\n");
 
   try {
-    const proc = spawn(
-      [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: process.env.PROJECT_DIR || process.cwd(),
-        env: { ...process.env },
-      }
-    );
-
-    // Timeout handling (EC-004)
-    const timeoutPromise = new Promise<string>((resolve) => {
-      setTimeout(() => resolve("__TIMEOUT__"), EVALUATOR_TIMEOUT);
+    // S28: Use centralized spawnClaude with effort=medium for evaluators
+    const resultPromise = spawnClaude({
+      prompt,
+      effort: "medium",
     });
 
-    const outputPromise = new Response(proc.stdout).text();
-    const output = await Promise.race([outputPromise, timeoutPromise]);
+    // Timeout handling (EC-004)
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), EVALUATOR_TIMEOUT);
+    });
 
-    if (output === "__TIMEOUT__") {
+    const result = await Promise.race([resultPromise, timeoutPromise]);
+
+    if (!result) {
       console.warn(`evaluateGate: timeout for gate "${gateName}" (${EVALUATOR_TIMEOUT}ms). Passing with warning.`);
       return {
         pass: true,
@@ -163,10 +157,8 @@ export async function evaluateGate(
       };
     }
 
-    await proc.exited;
-
     // Parse JSON from output
-    const evaluation = parseEvaluationOutput(output.trim(), gateName);
+    const evaluation = parseEvaluationOutput(result.stdout, gateName);
     return evaluation;
   } catch (error) {
     console.error(`evaluateGate error for gate "${gateName}":`, error);

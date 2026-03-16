@@ -18,7 +18,6 @@
  *   });
  */
 
-import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Task } from "./tasks.ts";
 import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
@@ -28,6 +27,7 @@ import {
   type AgentPromptContext,
 } from "./bmad-prompts.ts";
 import { getAgent, type BmadAgent } from "./bmad-agents.ts";
+import { spawnClaude } from "./agent.ts";
 import { WorkflowTracker } from "./workflow.ts";
 import { buildTaskContext } from "./document-sharding.ts";
 import {
@@ -36,6 +36,7 @@ import {
   parseAgentOutput,
   buildStructuredOutputInstructions,
   buildStructuredChainContext,
+  getJsonSchemaForRole,
 } from "./agent-schemas.ts";
 import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
 import {
@@ -82,7 +83,6 @@ import {
 } from "./fan-out.ts";
 import { writeSectionWithRetry, mergeImplementationSection } from "./blackboard.ts";
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
 // ── Types ────────────────────────────────────────────────────
@@ -211,23 +211,26 @@ async function runAgentStep(
   prompt += getOrchestrationInstructions(agentId);
 
   try {
-    const proc = spawn(
-      [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
-      { stdout: "pipe", stderr: "pipe", cwd: PROJECT_DIR, env: { ...process.env } }
-    );
+    // S28: Use centralized spawnClaude with agent-specific CLI flags
+    const jsonSchema = getJsonSchemaForRole(agentId);
+    const result = await spawnClaude({
+      prompt,
+      outputFormat: jsonSchema ? "json" : "text",
+      jsonSchema: jsonSchema || undefined,
+      effort: agent?.effort,
+      model: agent?.model,
+      fallbackModel: agent?.fallbackModel,
+      maxBudgetUsd: agent?.maxBudgetUsd,
+    });
 
-    const output = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
-
-    const rawOutput = output.trim();
-    const success = exitCode === 0;
+    const rawOutput = result.stdout;
+    const success = result.exitCode === 0;
 
     // Parse structured output (S22-02)
     const structured = success ? parseAgentOutput(rawOutput, agentId) : null;
 
-    // Parse token usage (S23-05)
-    const usage = parseTokenUsage(rawOutput, prompt.length);
+    // Parse token usage (S23-05, S28: model-aware pricing)
+    const usage = parseTokenUsage(rawOutput, prompt.length, agent?.model);
 
     return {
       agentId,
@@ -235,7 +238,7 @@ async function runAgentStep(
       success,
       output: rawOutput,
       structured,
-      error: exitCode !== 0 ? stderr.trim() : undefined,
+      error: result.exitCode !== 0 ? result.stderr : undefined,
       durationMs: Date.now() - startTime,
       tokensInput: usage.tokensInput,
       tokensOutput: usage.tokensOutput,
@@ -626,8 +629,9 @@ export async function orchestrate(
           }
         }
 
-        // Log cost
+        // Log cost (S28: include model)
         if (supabase && node.result.tokensInput) {
+          const nodeAgent = getAgent(node.agent);
           logCost(supabase, {
             taskId: task.id,
             sprintId: task.sprint || undefined,
@@ -639,6 +643,7 @@ export async function orchestrate(
             durationMs: node.result.durationMs,
             retryAttempt: node.result.retryCount || 0,
             context: "orchestration_parallel",
+            model: nodeAgent?.model,
           }).catch(() => {});
         }
       }
@@ -748,7 +753,7 @@ export async function orchestrate(
         }
       }
 
-      // Log cost (S23-05)
+      // Log cost (S23-05, S28: include model)
       if (supabase && result!.tokensInput) {
         logCost(supabase, {
           taskId: task.id,
@@ -761,6 +766,7 @@ export async function orchestrate(
           durationMs: result!.durationMs,
           retryAttempt: retryCount,
           context: "orchestration",
+          model: agent?.model,
         }).catch(() => {});
       }
 

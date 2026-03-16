@@ -34,6 +34,8 @@ export interface CostEntry {
   retryAttempt?: number;
   context?: string;
   metadata?: Record<string, unknown>;
+  /** S28: model used for this execution */
+  model?: string;
 }
 
 export interface SprintCostSummary {
@@ -49,16 +51,24 @@ export interface SprintCostSummary {
 
 // ── Pricing ──────────────────────────────────────────────────
 
-/** Approximate pricing per 1M tokens (Claude Sonnet 4 via CLI) */
-const PRICE_PER_M_INPUT = 3.0; // $3/M input tokens
-const PRICE_PER_M_OUTPUT = 15.0; // $15/M output tokens
+/** S28: Multi-model pricing per 1M tokens */
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-6":   { input: 15.0, output: 75.0 },
+  "claude-sonnet-4-6": { input: 3.0,  output: 15.0 },
+  "claude-haiku-4-5":  { input: 0.80, output: 4.0 },
+};
+
+/** Default pricing (Sonnet) for backward compatibility */
+const DEFAULT_PRICING = MODEL_PRICING["claude-sonnet-4-6"];
 
 /**
  * Estimate cost from token counts.
+ * S28: Accepts optional model to use model-specific pricing.
  */
-export function estimateCost(tokensInput: number, tokensOutput: number): number {
-  const inputCost = (tokensInput / 1_000_000) * PRICE_PER_M_INPUT;
-  const outputCost = (tokensOutput / 1_000_000) * PRICE_PER_M_OUTPUT;
+export function estimateCost(tokensInput: number, tokensOutput: number, model?: string): number {
+  const pricing = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;
+  const inputCost = (tokensInput / 1_000_000) * pricing.input;
+  const outputCost = (tokensOutput / 1_000_000) * pricing.output;
   return Math.round((inputCost + outputCost) * 10000) / 10000; // 4 decimal places
 }
 
@@ -70,10 +80,12 @@ export function estimateCost(tokensInput: number, tokensOutput: number): number 
  * Claude CLI with --output-format text doesn't emit structured usage data,
  * so we estimate from the output length as a fallback.
  * If structured usage data is found (JSON format), we parse it.
+ * S28: Accepts optional model for model-specific pricing.
  */
 export function parseTokenUsage(
   output: string,
-  promptLength: number = 0
+  promptLength: number = 0,
+  model?: string
 ): TokenUsage {
   // Try to find structured usage data in output (Claude CLI may include it)
   const usageMatch = output.match(
@@ -87,7 +99,7 @@ export function parseTokenUsage(
       tokensInput,
       tokensOutput,
       tokensTotal: tokensInput + tokensOutput,
-      costUsd: estimateCost(tokensInput, tokensOutput),
+      costUsd: estimateCost(tokensInput, tokensOutput, model),
     };
   }
 
@@ -102,7 +114,7 @@ export function parseTokenUsage(
     tokensInput,
     tokensOutput,
     tokensTotal: tokensInput + tokensOutput,
-    costUsd: estimateCost(tokensInput, tokensOutput),
+    costUsd: estimateCost(tokensInput, tokensOutput, model),
   };
 }
 
@@ -130,6 +142,7 @@ export async function logCost(
       retry_attempt: entry.retryAttempt || 0,
       context: entry.context || null,
       metadata: entry.metadata || {},
+      model: entry.model || null,
     });
     if (error) console.error("logCost error:", error);
   } catch (error) {
