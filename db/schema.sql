@@ -517,7 +517,7 @@ CREATE TABLE IF NOT EXISTS memory_links (
   source_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
   target_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
   similarity FLOAT NOT NULL CHECK (similarity >= 0 AND similarity <= 1),
-  link_type TEXT NOT NULL DEFAULT 'semantic',
+  link_type TEXT NOT NULL DEFAULT 'related' CHECK (link_type IN ('related', 'extends', 'supports')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (source_id, target_id),
   CHECK (source_id != target_id)
@@ -541,6 +541,7 @@ DECLARE
   v_match RECORD;
   v_links_created INT := 0;
   v_target_count INT;
+  v_link_type TEXT;
 BEGIN
   -- Fetch the memory's embedding
   SELECT embedding INTO v_embedding
@@ -570,9 +571,15 @@ BEGIN
     ORDER BY m.embedding <=> v_embedding
     LIMIT p_max_links - v_existing_count
   LOOP
+    -- Determine link type based on similarity
+    v_link_type := CASE
+      WHEN v_match.sim >= 0.75 THEN 'extends'
+      ELSE 'related'
+    END;
+
     -- Insert forward link (source → target)
     INSERT INTO public.memory_links (source_id, target_id, similarity, link_type)
-    VALUES (p_memory_id, v_match.id, v_match.sim, 'semantic')
+    VALUES (p_memory_id, v_match.id, v_match.sim, v_link_type)
     ON CONFLICT (source_id, target_id) DO NOTHING;
 
     IF FOUND THEN
@@ -586,7 +593,7 @@ BEGIN
 
     IF v_target_count < p_max_links THEN
       INSERT INTO public.memory_links (source_id, target_id, similarity, link_type)
-      VALUES (v_match.id, p_memory_id, v_match.sim, 'semantic')
+      VALUES (v_match.id, p_memory_id, v_match.sim, v_link_type)
       ON CONFLICT (source_id, target_id) DO NOTHING;
 
       IF FOUND THEN
@@ -615,6 +622,12 @@ CREATE TRIGGER memory_auto_link
   AFTER UPDATE OF embedding ON memory
   FOR EACH ROW
   WHEN (OLD.embedding IS NULL AND NEW.embedding IS NOT NULL)
+  EXECUTE FUNCTION auto_link_memory();
+
+CREATE TRIGGER memory_auto_link_insert
+  AFTER INSERT ON memory
+  FOR EACH ROW
+  WHEN (NEW.embedding IS NOT NULL)
   EXECUTE FUNCTION auto_link_memory();
 
 -- ============================================================

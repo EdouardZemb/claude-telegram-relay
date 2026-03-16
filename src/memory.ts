@@ -443,17 +443,17 @@ export async function findDuplicateIdea(
 export async function linkMemories(
   supabase: SupabaseClient | null,
   memoryId: string,
-  threshold: number = 0.65,
-  maxLinks: number = 5
+  threshold?: number,
+  maxLinks?: number
 ): Promise<number> {
   if (!supabase || !memoryId) return 0;
 
   try {
-    const { data, error } = await supabase.rpc("link_memory", {
-      p_memory_id: memoryId,
-      p_threshold: threshold,
-      p_max_links: maxLinks,
-    });
+    const params: Record<string, any> = { p_memory_id: memoryId };
+    if (threshold !== undefined) params.p_threshold = threshold;
+    if (maxLinks !== undefined) params.p_max_links = maxLinks;
+
+    const { data, error } = await supabase.rpc("link_memory", params);
 
     if (error) {
       console.error("link_memory error:", error);

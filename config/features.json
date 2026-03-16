@@ -6,7 +6,7 @@
   "cost_estimate": true,
   "feature_monitoring": true,
   "intent_detection": false,
-  "llm_router": true,
+  "llm_router": false,
   "model_cascade": false,
-  "auto_gate_approval": true
+  "auto_gate_approval": false
 }

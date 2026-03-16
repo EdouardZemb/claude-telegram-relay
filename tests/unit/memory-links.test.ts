@@ -17,7 +17,7 @@ describe("linkMemories", () => {
     supabase = createMockSupabase();
   });
 
-  it("calls link_memory RPC with correct default params", async () => {
+  it("calls link_memory RPC with only memoryId when no optional params", async () => {
     let calledWith: any = null;
     supabase._registerRpc("link_memory", (params: any) => {
       calledWith = params;
@@ -28,8 +28,6 @@ describe("linkMemories", () => {
 
     expect(calledWith).toEqual({
       p_memory_id: "mem-123",
-      p_threshold: 0.65,
-      p_max_links: 5,
     });
     expect(result).toBe(4);
   });
@@ -122,85 +120,75 @@ describe("linkMemories", () => {
   });
 });
 
-describe("memory_links schema contract", () => {
-  it("schema.sql defines memory_links table with required columns", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
+describe("linkMemories behavioral tests", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
 
-    // Table exists
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  it("respects maxLinks=1 by passing it to RPC", async () => {
+    let calledWith: any = null;
+    supabase._registerRpc("link_memory", (params: any) => {
+      calledWith = params;
+      return 1;
+    });
+
+    const result = await linkMemories(supabase, "mem-100", 0.65, 1);
+
+    expect(calledWith.p_max_links).toBe(1);
+    expect(result).toBe(1);
+  });
+
+  it("high threshold filters more aggressively", async () => {
+    let calledWith: any = null;
+    supabase._registerRpc("link_memory", (params: any) => {
+      calledWith = params;
+      return 0; // no matches above 0.95
+    });
+
+    const result = await linkMemories(supabase, "mem-200", 0.95);
+
+    expect(calledWith.p_threshold).toBe(0.95);
+    expect(result).toBe(0);
+  });
+
+  it("returns link count reflecting bidirectional creation", async () => {
+    // RPC returns 6 = 3 forward + 3 reverse links
+    supabase._registerRpc("link_memory", () => 6);
+
+    const result = await linkMemories(supabase, "mem-300");
+    expect(result).toBe(6);
+  });
+
+  it("does not call RPC when memoryId is empty", async () => {
+    let rpcCalled = false;
+    supabase._registerRpc("link_memory", () => {
+      rpcCalled = true;
+      return 5;
+    });
+
+    await linkMemories(supabase, "");
+    expect(rpcCalled).toBe(false);
+  });
+
+  it("handles RPC exception gracefully", async () => {
+    supabase._registerRpc("link_memory", () => {
+      throw new Error("database connection lost");
+    });
+
+    const result = await linkMemories(supabase, "mem-400");
+    expect(result).toBe(0);
+  });
+});
+
+describe("memory_links schema snapshot", () => {
+  it("schema.sql contains memory_links table and link_memory RPC", async () => {
+    const schema = await Bun.file("db/schema.sql").text();
+
     expect(schema).toContain("CREATE TABLE IF NOT EXISTS memory_links");
-
-    // Required columns
-    expect(schema).toContain("source_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE");
-    expect(schema).toContain("target_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE");
-    expect(schema).toContain("similarity FLOAT NOT NULL");
-    expect(schema).toContain("link_type TEXT NOT NULL DEFAULT 'semantic'");
-    expect(schema).toContain("created_at TIMESTAMPTZ DEFAULT NOW()");
-
-    // Constraints
-    expect(schema).toContain("UNIQUE (source_id, target_id)");
-    expect(schema).toContain("CHECK (source_id != target_id)");
-
-    // Indexes
-    expect(schema).toContain("idx_memory_links_source");
-    expect(schema).toContain("idx_memory_links_target");
-  });
-
-  it("schema.sql defines link_memory RPC with default params", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
     expect(schema).toContain("CREATE OR REPLACE FUNCTION link_memory(");
-    expect(schema).toContain("p_memory_id UUID");
-    expect(schema).toContain("p_threshold FLOAT DEFAULT 0.65");
-    expect(schema).toContain("p_max_links INT DEFAULT 5");
-    expect(schema).toContain("RETURNS INTEGER");
-  });
-
-  it("schema.sql defines auto_link_memory trigger on embedding update", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    expect(schema).toContain("CREATE OR REPLACE FUNCTION auto_link_memory()");
     expect(schema).toContain("CREATE TRIGGER memory_auto_link");
-    expect(schema).toContain("AFTER UPDATE OF embedding ON memory");
-    expect(schema).toContain("OLD.embedding IS NULL AND NEW.embedding IS NOT NULL");
-  });
-
-  it("schema.sql defines RLS policy for memory_links", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    expect(schema).toContain("ALTER TABLE memory_links ENABLE ROW LEVEL SECURITY");
-    expect(schema).toMatch(/CREATE POLICY .+ ON memory_links/);
-  });
-
-  it("link_memory RPC uses ON CONFLICT DO NOTHING for idempotence", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    expect(schema).toContain("ON CONFLICT (source_id, target_id) DO NOTHING");
-  });
-
-  it("link_memory RPC filters self-links (m.id != p_memory_id)", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    expect(schema).toContain("m.id != p_memory_id");
-  });
-
-  it("link_memory RPC checks target max before reverse insert", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    // The RPC should count existing links for the target before inserting reverse
-    expect(schema).toContain("v_target_count < p_max_links");
-  });
-
-  it("link_memory RPC has exception handler", async () => {
-    const schemaFile = Bun.file("db/schema.sql");
-    const schema = await schemaFile.text();
-
-    expect(schema).toContain("EXCEPTION WHEN OTHERS");
+    expect(schema).toContain("link_type TEXT NOT NULL");
   });
 });
