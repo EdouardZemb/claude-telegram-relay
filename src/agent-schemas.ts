@@ -557,7 +557,7 @@ export function buildStructuredChainContext(
  * Format a structured output for inclusion in downstream context.
  * Extracts the most relevant fields per role.
  */
-function formatStructuredOutput(output: StructuredAgentOutput): string {
+export function formatStructuredOutput(output: StructuredAgentOutput): string {
   switch (output.role) {
     case "analyst":
       return [

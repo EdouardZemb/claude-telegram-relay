@@ -89,14 +89,12 @@ export async function getProject(
   if (bySlug) return bySlug as Project;
 
   // Try by ID prefix
-  const { data: byId } = await supabase
+  const { data: allProjects } = await supabase
     .from("projects")
-    .select("*")
-    .like("id", `${slugOrId}%`)
-    .limit(1)
-    .single();
+    .select("*");
 
-  return byId as Project | null;
+  const byId = (allProjects || []).find((p: { id: string }) => p.id.startsWith(slugOrId));
+  return (byId as Project) ?? null;
 }
 
 export async function listProjects(

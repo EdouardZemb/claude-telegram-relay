@@ -141,6 +141,13 @@ class MockQueryBuilder {
     return this;
   }
 
+  filter(column: string, op: string, value: any) {
+    // Support PostgREST-style casting (e.g. "id::text") — strip the cast for in-memory matching
+    const cleanColumn = column.replace(/::.*$/, "");
+    this.filters.push({ column: cleanColumn, op, value });
+    return this;
+  }
+
   not(column: string, op: string, value: any) {
     this.filters.push({ column, op: `not.${op}`, value });
     return this;

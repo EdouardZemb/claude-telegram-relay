@@ -37,6 +37,7 @@ import {
   buildStructuredOutputInstructions,
   buildStructuredChainContext,
   getJsonSchemaForRole,
+  formatStructuredOutput,
 } from "./agent-schemas.ts";
 import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
 import {
@@ -1143,15 +1144,19 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     }
   }
 
-  // Add last agent's output as the main result
+  // Add last agent's output as the main result (formatted as plain text)
   const lastSuccessful = [...result.steps].reverse().find((s) => s.success);
-  if (lastSuccessful && lastSuccessful.output) {
+  if (lastSuccessful) {
     lines.push("");
     lines.push("--- Resultat ---");
-    // Trim to reasonable Telegram length
     const maxLen = 3000;
-    const output = lastSuccessful.output;
-    lines.push(output.length > maxLen ? output.substring(0, maxLen) + "..." : output);
+    // Use structured output formatted as plain text when available
+    const output = lastSuccessful.structured
+      ? formatStructuredOutput(lastSuccessful.structured)
+      : lastSuccessful.output;
+    if (output) {
+      lines.push(output.length > maxLen ? output.substring(0, maxLen) + "..." : output);
+    }
   }
 
   return lines.join("\n");
