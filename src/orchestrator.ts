@@ -53,9 +53,7 @@ import {
   type SectionName,
 } from "./blackboard.ts";
 import {
-  evaluateGate,
   evaluateAndRework,
-  formatEvaluationFeedback,
   type GateName,
   type GateEvaluation,
 } from "./gate-evaluator.ts";
@@ -853,11 +851,61 @@ export async function orchestrate(
             if (options.onProgress) {
               await options.onProgress(`Gate evaluation: ${gate}...`);
             }
-            const evaluation = await evaluateGate(supabase, bbSessionId, gate, sectionData);
-            gateEvaluations.push(evaluation);
+            const reworkResult = await evaluateAndRework(
+              supabase,
+              bbSessionId,
+              agentId,
+              gate,
+              sectionData,
+              async (feedback: string) => {
+                if (options.onProgress) {
+                  await options.onProgress(`Rework ${agentId} avec feedback des gates...`);
+                }
+                const reworkMessages = [...messages, {
+                  agentId,
+                  agentName: result!.agentName,
+                  success: false,
+                  structured: null,
+                  rawOutput: feedback,
+                  durationMs: 0,
+                }];
+                const reworkResult = await runAgentStep(agentId, task, reworkMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
+                if (reworkResult.success) {
+                  const newData = reworkResult.structured || { raw: reworkResult.output.substring(0, 30000) };
+                  // Update blackboard with reworked output
+                  if (supabase && !bbFallback) {
+                    const res = await writeSection(supabase, bbSessionId, section, newData, agentId, bbVersion);
+                    if (res.success) bbVersion = res.newVersion;
+                  } else if (bbFallback) {
+                    const res = bbFallback.write(bbSessionId, section, newData, agentId, bbVersion);
+                    if (res.success) bbVersion = res.newVersion;
+                  }
+                  // Update step result
+                  result = reworkResult;
+                  messages[messages.length - 1] = {
+                    agentId,
+                    agentName: reworkResult.agentName,
+                    success: reworkResult.success,
+                    structured: reworkResult.structured,
+                    rawOutput: reworkResult.output,
+                    durationMs: reworkResult.durationMs,
+                  };
+                  return newData;
+                }
+                return reworkResult.structured || { raw: reworkResult.output.substring(0, 30000) };
+              },
+              {
+                maxIterations: 2,
+                taskId: task.id,
+                sprintId: task.sprint || undefined,
+                taskPriority: task.priority,
+              }
+            );
+            gateEvaluations.push(reworkResult.finalEvaluation);
             if (options.onProgress) {
-              const status = evaluation.pass ? "PASS" : "FAIL";
-              await options.onProgress(`Gate ${gate}: ${status} (${evaluation.score}/100)`);
+              const status = reworkResult.finalEvaluation.pass ? "PASS" : "FAIL";
+              const reworkNote = reworkResult.iterations > 0 ? ` (${reworkResult.iterations} rework)` : "";
+              await options.onProgress(`Gate ${gate}: ${status} (${reworkResult.finalEvaluation.score}/100)${reworkNote}`);
             }
           }
         }
