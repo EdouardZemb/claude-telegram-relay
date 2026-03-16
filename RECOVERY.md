@@ -67,7 +67,7 @@ Once connected via SSH:
 # See all services
 npx pm2 status
 
-# Expected output: claude-relay (online), claude-dashboard (online), claude-autodeploy (online)
+# Expected output: claude-relay (online), claude-dashboard (online), claude-alert-cron, claude-system-alerts
 ```
 
 ### Service is "errored" or "stopped"

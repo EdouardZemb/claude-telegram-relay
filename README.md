@@ -319,14 +319,15 @@ docs/
 
 ## Process Management
 
-Four services managed by PM2:
+Five services managed by PM2:
 
 | Service | Description |
 |---------|-------------|
 | claude-relay | Main Telegram bot |
 | claude-dashboard | Kanban board (port 3456) |
-| claude-autodeploy | Auto-deploy watcher |
 | claude-alert-cron | Hourly anomaly detection |
+| claude-autonomy-cron | Daily autonomous task scanner |
+| claude-system-alerts | System health monitoring (every 15min) |
 
 ```bash
 npx pm2 status                      # Check services
@@ -343,9 +344,9 @@ Feature branch workflow enforced at all levels:
 2. Agent writes code + tests
 3. Adversarial code review (Gate 3)
 4. Push + PR creation
-5. CI checks on GitHub Actions
-6. Merge to master triggers auto-deploy via SSH
-7. PM2 restarts, deploy notification sent to Telegram
+5. CI checks on self-hosted GitHub Actions runner
+6. Merge to master triggers deploy via self-hosted runner (git pull + PM2 restart + smoke test)
+7. Auto-rollback if smoke test fails, deploy notification sent to Telegram
 
 ## Resilience
 

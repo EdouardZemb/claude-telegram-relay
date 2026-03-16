@@ -143,14 +143,15 @@ Step-file workflows organized by phase:
 
 ## PM2 Configuration (ecosystem.config.cjs)
 
-Four services:
+Five services:
 
 | Service | Script | Notes |
 |---------|--------|-------|
 | `claude-relay` | `start-relay.sh` | Main bot, autorestart max 10 |
 | `claude-dashboard` | `bun run dashboard/server.ts` | Port 3456, autorestart max 10 |
-| `claude-autodeploy` | `scripts/auto-deploy.sh` | CI/CD watcher, autorestart max 5 |
 | `claude-alert-cron` | `bun run src/alert-cron.ts` | Hourly cron (0 * * * *) |
+| `claude-autonomy-cron` | `bun run src/autonomy-cron.ts` | Daily cron (0 8 * * *) |
+| `claude-system-alerts` | `scripts/system-alerts.sh` | Every 15min (*/15 * * * *) |
 
 All logs go to `~/.claude-relay/logs/`.
 
