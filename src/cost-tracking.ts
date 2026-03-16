@@ -36,6 +36,8 @@ export interface CostEntry {
   metadata?: Record<string, unknown>;
   /** S28: model used for this execution */
   model?: string;
+  /** S34: Number of cascade escalations (0 = direct, >0 = escalated) */
+  cascadeEscalations?: number;
 }
 
 export interface SprintCostSummary {

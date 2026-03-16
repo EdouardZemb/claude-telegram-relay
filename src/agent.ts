@@ -39,19 +39,99 @@ export interface SpawnClaudeOptions {
   timeout?: number;
   /** S33: Agent role for MCP tool instructions injection */
   mcpRole?: string;
+  /** S34: Enable model cascade (Haiku -> Sonnet -> Opus). AC-011 to AC-015 */
+  cascade?: boolean;
 }
 
 export interface SpawnClaudeResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** S34: Model that was actually used (for cascade tracking) */
+  modelUsed?: string;
+  /** S34: Number of cascade escalations (0 if no cascade) */
+  cascadeEscalations?: number;
+}
+
+/** S34: Model cascade order — cheapest to most expensive */
+export const CASCADE_MODELS = [
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+  "claude-opus-4-6",
+] as const;
+
+/**
+ * S34 FR-003: Run spawnClaude with model cascade.
+ * Starts with cheapest model, escalates on failure.
+ * AC-013: Includes failure reason from previous attempt.
+ * EC-003: Stops after exhausting all 3 tiers.
+ * EC-006: Explicit model override disables cascade.
+ */
+export async function spawnClaudeWithCascade(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
+  // EC-006: If explicit model is set, use it directly (no cascade)
+  if (options.model) {
+    const result = await spawnClaudeCore(options);
+    result.modelUsed = options.model;
+    result.cascadeEscalations = 0;
+    return result;
+  }
+
+  let lastError = "";
+  let escalations = 0;
+
+  for (let i = 0; i < CASCADE_MODELS.length; i++) {
+    const model = CASCADE_MODELS[i];
+
+    // AC-013: Include failure context from previous attempt
+    let prompt = options.prompt;
+    if (lastError && i > 0) {
+      prompt = [
+        prompt,
+        "",
+        `NOTE: A previous attempt with a simpler model failed. Error context:`,
+        lastError.substring(0, 1000),
+        "",
+        "Please try to produce a correct output.",
+      ].join("\n");
+    }
+
+    const result = await spawnClaudeCore({
+      ...options,
+      prompt,
+      model,
+      fallbackModel: undefined, // cascade handles escalation
+    });
+
+    result.modelUsed = model;
+    result.cascadeEscalations = escalations;
+
+    // Success: return immediately
+    if (result.exitCode === 0 && result.stdout.trim().length > 0) {
+      return result;
+    }
+
+    // Failed: record error and escalate
+    lastError = result.stderr || result.stdout || "Empty output";
+    escalations++;
+  }
+
+  // EC-003: All tiers exhausted, return failure from last (Opus) attempt
+  return {
+    stdout: "",
+    stderr: lastError,
+    exitCode: 1,
+    modelUsed: CASCADE_MODELS[CASCADE_MODELS.length - 1],
+    cascadeEscalations: escalations,
+  };
 }
 
 /**
  * Centralized function to spawn Claude Code CLI with all supported flags.
  * Builds args conditionally: flags are only added if the option is provided.
+ * S34: Renamed core logic to spawnClaudeCore, spawnClaude is the public API
+ * that handles cascade routing.
  */
-export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
+async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
   const args: string[] = [CLAUDE_PATH];
 
   // System prompt (--append-system-prompt) before task prompt
@@ -122,6 +202,18 @@ export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnCla
 
   return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
 }
+
+/**
+ * Public API: spawn Claude Code CLI.
+ * S34: Routes to cascade when options.cascade is true (AC-015: backward compatible).
+ */
+export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
+  if (options.cascade) {
+    return spawnClaudeWithCascade(options);
+  }
+  return spawnClaudeCore(options);
+}
+
 const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
 const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 

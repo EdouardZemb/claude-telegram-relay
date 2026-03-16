@@ -181,7 +181,11 @@ async function runAgentStep(
   task: Task,
   previousMessages: AgentMessage[],
   shardedContext?: string,
-  agentContext?: string
+  agentContext?: string,
+  /** S34: Per-role model override from LLM router */
+  modelOverride?: string,
+  /** S34: Enable model cascade */
+  cascade?: boolean
 ): Promise<AgentStepResult> {
   const startTime = Date.now();
   const agent = getAgent(agentId);
@@ -226,17 +230,20 @@ async function runAgentStep(
     // S28: Use centralized spawnClaude with agent-specific CLI flags
     // S32: Inject Supabase context via --append-system-prompt
     // S33: MCP tool instructions per role
+    // S34: Model override from router (AC-019), cascade support
     const jsonSchema = getJsonSchemaForRole(agentId);
+    const effectiveModel = modelOverride || agent?.model;
     const result = await spawnClaude({
       prompt,
       systemPrompt: agentContext || undefined,
       outputFormat: jsonSchema ? "json" : "text",
       jsonSchema: jsonSchema || undefined,
       effort: agent?.effort,
-      model: agent?.model,
-      fallbackModel: agent?.fallbackModel,
+      model: cascade ? undefined : effectiveModel, // cascade handles model selection
+      fallbackModel: cascade ? undefined : agent?.fallbackModel,
       maxBudgetUsd: agent?.maxBudgetUsd,
       mcpRole: agentId,
+      cascade,
     });
 
     const rawOutput = result.stdout;
@@ -245,8 +252,9 @@ async function runAgentStep(
     // Parse structured output (S22-02)
     const structured = success ? parseAgentOutput(rawOutput, agentId) : null;
 
-    // Parse token usage (S23-05, S28: model-aware pricing)
-    const usage = parseTokenUsage(rawOutput, prompt.length, agent?.model);
+    // Parse token usage (S23-05, S28: model-aware pricing, S34: cascade model tracking)
+    const actualModel = result.modelUsed || effectiveModel || agent?.model;
+    const usage = parseTokenUsage(rawOutput, prompt.length, actualModel);
 
     return {
       agentId,
@@ -419,6 +427,10 @@ export interface OrchestrateOptions {
   maxConcurrency?: number;
   /** S33: Resume from a previous pipeline run session ID */
   resumeSessionId?: string;
+  /** S34: Per-role model overrides from LLM router (AC-019) */
+  modelOverrides?: Partial<Record<AgentRole, string>>;
+  /** S34: Enable model cascade for agents (Haiku -> Sonnet -> Opus) */
+  cascade?: boolean;
 }
 
 /**
@@ -643,7 +655,7 @@ export async function orchestrate(
       }
 
       supervisor.markStarted(agentId);
-      const result = await runAgentStep(agentId, task, prevMessages, shardedContext, agentContextCache.get(agentId));
+      const result = await runAgentStep(agentId, task, prevMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
       supervisor.markCompleted(agentId, result);
       return result;
     }, {
@@ -759,7 +771,7 @@ export async function orchestrate(
       let retryCount = 0;
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        result = await runAgentStep(agentId, task, messages, shardedContext, agentContextCache.get(agentId));
+        result = await runAgentStep(agentId, task, messages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
 
         if (result.success) break;
 

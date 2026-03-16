@@ -30,6 +30,7 @@ import {
 import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
 import { Semaphore } from "./semaphore.ts";
+import { routeTask, routerPipelineToRoles, type RouterDecision } from "./llm-router.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -70,6 +71,10 @@ export interface PipelineOptions {
   maxRetries?: number;
   /** S25: Max concurrency for batch parallel execution (default: 2) */
   maxConcurrency?: number;
+  /** S34: Use LLM router for dynamic pipeline selection (FR-004) */
+  useRouter?: boolean;
+  /** S34: Enable model cascade for agents (FR-003) */
+  cascade?: boolean;
 }
 
 // ── Auto Pipeline ────────────────────────────────────────────
@@ -97,14 +102,29 @@ export async function runAutoPipeline(
     skipGates = false,
     autoPipeline = false,
     maxRetries = 0,
+    useRouter = false,
+    cascade = false,
   } = options;
 
   const progress = async (msg: string) => {
     if (onProgress) await onProgress(msg);
   };
 
+  // S34: LLM router for dynamic pipeline selection (FR-004)
+  let routerDecision: RouterDecision | null = null;
+  if (useRouter) {
+    routerDecision = await routeTask(task);
+    if (routerDecision) {
+      await progress(`LLM Router: pipeline=${routerDecision.pipeline}, budget=$${routerDecision.budget}, reason=${routerDecision.reasoning}`);
+    } else {
+      await progress("LLM Router: fallback to keyword-based selection");
+    }
+  }
+
   // S22-06: Log pipeline classification
-  const pipelineType = autoPipeline ? classifyPipeline(task) : "DEFAULT";
+  const pipelineType = routerDecision
+    ? routerDecision.pipeline
+    : (autoPipeline ? classifyPipeline(task) : "DEFAULT");
   await progress(`AUTO-PIPELINE demarre pour: ${task.title} (pipeline: ${pipelineType})`);
 
   // Track workflow
@@ -162,15 +182,19 @@ export async function runAutoPipeline(
     await progress("Phase 3/5: Analyse multi-agents (Analyst -> PM -> Architect)...");
     if (tracker) await tracker.transition("decomposition");
 
-    const analysisPipeline = autoPipeline
-      ? selectPipeline(task).filter((r) => r !== "dev" && r !== "qa")
-      : (["analyst", "pm", "architect"] as AgentRole[]);
+    const analysisPipeline = routerDecision
+      ? routerPipelineToRoles(routerDecision).filter((r) => r !== "dev" && r !== "qa")
+      : autoPipeline
+        ? selectPipeline(task).filter((r) => r !== "dev" && r !== "qa")
+        : (["analyst", "pm", "architect"] as AgentRole[]);
 
     const analysisResult = await orchestrate(supabase, task, {
       pipeline: analysisPipeline,
       onProgress,
       stopOnFailure: false,
       maxRetries,
+      modelOverrides: routerDecision?.models,
+      cascade,
     });
 
     const analysisOk = analysisResult.steps.filter((s) => s.success).length;
