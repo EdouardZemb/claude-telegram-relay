@@ -6,41 +6,47 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux]
+    runs-on: ubuntu-latest
     steps:
-      - name: Deploy to production
-        run: |
-          cd /home/edouard/claude-telegram-relay
-          git fetch origin master
-          git checkout master
-          git pull origin master
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            cd /home/edouard/claude-telegram-relay
+            git fetch origin master
+            git checkout master
+            git pull origin master
 
-          # Install deps if package.json changed
-          if git diff --name-only HEAD~1 HEAD | grep -q "package.json"; then
-            bun install
-          fi
+            # Install deps if package.json changed
+            if git diff --name-only HEAD~1 HEAD | grep -q "package.json"; then
+              bun install
+            fi
 
-          # Restart services
-          npx pm2 restart claude-relay --update-env
-          npx pm2 restart claude-dashboard --update-env
+            # Restart services
+            npx pm2 restart claude-relay --update-env
+            npx pm2 restart claude-dashboard --update-env
 
-          # Wait for services to start
-          sleep 5
+            # Wait for services to start
+            sleep 5
 
-          # Smoke test + rollback
-          COMMIT=$(git log --oneline -1)
+            # S29: Full smoke test suite (replaces mini health check)
+            COMMIT=$(git log --oneline -1)
 
-          if bun run smoke; then
-            echo "Deploy complete: $COMMIT (smoke test OK)"
-            bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"
+            if bun run smoke; then
+              echo "Deploy complete: $COMMIT (smoke test OK)"
+              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "success" "$COMMIT"
 
-            # Generate and send post-merge checklist
-            bun run scripts/generate-checklist.ts 2>/dev/null || true
-          else
-            echo "SMOKE TEST FAILED — rolling back"
-            bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "failure" "Smoke test failed for $COMMIT — auto-rollback"
+              # Generate and send post-merge checklist
+              bun run scripts/generate-checklist.ts 2>/dev/null || true
+            else
+              echo "SMOKE TEST FAILED — rolling back"
+              bash /home/edouard/claude-telegram-relay/scripts/notify-deploy.sh "failure" "Smoke test failed for $COMMIT — auto-rollback"
 
-            # Auto-rollback
-            bash /home/edouard/claude-telegram-relay/scripts/rollback.sh "smoke test failed after deploy"
-            exit 1
-          fi
+              # Auto-rollback (S29-T6)
+              bash /home/edouard/claude-telegram-relay/scripts/rollback.sh "smoke test failed after deploy"
+              exit 1
+            fi
