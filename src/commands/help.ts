@@ -12,6 +12,8 @@ import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
 import { formatAgentList } from "../bmad-agents.ts";
 import { formatMonitoringStats } from "../alerts.ts";
+import { formatRecentGateEvaluations } from "../trust-scores.ts";
+import { formatDoubleLoopRules } from "../gate-persistence.ts";
 
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -171,12 +173,23 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
     }
   });
 
-  // /monitor — production monitoring stats
+  // /monitor — production monitoring stats (S35: trust scores, evaluations, double-loop)
   composer.command("monitor", async (ctx) => {
     const blocked = commandGuard(ctx, "monitor");
     if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
 
-    await ctx.reply(formatMonitoringStats(), threadOpts(ctx));
+    const parts = [formatMonitoringStats()];
+
+    // S35: Recent gate evaluations and double-loop rules
+    if (supabase) {
+      const [recentEvals, dlRules] = await Promise.all([
+        formatRecentGateEvaluations(supabase),
+        formatDoubleLoopRules(supabase),
+      ]);
+      parts.push("", recentEvals, "", dlRules);
+    }
+
+    await ctx.reply(parts.join("\n"), threadOpts(ctx));
   });
 
   return composer;

@@ -38,7 +38,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `supervisor.ts` | Deterministic TypeScript supervisor: agent status tracking, retry/skip/escalate decisions, timeout, structured report with speedup ratio |
 | `fan-out.ts` | Subtask parallelism: fan-out N Dev agents in worktrees, fan-in merge branches and blackboard sections, file overlap detection |
 | `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup. Branch isolation for parallel agents |
-| `gate-evaluator.ts` | Gate evaluation: dual verification (deterministic + LLM), structured rubric scoring (4x25), evaluate-rework loop (max 2 iterations) |
+| `gate-evaluator.ts` | Gate evaluation: dual verification (deterministic + LLM), structured rubric scoring (4x25), evaluate-rework loop (max 2 iterations), trust-based auto-approval |
 | `llm-router.ts` | LLM-based router for dynamic pipeline selection: Haiku analyzes task, returns pipeline + model overrides + budget |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context, JSON Schema for --json-schema flag |
@@ -51,7 +51,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
 | `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
-| `feedback-loop.ts` | Learning from retros → permanent agent prompt enrichment |
+| `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
 | `workflow-propagation.ts` | Cross-project improvement voting |
@@ -71,6 +71,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `mcp-config.ts` | Per-role MCP tool configuration: tool allowlists, system prompt instructions for agent MCP access |
 | `pipeline-state.ts` | Pipeline checkpoint/resume: persists execution state after each agent step, enables resuming from last success |
 | `intent-detection.ts` | Intent detection spike: pattern-based natural language to command mapping, behind feature flag |
+| `trust-scores.ts` | Trust scores per agent role: confidence tracking, auto-approval logic, progressive autonomy |
+| `gate-persistence.ts` | Gate evaluation persistence to Supabase, double-loop learning from recurring rubric weaknesses |
 
 ### Telegram Commands
 
@@ -112,7 +114,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`, `bump_memory_access`
 
@@ -172,6 +174,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Quality Foundations & Routing (S34):** Four improvements to gate intelligence and cost optimization. (1) Dual Verification: `gate-evaluator.ts` runs deterministic checks (tsc type check, bun test) BEFORE LLM evaluation on implementation gates. If checks fail, gate fails immediately without LLM cost. Non-implementation gates (spec, plan, tasks) skip deterministic checks. 30s timeout per check. (2) Structured Rubric Scoring: Gates score 4 dimensions x 25 points instead of single 0-100. Implementation gates: error_handling, test_coverage, code_style, spec_conformity. Spec/plan gates: completeness, traceability, clarity, feasibility. Dimension below 10 flagged as critical weakness. Total = sum of dimensions (0-100 scale preserved). (3) Model Cascade: `spawnClaudeWithCascade()` in agent.ts starts with Haiku, escalates to Sonnet then Opus on failure. Failure context from previous attempt included in escalated prompt. Explicit model override disables cascade. Cascade disabled by default (backward compatible). (4) LLM Router: `src/llm-router.ts` uses a Haiku call to analyze task and return pipeline type + per-role model overrides + budget. Replaces keyword matching in auto-pipeline when `useRouter: true`. 5s timeout with fallback to keyword-based classifyPipeline(). Feature flags: `llm_router`, `model_cascade` (both disabled by default).
 
+**Auto-improvement & Confidence (S35):** Five features for progressive autonomy and self-improvement. (1) Gate Evaluation Persistence: every `evaluateGate()` result is persisted to `gate_evaluations` table with rubric dimensions, deterministic check results, rework iteration, and auto-approval flag. (2) Trust Scores: `trust_scores` table tracks per-agent-role confidence (0-100, default 50). Pass without rework: +5, pass with rework: +1, fail: -10. Updated automatically after each gate evaluation via `evaluateAndRework()`. (3) Double-loop Learning: when a rubric dimension scores below 15/25 three or more times for an agent role, a corrective feedback rule is auto-generated in `feedback_rules` (source: `double_loop`). Injected into agent prompts via `buildFeedbackContext()`. (4) Progressive Gate Auto-approval: trust >= 80 + P3+ tasks: spec/plan/tasks gates auto-approved (skip LLM). Trust >= 90 + P3+: implementation gates auto-approved (deterministic checks still run). P1/P2 always fully evaluated. Behind `auto_gate_approval` feature flag (disabled by default). (5) /monitor Extension: shows trust scores, 5 most recent gate evaluations, and active double-loop rules.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -203,7 +207,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  909 tests (unit + integration + E2E)
+tests/                  948 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -211,7 +215,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (909 tests, all must pass before merge)
+- Tests: `bun test` (948 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
