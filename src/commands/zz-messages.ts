@@ -19,6 +19,8 @@ import {
   autoRemember,
 } from "../memory.ts";
 import { recordResponseTime } from "../alerts.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
+import { detectIntent, formatIntentSuggestion } from "../intent-detection.ts";
 
 export default function messagesComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -54,6 +56,15 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       if (classification?.is_memorable) {
         autoRemember(bctx.supabase, text, classification).catch(() => {});
+      }
+
+      // S33: Intent detection (behind feature flag)
+      if (isFeatureEnabled("intent_detection")) {
+        const intentResult = detectIntent(text);
+        const suggestion = formatIntentSuggestion(intentResult);
+        if (suggestion) {
+          await ctx.reply(suggestion, bctx.threadOpts(ctx));
+        }
       }
 
       const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName, dynProfile);

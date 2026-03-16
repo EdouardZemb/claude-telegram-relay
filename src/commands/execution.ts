@@ -23,6 +23,7 @@ import { WorkflowTracker } from "../workflow.ts";
 import { resolveProjectContext } from "../projects.ts";
 import { buildTaskContext } from "../document-sharding.ts";
 import { notifyPRCreated, notifyTaskDone } from "../notifications.ts";
+import { findLatestPipelineRun } from "../pipeline-state.ts";
 
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -188,18 +189,27 @@ export default function execution(bctx: BotContext): Composer<Context> {
     }
 
     const args = ctx.match?.trim() || "";
-    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--parallel]
+    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--parallel] [--resume [sessionId]]
     // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
     const useBlackboard = args.includes("--blackboard");
     const useParallel = args.includes("--parallel");
-    const cleanArgs = args.replace("--blackboard", "").replace("--parallel", "").trim();
+    const useResume = args.includes("--resume");
+    // Extract explicit session ID after --resume if present
+    const resumeMatch = args.match(/--resume\s+([^\s-]\S*)/);
+    const explicitResumeId = resumeMatch ? resumeMatch[1] : undefined;
+    const cleanArgs = args
+      .replace(/--blackboard/g, "")
+      .replace(/--parallel/g, "")
+      .replace(/--resume\s+\S*/g, "")
+      .replace(/--resume/g, "")
+      .trim();
     const parts = cleanArgs.split(/\s+/);
     const idPrefix = parts[0];
     const pipelineArg = parts[1] || "full";
 
     if (!idPrefix) {
       await ctx.reply(
-        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--parallel]\n\n" +
+        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--parallel] [--resume]\n\n" +
         "Pipelines disponibles:\n" +
         "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
         "  quick — Dev -> QA\n" +
@@ -207,7 +217,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
         "  custom — ex: /orchestrate abc pm,dev,qa\n\n" +
         "Options:\n" +
         "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)\n" +
-        "  --parallel — Execution parallele DAG (agents independants en parallele)",
+        "  --parallel — Execution parallele DAG (agents independants en parallele)\n" +
+        "  --resume [sessionId] — Reprendre depuis le dernier echec (ou un sessionId specifique)",
         bctx.threadOpts(ctx)
       );
       return;
@@ -258,10 +269,27 @@ export default function execution(bctx: BotContext): Composer<Context> {
       pipeline = customAgents as AgentRole[];
     }
 
+    // S33: Resolve resume session ID
+    let resumeSessionId: string | undefined;
+    if (useResume) {
+      if (explicitResumeId) {
+        resumeSessionId = explicitResumeId;
+      } else {
+        const found = await findLatestPipelineRun(bctx.supabase, task.id);
+        if (found) {
+          resumeSessionId = found;
+        } else {
+          await ctx.reply("Aucun pipeline echoue a reprendre pour cette tache.", bctx.threadOpts(ctx));
+          return;
+        }
+      }
+    }
+
     const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
     const parallelLabel = useParallel ? "\nMode: parallele (DAG)" : "";
+    const resumeLabel = resumeSessionId ? `\nResume: ${resumeSessionId}` : "";
     await ctx.reply(
-      `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${parallelLabel}\nCa peut prendre plusieurs minutes...`,
+      `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${parallelLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
       bctx.threadOpts(ctx)
     );
 
@@ -270,6 +298,7 @@ export default function execution(bctx: BotContext): Composer<Context> {
       stopOnFailure: true,
       useBlackboard,
       parallel: useParallel,
+      resumeSessionId,
       onProgress: async (msg) => {
         await ctx.reply(msg, bctx.threadOpts(ctx));
       },

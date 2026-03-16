@@ -84,6 +84,15 @@ import {
 } from "./fan-out.ts";
 import { writeSectionWithRetry, mergeImplementationSection } from "./blackboard.ts";
 import { buildAgentContext } from "./agent-context.ts";
+import {
+  createPipelineRun,
+  savePipelineStep,
+  updatePipelineStatus,
+  loadPipelineState,
+  buildResumeContext,
+  findLatestPipelineRun,
+  type StepSnapshot,
+} from "./pipeline-state.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
@@ -216,6 +225,7 @@ async function runAgentStep(
   try {
     // S28: Use centralized spawnClaude with agent-specific CLI flags
     // S32: Inject Supabase context via --append-system-prompt
+    // S33: MCP tool instructions per role
     const jsonSchema = getJsonSchemaForRole(agentId);
     const result = await spawnClaude({
       prompt,
@@ -226,6 +236,7 @@ async function runAgentStep(
       model: agent?.model,
       fallbackModel: agent?.fallbackModel,
       maxBudgetUsd: agent?.maxBudgetUsd,
+      mcpRole: agentId,
     });
 
     const rawOutput = result.stdout;
@@ -406,6 +417,8 @@ export interface OrchestrateOptions {
   parallel?: boolean;
   /** S25: Max concurrent agents (default: 3) */
   maxConcurrency?: number;
+  /** S33: Resume from a previous pipeline run session ID */
+  resumeSessionId?: string;
 }
 
 /**
@@ -419,6 +432,26 @@ export async function orchestrate(
   task: Task,
   options: OrchestrateOptions = {}
 ): Promise<OrchestratedResult> {
+  // S33: Resume from previous pipeline run
+  let resumeFromStep = 0;
+  let pipelineSessionId: string | null = null;
+
+  if (options.resumeSessionId) {
+    const savedState = await loadPipelineState(supabase, options.resumeSessionId);
+    if (savedState) {
+      const ctx = buildResumeContext(savedState);
+      resumeFromStep = ctx.resumeFromStep;
+      pipelineSessionId = options.resumeSessionId;
+      // Pre-fill messages from completed steps
+      if (options.onProgress) {
+        await options.onProgress(
+          `Resume pipeline depuis l'etape ${resumeFromStep} (${ctx.previousMessages.length} agents deja completes)`
+        );
+      }
+      // Messages will be loaded below after pipeline selection
+    }
+  }
+
   // Dynamic pipeline selection (S22-06)
   const pipeline = options.autoPipeline
     ? selectPipeline(task, options.pipeline)
@@ -427,6 +460,14 @@ export async function orchestrate(
   const startTime = Date.now();
   const steps: AgentStepResult[] = [];
   const messages: AgentMessage[] = [];
+
+  // S33: Load previous messages if resuming
+  if (options.resumeSessionId) {
+    const savedState = await loadPipelineState(supabase, options.resumeSessionId);
+    if (savedState) {
+      messages.push(...savedState.stepsResults);
+    }
+  }
 
   // Load sharded context for the task (PRD, architecture docs)
   let shardedContext: string | undefined;
@@ -496,6 +537,18 @@ export async function orchestrate(
       taskId: task.id,
       sprintId: task.sprint || undefined,
     });
+  }
+
+  // S33: Create pipeline run for checkpoint tracking (if not resuming)
+  if (!pipelineSessionId) {
+    pipelineSessionId = `pr-${task.id}-${Date.now()}`;
+    await createPipelineRun(
+      supabase,
+      task.id,
+      pipelineSessionId,
+      classifyPipeline(task),
+      pipeline
+    );
   }
 
   // S24: Blackboard initialization
@@ -675,7 +728,15 @@ export async function orchestrate(
     supervisorReport = supervisor.generateReport();
   } else {
     // ── Sequential execution (existing behavior) ─────────────
+    let stepIndex = 0;
     for (const agentId of pipeline) {
+      // S33: Skip already completed steps on resume
+      if (stepIndex < resumeFromStep) {
+        stepIndex++;
+        continue;
+      }
+      stepIndex++;
+
       const agent = getAgent(agentId);
       const agentLabel = agent
         ? `${agent.icon} ${agent.name} (${agent.title})`
@@ -729,6 +790,20 @@ export async function orchestrate(
         error: result!.error,
       };
       messages.push(message);
+
+      // S33: Checkpoint after each step
+      if (pipelineSessionId) {
+        const snapshot: StepSnapshot = {
+          agentId,
+          success: result!.success,
+          durationMs: result!.durationMs,
+          completedAt: new Date().toISOString(),
+          tokensInput: result!.tokensInput,
+          tokensOutput: result!.tokensOutput,
+          costUsd: result!.costUsd,
+        };
+        await savePipelineStep(supabase, pipelineSessionId, snapshot, message);
+      }
 
       // Persist agent artifacts to the task in Supabase
       if (result!.success && supabase) {
@@ -813,9 +888,14 @@ export async function orchestrate(
 
       // Stop on failure if configured
       if (!result!.success && options.stopOnFailure) {
+        // S33: Mark pipeline as failed for future resume
+        if (pipelineSessionId) {
+          await updatePipelineStatus(supabase, pipelineSessionId, "failed", result!.error);
+        }
         if (options.onProgress) {
           await options.onProgress(
-            `Pipeline arrete: ${agentLabel} a echoue.`
+            `Pipeline arrete: ${agentLabel} a echoue.` +
+            (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : "")
           );
         }
         break;
@@ -824,6 +904,12 @@ export async function orchestrate(
   }
 
   const totalDurationMs = Date.now() - startTime;
+
+  // S33: Mark pipeline as completed (if not already failed)
+  if (pipelineSessionId) {
+    const finalStatus = steps.every((s) => s.success) ? "completed" : "failed";
+    await updatePipelineStatus(supabase, pipelineSessionId, finalStatus);
+  }
 
   // S24: Adversarial verifier + traceability (after all agents done)
   let traceabilityReport: ReturnType<typeof generateTraceabilityReport> | null = null;

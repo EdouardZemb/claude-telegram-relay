@@ -410,6 +410,46 @@ CREATE TRIGGER blackboard_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_blackboard_updated_at();
 
 -- ============================================================
+-- PIPELINE RUNS TABLE (Checkpoint / resume for orchestration)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  session_id TEXT NOT NULL UNIQUE,
+  task_id UUID REFERENCES tasks(id),
+  pipeline_type TEXT NOT NULL,
+  pipeline_agents TEXT[] NOT NULL DEFAULT '{}',
+  current_step INTEGER NOT NULL DEFAULT 0,
+  steps_completed JSONB NOT NULL DEFAULT '[]',
+  steps_results JSONB NOT NULL DEFAULT '[]',
+  blackboard_id TEXT,
+  status TEXT NOT NULL DEFAULT 'running'
+    CHECK (status IN ('running', 'completed', 'failed', 'paused')),
+  error TEXT,
+  metadata JSONB DEFAULT '{}'
+);
+
+COMMENT ON TABLE pipeline_runs IS 'Pipeline execution state for checkpoint/resume. Saves progress after each agent step.';
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_session ON pipeline_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_task ON pipeline_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON pipeline_runs(status);
+
+-- Auto-update updated_at on pipeline_runs
+CREATE OR REPLACE FUNCTION update_pipeline_runs_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+CREATE TRIGGER pipeline_runs_updated_at
+  BEFORE UPDATE ON pipeline_runs
+  FOR EACH ROW EXECUTE FUNCTION update_pipeline_runs_updated_at();
+
+-- ============================================================
 -- WORKFLOW AUDIT TABLE (Configuration change tracking)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS workflow_audit (
