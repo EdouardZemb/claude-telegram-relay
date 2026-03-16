@@ -26,28 +26,62 @@ export interface DocGap {
 }
 
 /**
- * Extract all TypeScript module names from src/ directory.
+ * Extract all TypeScript module names from src/ directory and src/commands/.
  */
 export async function extractModules(srcDir: string): Promise<string[]> {
   const files = await readdir(srcDir);
-  return files
+  const modules = files
     .filter((f) => f.endsWith(".ts"))
-    .filter((f) => !WHITELIST.includes(f))
-    .map((f) => f)
-    .sort();
+    .filter((f) => !WHITELIST.includes(f));
+
+  // Also include commands/*.ts modules
+  try {
+    const cmdFiles = await readdir(join(srcDir, "commands"));
+    for (const f of cmdFiles) {
+      if (f.endsWith(".ts")) {
+        modules.push(`commands/${f}`);
+      }
+    }
+  } catch {
+    // No commands directory
+  }
+
+  return modules.sort();
 }
 
 /**
- * Extract all bot.command() registrations from relay.ts.
+ * Extract all command registrations from relay.ts and src/commands/*.ts.
+ * Matches bot.command("name") and composer.command("name").
  */
 export async function extractCommands(relayPath: string): Promise<string[]> {
-  const content = await readFile(relayPath, "utf-8");
-  const regex = /bot\.command\(["'](\w+)["']/g;
   const commands: string[] = [];
+  const regex = /(?:bot|composer)\.command\(["'](\w+)["']/g;
+
+  // Scan relay.ts
+  const relayContent = await readFile(relayPath, "utf-8");
   let match;
-  while ((match = regex.exec(content)) !== null) {
+  while ((match = regex.exec(relayContent)) !== null) {
     commands.push(`/${match[1]}`);
   }
+
+  // Scan src/commands/*.ts
+  const commandsDir = join(relayPath, "..", "commands");
+  try {
+    const files = await readdir(commandsDir);
+    for (const file of files) {
+      if (!file.endsWith(".ts")) continue;
+      const content = await readFile(join(commandsDir, file), "utf-8");
+      const fileRegex = /(?:bot|composer)\.command\(["'](\w+)["']/g;
+      while ((match = fileRegex.exec(content)) !== null) {
+        if (!commands.includes(`/${match[1]}`)) {
+          commands.push(`/${match[1]}`);
+        }
+      }
+    }
+  } catch {
+    // No commands directory — that's fine (backward compatible)
+  }
+
   return commands.sort();
 }
 

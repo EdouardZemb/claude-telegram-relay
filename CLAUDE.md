@@ -12,7 +12,20 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 32 Telegram commands, voice, photos, docs. Exports `createBot(token)` factory for E2E testing via `handleUpdate` |
+| `relay.ts` | Bot entrypoint: creates Bot, loads Composers via loader, auth middleware, startup/shutdown. Exports async `createBot(token)` factory for E2E testing via `handleUpdate` |
+| `bot-context.ts` | Shared dependency object for Composers: callClaude, sendResponse, buildPrompt, supabase, session, topic helpers |
+| `topic-config.ts` | Topic configuration for Telegram forum groups: per-topic system prompts and command allowlists |
+| `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ via Bun Glob, errorBoundary per module |
+| `commands/help.ts` | Composer: /help, /workflow, /agents, /status, /monitor |
+| `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
+| `commands/execution.ts` | Composer: /exec, /orchestrate, /autopipeline + gate callbacks |
+| `commands/planning.ts` | Composer: /plan, /prd, /planify + PRD validation callbacks |
+| `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
+| `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
+| `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
+| `commands/project.ts` | Composer: /projects, /project |
+| `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
+| `commands/zz-messages.ts` | Composer: message:text, message:voice, message:photo, message:document handlers (loaded last) |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
@@ -148,6 +161,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **CI/CD & E2E Testing (S30):** Self-hosted GitHub Actions runner on the server (systemd, HTTPS outbound only — no firewall issues). CI (`ci.yml`) and deploy (`deploy.yml`) run on `[self-hosted, linux]`. Deploy is local (git pull + pm2 restart + smoke test + auto-rollback), replacing SSH-based deploy. Auto-deploy polling (`auto-deploy.sh`, `claude-autodeploy` PM2 service) removed — redundant with runner. E2E tests use Grammy's `bot.handleUpdate()` to inject synthetic Telegram updates into the bot's handler pipeline. `relay.ts` exports `createBot(token)` factory function; `import.meta.main` guards startup side effects (bot.start, PID file, intervals, process handlers). E2E framework (`tests/e2e/framework.ts`) intercepts `ctx.reply()` via Grammy API transformer — no real Telegram API calls. 8 E2E tests cover /help, /status, /feature, /workflow, /agents, /monitor, /estimate, /notify. Data isolation via `[E2E-<runId>]` prefix tags, cleanup after each test. E2E job in CI depends on check job, uses RELAY_DIR in /tmp.
 
+**Composer Extensibility (S31):** Refactored relay.ts (3216→243 lines) using Grammy's native Composer pattern. `src/bot-context.ts` provides a typed `BotContext` dependency object (callClaude, sendResponse, buildPrompt, supabase, session, topic helpers) injected into all Composers. `src/loader.ts` auto-discovers `src/commands/*.ts` via Bun Glob, imports each module, and mounts Composers with per-module errorBoundary. 10 Composer modules cover all 33 commands + 4 message handlers + callbacks. `src/topic-config.ts` extracts per-topic system prompts and command allowlists. Adding a new feature = creating a new file in `src/commands/`, no relay.ts modification needed. Zero new dependencies. ADR-007.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -169,7 +184,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    42 TypeScript modules (core logic)
+src/                    44 TypeScript modules (core logic)
+  commands/             10 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
