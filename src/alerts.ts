@@ -1,4 +1,9 @@
 /**
+ * @module alerts
+ * @description Anomaly detection: stuck tasks, rework spikes, schedule slips.
+ */
+
+/**
  * Proactive Alerts — S12 Intelligence Reflexive
  *
  * Detecte les anomalies en temps reel dans le workflow

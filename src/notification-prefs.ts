@@ -1,4 +1,10 @@
 /**
+ * @module notification-prefs
+ * @description Notification preferences: quiet hours, per-type enable/disable/immediate,
+ * /notify command config.
+ */
+
+/**
  * Notification Preferences — S26 Smart Notifications
  *
  * Configurable preferences for notification batching, quiet hours,

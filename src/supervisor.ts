@@ -1,4 +1,10 @@
 /**
+ * @module supervisor
+ * @description Deterministic TypeScript supervisor: agent status tracking,
+ * retry/skip/escalate decisions, timeout, structured report with speedup ratio.
+ */
+
+/**
  * Supervisor — S25 T4
  *
  * Deterministic TypeScript supervisor for parallel agent execution.

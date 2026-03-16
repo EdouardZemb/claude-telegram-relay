@@ -1,4 +1,10 @@
 /**
+ * @module notification-queue
+ * @description Notification batching queue: enqueue, flush, digest formatting,
+ * inline buttons, quiet hours, morning digest, JSON persistence.
+ */
+
+/**
  * Notification Queue — S26 Smart Notifications
  *
  * Batches notifications, respects quiet hours, sends inline buttons

@@ -1,4 +1,9 @@
 /**
+ * @module alert-cron
+ * @description Hourly scheduled alert runner + memory archival + morning digest flush.
+ */
+
+/**
  * Alert Cron — S13 Intelligence Reflexive + S26 Smart Notifications
  *
  * Standalone script that runs periodically via PM2 cron.

@@ -1,4 +1,10 @@
 /**
+ * @module blackboard
+ * @description Shared structured workspace: versioned JSONB sections, optimistic locking,
+ * role authorization, traceability reports, concurrent write retry.
+ */
+
+/**
  * Blackboard — S24 Gated Blackboard & SDD
  *
  * Shared structured workspace for multi-agent pipelines.

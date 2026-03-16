@@ -1,4 +1,9 @@
 /**
+ * @module document-sharding
+ * @description Intelligent context cache: splits large docs, loads only relevant shards.
+ */
+
+/**
  * Document Sharding System
  *
  * Splits large documents (PRDs, architecture docs) into indexed sections.

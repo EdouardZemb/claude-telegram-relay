@@ -1,4 +1,9 @@
 /**
+ * @module relay
+ * @description Main bot: message handling, 28 Telegram commands, voice, photos, docs.
+ */
+
+/**
  * Claude Code Telegram Relay
  *
  * Minimal relay that connects Telegram to Claude Code CLI.

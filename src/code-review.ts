@@ -1,4 +1,9 @@
 /**
+ * @module code-review
+ * @description Adversarial code review before merge.
+ */
+
+/**
  * Adversarial Code Review System
  *
  * Automated code review that runs post-implementation, before merge.

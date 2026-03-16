@@ -15,7 +15,10 @@
     "setup:launchd": "bun run setup/configure-launchd.ts",
     "setup:services": "bun run setup/configure-services.ts",
     "setup:verify": "bun run setup/verify.ts",
-    "dashboard": "bun run dashboard/server.ts"
+    "dashboard": "bun run dashboard/server.ts",
+    "changelog": "git-cliff -o CHANGELOG.md",
+    "doc:check": "bun run scripts/doc-check.ts",
+    "doc:freshness": "bun run scripts/doc-freshness.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

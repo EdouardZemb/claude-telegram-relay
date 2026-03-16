@@ -1,4 +1,9 @@
 /**
+ * @module semaphore
+ * @description Promise-based counting semaphore for concurrency control (default max 3).
+ */
+
+/**
  * Semaphore — S25 T1
  *
  * Promise-based counting semaphore for concurrency control.

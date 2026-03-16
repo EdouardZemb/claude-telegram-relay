@@ -1,4 +1,9 @@
 /**
+ * @module auto-pipeline
+ * @description Autonomous end-to-end pipeline with auto pipeline selection and retries.
+ */
+
+/**
  * Auto Pipeline — S16-09
  *
  * Automated end-to-end BMad pipeline for a task:

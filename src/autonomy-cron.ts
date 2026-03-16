@@ -1,4 +1,9 @@
 /**
+ * @module autonomy-cron
+ * @description Scheduled autonomy runner: daily scan trigger via PM2 cron.
+ */
+
+/**
  * Autonomy Cron — Proactive Task Creation
  *
  * Standalone script that runs periodically via PM2.

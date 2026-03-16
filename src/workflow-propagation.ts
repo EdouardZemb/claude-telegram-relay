@@ -1,4 +1,9 @@
 /**
+ * @module workflow-propagation
+ * @description Cross-project improvement voting.
+ */
+
+/**
  * Workflow Propagation — Cross-Project Improvement Sharing
  *
  * When a project's retro suggests workflow improvements (gate changes,

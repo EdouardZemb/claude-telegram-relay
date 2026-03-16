@@ -1,4 +1,10 @@
 /**
+ * @module worktree
+ * @description Git worktree lifecycle: create, push, merge, cleanup.
+ * Branch isolation for parallel agents.
+ */
+
+/**
  * Worktree Manager — S25 T3
  *
  * Git worktree lifecycle for parallel Dev agents.

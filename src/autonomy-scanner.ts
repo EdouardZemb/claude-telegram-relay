@@ -1,4 +1,9 @@
 /**
+ * @module autonomy-scanner
+ * @description Proactive task creation: scans codebase for improvements.
+ */
+
+/**
  * Autonomy Scanner — Proactive Opportunity Detection
  *
  * Scans the project for improvement opportunities and returns

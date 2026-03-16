@@ -1,4 +1,9 @@
 /**
+ * @module story-files
+ * @description Structured task specs (acceptance criteria, test stubs, steps).
+ */
+
+/**
  * Story Files — S16-02
  *
  * Generates structured story files for tasks, following BMad methodology.

@@ -1,4 +1,9 @@
 /**
+ * @module tts
+ * @description Text-to-speech via Piper (local).
+ */
+
+/**
  * Text-to-Speech Module
  *
  * Routes to Piper TTS (local) based on TTS_PROVIDER env var.

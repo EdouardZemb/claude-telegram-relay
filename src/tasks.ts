@@ -1,4 +1,9 @@
 /**
+ * @module tasks
+ * @description Task CRUD: backlog -> in_progress -> review -> done lifecycle.
+ */
+
+/**
  * Task/Backlog Management
  *
  * CRUD operations on the `tasks` table in Supabase.

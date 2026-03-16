@@ -1,4 +1,9 @@
 /**
+ * @module cost-tracking
+ * @description Token usage tracking, cost estimation, sprint cost aggregation.
+ */
+
+/**
  * Cost Tracking Module — S23-05/06/07
  *
  * Tracks token usage and estimated cost per agent execution.

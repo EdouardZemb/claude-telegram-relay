@@ -1,4 +1,10 @@
 /**
+ * @module orchestrator
+ * @description Multi-agent pipeline: structured JSON message passing, retry loop,
+ * dynamic pipeline selection, cost tracking per agent, blackboard integration.
+ */
+
+/**
  * Multi-Agent Orchestrator — S16-01 / S22
  *
  * Chains BMad agents in configurable sequences.

@@ -1,4 +1,9 @@
 /**
+ * @module patterns
+ * @description Multi-sprint pattern analysis, workflow improvement proposals.
+ */
+
+/**
  * Pattern Detection — S12 Intelligence Reflexive
  *
  * Analyse les workflow_logs et sprint_metrics sur plusieurs sprints

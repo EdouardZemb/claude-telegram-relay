@@ -1,4 +1,9 @@
 /**
+ * @module bmad-agents
+ * @description 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates.
+ */
+
+/**
  * BMad Method v6 — Agent Definitions
  *
  * Maps BMad agents to Telegram commands and provides system prompts

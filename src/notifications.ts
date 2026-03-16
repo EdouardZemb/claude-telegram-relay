@@ -1,4 +1,9 @@
 /**
+ * @module notifications
+ * @description Proactive Telegram notifications routed through notification queue.
+ */
+
+/**
  * Proactive Notifications — S26 Smart Notifications
  *
  * All notifications are routed through the notification queue for

@@ -1,4 +1,9 @@
 /**
+ * @module prd
+ * @description PRD management: draft -> approved/rejected.
+ */
+
+/**
  * PRD (Product Requirements Document) Management
  *
  * Generates structured PRDs via Claude from user descriptions,

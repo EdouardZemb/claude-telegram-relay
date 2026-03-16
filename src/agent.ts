@@ -1,4 +1,9 @@
 /**
+ * @module agent
+ * @description Sub-agent execution: launches Claude Code with branch-PR workflow.
+ */
+
+/**
  * Agentic Task Execution
  *
  * Launches Claude Code as a sub-agent to execute tasks autonomously.

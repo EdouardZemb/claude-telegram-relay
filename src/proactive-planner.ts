@@ -1,4 +1,9 @@
 /**
+ * @module proactive-planner
+ * @description Daily backlog analysis + recommendations.
+ */
+
+/**
  * Proactive Planner — S16-10
  *
  * Analyzes the backlog periodically and proposes:

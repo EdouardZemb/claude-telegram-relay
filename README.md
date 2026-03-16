@@ -77,6 +77,52 @@ The system improves itself through data-driven retrospectives:
 - `/orchestrate` chains agents in configurable pipelines (DEFAULT, QUICK, REVIEW)
 - `/autopipeline` runs end-to-end without user intervention (PRD → dev → review → done)
 - `/planify` proactively analyzes backlog and suggests priority reordering
+- Structured JSON message passing between agents (typed schemas per role)
+- Dynamic pipeline selection based on task type and priority
+
+### Blackboard Architecture
+Shared structured workspace for multi-agent collaboration:
+
+- 5 sections: spec, plan, tasks, implementation, verification
+- JSONB storage with optimistic locking and versioning
+- Role-based write authorization (agents only write their sections)
+- Gate Evaluator: LLM-based quality checks at each gate (score 0-100)
+- Adversarial Verifier: clean room spec-vs-implementation drift detection
+- Traceability report: FR → tasks → tests → files mapping
+
+### Parallel Execution
+DAG-based parallel scheduling for multi-agent pipelines:
+
+- Independent agents run concurrently (e.g., analyst + PM)
+- Fan-out N Dev agents on subtasks, each in isolated git worktree
+- Deterministic TypeScript supervisor (zero LLM cost): retry/skip/escalate
+- Semaphore-gated concurrency (default max 3)
+- Speedup ratio tracking via ParallelMetrics
+
+### Smart Notifications
+Proactive notification system with batching and quiet hours:
+
+- All notifications route through a batching queue
+- Flush after 5min interval or 5-message threshold
+- Quiet hours (default 20h-9h, timezone-aware) queue non-critical notifications
+- Critical alerts bypass quiet hours
+- Inline action buttons: start/complete tasks, promote ideas, view PRs
+- Morning digest: accumulated notifications flushed when quiet hours end
+- Per-type preferences via `/notify` command
+
+### Cost Tracking
+Token usage monitoring across agent executions:
+
+- Per-agent and per-task cost estimation
+- Sprint cost aggregation
+- `/cost` command for breakdown view
+
+### Intelligent Memory
+- Importance scoring with temporal decay (half-life 70 days)
+- Auto-classification via GPT-4o-mini (facts, goals, ideas)
+- Semantic deduplication and contradiction detection
+- Ideas pipeline: capture → review → promote to task or archive
+- MCP server for Claude Code sessions (search, list, capture)
 
 ## Quick Start
 
@@ -147,6 +193,15 @@ bun run start          # Start the bot
 | /project archive \<slug\> | Archive a project |
 | /project topic \<slug\> | Link topic to project |
 
+### Intelligence
+
+| Command | Description |
+|---------|-------------|
+| /brain | Memory synthesis: patterns, health, ideas, suggestions |
+| /ideas | Ideas pipeline: list, add, review, promote, archive |
+| /cost | Token usage and cost tracking (per sprint or total) |
+| /notify | Notification preferences: quiet hours, on/off per type |
+
 ### Utilities
 
 | Command | Description |
@@ -182,11 +237,25 @@ src/
   feedback-loop.ts        # Retro-driven learning → agent prompt enrichment
   proactive-planner.ts    # Daily backlog analysis + recommendations
   prd.ts                  # PRD generation and lifecycle
-  notifications.ts        # Forum topic notifications
+  notifications.ts        # Proactive notifications routed through queue
+  notification-queue.ts   # Batching queue: flush, digest, inline buttons, quiet hours
+  notification-prefs.ts   # Notification preferences: quiet hours, per-type config
   profile-evolution.ts    # Dynamic user profiling
+  cost-tracking.ts        # Token usage tracking and cost estimation
+  blackboard.ts           # Shared JSONB workspace with optimistic locking
+  dag-executor.ts         # DAG-based parallel agent scheduler
+  semaphore.ts            # Counting semaphore for concurrency control
+  supervisor.ts           # Deterministic agent supervisor (retry/skip/escalate)
+  fan-out.ts              # Subtask parallelism with git worktrees
+  worktree.ts             # Git worktree lifecycle management
+  gate-evaluator.ts       # LLM-based quality checks at pipeline gates
+  adversarial-verifier.ts # Spec-vs-implementation drift detection
+  agent-schemas.ts        # Typed JSON schemas per agent role
+  autonomy-scanner.ts     # Proactive task creation from codebase analysis
+  autonomy-cron.ts        # Scheduled autonomy runner (daily via PM2)
   transcribe.ts           # Voice transcription (Groq / local Whisper)
   tts.ts                  # Text-to-speech (Piper)
-  alert-cron.ts           # Hourly scheduled alert runner
+  alert-cron.ts           # Hourly scheduled alert runner + morning digest
 
 config/
   bmad-templates/         # BMad Method v6 templates
@@ -207,6 +276,19 @@ db/
 supabase/functions/
   embed/index.ts          # Auto-embedding Edge Function
   search/index.ts         # Semantic search Edge Function
+  classify-thought/       # Message classification (GPT-4o-mini)
+  memory-mcp/             # Memory CRUD API for MCP server
+
+mcp/
+  memory-server.ts        # Local MCP server for Claude Code sessions
+
+scripts/
+  doc-freshness.ts        # CI documentation freshness checker
+  doc-check.ts            # Interactive doc maintenance tool
+  wait-ci.sh              # CI status verification after PR creation
+
+docs/
+  adr/                    # Architecture Decision Records
 ```
 
 ## Database
@@ -225,11 +307,15 @@ supabase/functions/
 | workflow_logs | Transition tracking for workflow engine |
 | workflow_proposals | Cross-project improvement proposals |
 | feedback_rules | Learned patterns from retros → agent prompt enrichment |
+| cost_tracking | Token usage and cost per agent execution |
+| blackboard | Shared JSONB workspace for multi-agent pipelines |
 | logs | System logs |
 
 ### Edge Functions
 - **embed** — Auto-generates embeddings on INSERT (DB webhooks)
 - **search** — Semantic search endpoint
+- **classify-thought** — GPT-4o-mini message classification with idea detection
+- **memory-mcp** — Memory CRUD + semantic search API for MCP server
 
 ## Process Management
 

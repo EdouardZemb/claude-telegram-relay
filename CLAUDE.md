@@ -48,6 +48,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `notification-prefs.ts` | Notification preferences: quiet hours, per-type enable/disable/immediate, /notify command config |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
+| `autonomy-scanner.ts` | Proactive task creation: scans codebase for improvements, creates auto-generated tasks |
+| `autonomy-cron.ts` | Scheduled autonomy runner: daily scan trigger via PM2 cron |
 | `alert-cron.ts` | Hourly scheduled alert runner + memory archival + morning digest flush |
 
 ### Telegram Commands
@@ -132,6 +134,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Smart Notifications (S26):** All proactive notifications (tasks, PRs, ideas, alerts) route through a batching queue (`notification-queue.ts`). Batching: flush after 5min interval OR 5-message threshold, whichever comes first. Single notifications sent standalone with inline action buttons; 2+ grouped into digest format. Quiet hours (default 20h-9h, timezone-aware) queue non-critical notifications for morning digest. Critical alerts bypass quiet hours. Inline buttons: task (Demarrer/Terminer/Voir), PR (URL button), idea (Promouvoir/Archiver), alert (Voir tache/sprint/Ignorer). Preferences configurable via `/notify` command (quiet hours, per-type enable/disable/immediate). Persistence: queue + prefs saved to JSON files in RELAY_DIR. Morning digest triggered by alert-cron when quiet hours end.
 
+**Documentation & Maintenance (S27):** Automated documentation freshness enforcement. CI step (`scripts/doc-freshness.ts`) verifies every PR: all `src/*.ts` modules appear in CLAUDE.md module table, all `bot.command()` registrations appear in commands table, test count within ±10 of documented value. Conventional commit format enforced by pre-push hook (regex, no external deps). `git-cliff` generates CHANGELOG.md from commit history. `scripts/doc-check.ts` proposes CLAUDE.md updates interactively (`bun run doc:check`). Architecture Decision Records in `docs/adr/`. TSDoc `@module`/`@description` headers on all source modules.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -147,7 +151,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    38 TypeScript modules (core logic)
+src/                    40 TypeScript modules (core logic)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
@@ -156,7 +160,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  640 tests (unit + integration)
+tests/                  658 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -164,7 +168,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (640 tests, all must pass before merge)
+- Tests: `bun test` (658 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
