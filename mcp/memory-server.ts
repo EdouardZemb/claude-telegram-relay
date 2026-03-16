@@ -96,5 +96,196 @@ server.tool(
   }
 );
 
+// ── S32: Supabase REST helpers ────────────────────────────────
+
+async function callSupabaseRest(path: string): Promise<unknown> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
+      Prefer: "return=representation",
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Supabase REST error (${response.status}): ${text}`);
+  }
+
+  return response.json();
+}
+
+async function callRpc(fn: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`RPC error (${response.status}): ${text}`);
+  }
+
+  return response.json();
+}
+
+// ── S32: Project Context Tools ───────────────────────────────
+
+server.tool(
+  "get_tasks",
+  "Get tasks from the project backlog. Filter by status, project, or sprint.",
+  {
+    status: z.string().optional().describe("Filter by status: backlog, in_progress, review, done"),
+    project: z.string().optional().describe("Filter by project name"),
+    sprint: z.string().optional().describe("Filter by sprint ID"),
+    limit: z.number().optional().describe("Max results (default 20)"),
+  },
+  async ({ status, project, sprint, limit }) => {
+    let url = "tasks?select=id,title,status,priority,sprint,project,description"
+      + "&order=priority.asc,created_at.asc"
+      + `&limit=${limit || 20}`
+      + "&status=neq.cancelled";
+    if (status) url += `&status=eq.${status}`;
+    if (project) url += `&project=eq.${project}`;
+    if (sprint) url += `&sprint=eq.${sprint}`;
+
+    const data = await callSupabaseRest(url);
+    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_sprint_summary",
+  "Get sprint progress summary: total, backlog, in_progress, review, done counts.",
+  {
+    sprint: z.string().describe("Sprint ID (e.g., 'S32')"),
+  },
+  async ({ sprint }) => {
+    const data = await callRpc("get_sprint_summary", { p_sprint: sprint });
+    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_project_context",
+  "Get full project context: memory (facts/goals), sprint summary, recent tasks. One-shot context for agents.",
+  {
+    project: z.string().optional().describe("Project name filter"),
+    sprint: z.string().optional().describe("Sprint ID for summary"),
+  },
+  async ({ project, sprint }) => {
+    const results: Record<string, unknown> = {};
+    const promises: Promise<void>[] = [];
+
+    promises.push(
+      callEdgeFunction("list_thoughts", { type: "fact", limit: 10 })
+        .then((data: unknown) => { results.facts = data; })
+        .catch(() => { results.facts = []; })
+    );
+
+    promises.push(
+      callEdgeFunction("list_thoughts", { type: "goal", limit: 5 })
+        .then((data: unknown) => { results.goals = data; })
+        .catch(() => { results.goals = []; })
+    );
+
+    if (sprint) {
+      promises.push(
+        callRpc("get_sprint_summary", { p_sprint: sprint })
+          .then((data: unknown) => { results.sprint_summary = data; })
+          .catch(() => { results.sprint_summary = null; })
+      );
+    }
+
+    let taskUrl = "tasks?select=id,title,status,priority,sprint&order=updated_at.desc&limit=10&status=neq.cancelled";
+    if (project) taskUrl += `&project=eq.${project}`;
+    promises.push(
+      callSupabaseRest(taskUrl)
+        .then((data: unknown) => { results.recent_tasks = data; })
+        .catch(() => { results.recent_tasks = []; })
+    );
+
+    await Promise.all(promises);
+    return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+  }
+);
+
+// ── S32: Blackboard Tools ────────────────────────────────────
+
+server.tool(
+  "read_blackboard",
+  "Read a blackboard section from a pipeline run. Sections: spec, plan, tasks, implementation, verification.",
+  {
+    session_id: z.string().describe("Blackboard session ID"),
+    section: z.string().optional().describe("Section to read. Omit for full blackboard."),
+  },
+  async ({ session_id, section }) => {
+    const url = `blackboard?session_id=eq.${session_id}&select=sections,version,status,pipeline_type`;
+    const data = await callSupabaseRest(url) as any[];
+
+    if (!data?.length) {
+      return { content: [{ type: "text" as const, text: `Blackboard not found for session: ${session_id}` }] };
+    }
+
+    const bb = data[0];
+    const result = section
+      ? { [section]: bb.sections?.[section] ?? null, version: bb.version }
+      : bb;
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "write_blackboard",
+  "Write data to a blackboard section. Uses optimistic locking (version check).",
+  {
+    session_id: z.string().describe("Blackboard session ID"),
+    section: z.enum(["spec", "plan", "tasks", "implementation", "verification"]).describe("Section to write"),
+    data: z.record(z.unknown()).describe("Data to write to the section"),
+    role: z.string().describe("Agent role performing the write"),
+  },
+  async ({ session_id, section, data, role }) => {
+    const current = await callSupabaseRest(`blackboard?session_id=eq.${session_id}&select=sections,version`) as any[];
+    if (!current?.length) {
+      return { content: [{ type: "text" as const, text: "Blackboard not found" }] };
+    }
+
+    const bb = current[0];
+    const newVersion = bb.version + 1;
+    const newSections = { ...bb.sections, [section]: data };
+
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/blackboard?session_id=eq.${session_id}&version=eq.${bb.version}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          apikey: SUPABASE_ANON_KEY,
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          sections: newSections,
+          version: newVersion,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { content: [{ type: "text" as const, text: `Write failed (version conflict?): ${text}` }] };
+    }
+
+    return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, version: newVersion }) }] };
+  }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -83,6 +83,7 @@ import {
   type FanOutResult,
 } from "./fan-out.ts";
 import { writeSectionWithRetry, mergeImplementationSection } from "./blackboard.ts";
+import { buildAgentContext } from "./agent-context.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
@@ -170,7 +171,8 @@ async function runAgentStep(
   agentId: AgentRole,
   task: Task,
   previousMessages: AgentMessage[],
-  shardedContext?: string
+  shardedContext?: string,
+  agentContext?: string
 ): Promise<AgentStepResult> {
   const startTime = Date.now();
   const agent = getAgent(agentId);
@@ -213,9 +215,11 @@ async function runAgentStep(
 
   try {
     // S28: Use centralized spawnClaude with agent-specific CLI flags
+    // S32: Inject Supabase context via --append-system-prompt
     const jsonSchema = getJsonSchemaForRole(agentId);
     const result = await spawnClaude({
       prompt,
+      systemPrompt: agentContext || undefined,
       outputFormat: jsonSchema ? "json" : "text",
       jsonSchema: jsonSchema || undefined,
       effort: agent?.effort,
@@ -439,6 +443,24 @@ export async function orchestrate(
     }
   }
 
+  // S32: Build Supabase context per agent role (cached, one fetch per role)
+  const agentContextCache = new Map<string, string>();
+  if (supabase) {
+    const ctxResults = await Promise.all(
+      pipeline.map(async (role) => {
+        const ctx = await buildAgentContext(supabase, {
+          role,
+          projectId: task.project_id || undefined,
+          sprintId: task.sprint || undefined,
+        });
+        return [role, ctx] as [string, string];
+      })
+    );
+    for (const [role, ctx] of ctxResults) {
+      if (ctx) agentContextCache.set(role, ctx);
+    }
+  }
+
   // Enrich task with story file before orchestration
   if (supabase) {
     const story = buildStoryFile(task);
@@ -568,7 +590,7 @@ export async function orchestrate(
       }
 
       supervisor.markStarted(agentId);
-      const result = await runAgentStep(agentId, task, prevMessages, shardedContext);
+      const result = await runAgentStep(agentId, task, prevMessages, shardedContext, agentContextCache.get(agentId));
       supervisor.markCompleted(agentId, result);
       return result;
     }, {
@@ -676,7 +698,7 @@ export async function orchestrate(
       let retryCount = 0;
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        result = await runAgentStep(agentId, task, messages, shardedContext);
+        result = await runAgentStep(agentId, task, messages, shardedContext, agentContextCache.get(agentId));
 
         if (result.success) break;
 

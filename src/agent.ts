@@ -16,6 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { updateTaskStatus, type Task } from "./tasks.ts";
 import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
 import { runCodeReview, saveReviewResult, formatReviewResult } from "./code-review.ts";
+import { buildAgentContext } from "./agent-context.ts";
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -288,8 +289,18 @@ export async function executeTask(
       }, AGENT_HEARTBEAT_MS);
     }
 
-    // S28: Use centralized spawnClaude
-    const result = await spawnClaude({ prompt });
+    // S32: Build Supabase context for dev agent
+    const agentCtx = await buildAgentContext(supabase, {
+      role: "dev",
+      projectId: task.project_id || undefined,
+      sprintId: task.sprint || undefined,
+    });
+
+    // S28: Use centralized spawnClaude, S32: inject context
+    const result = await spawnClaude({
+      prompt,
+      systemPrompt: agentCtx || undefined,
+    });
 
     if (heartbeatTimer) clearInterval(heartbeatTimer);
 
