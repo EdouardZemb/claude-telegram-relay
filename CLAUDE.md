@@ -13,7 +13,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | Module | Purpose |
 |--------|---------|
 | `relay.ts` | Main bot: message handling, 28 Telegram commands, voice, photos, docs |
-| `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow |
+| `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
@@ -26,16 +26,16 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup. Branch isolation for parallel agents |
 | `gate-evaluator.ts` | Gate evaluation: LLM-based quality checks at pipeline gates, evaluate-rework loop (max 2 iterations) |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
-| `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context |
-| `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates |
-| `bmad-prompts.ts` | Context-aware prompt builder per agent |
+| `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context, JSON Schema for --json-schema flag |
+| `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates, CLI flags (effort, model, budget) |
+| `bmad-prompts.ts` | Context-aware prompt builder per agent, system/task prompt split for --append-system-prompt |
 | `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto pipeline selection and retries |
-| `cost-tracking.ts` | Token usage tracking, cost estimation, sprint cost aggregation, /cost command |
+| `cost-tracking.ts` | Token usage tracking, multi-model cost estimation (Opus/Sonnet/Haiku), sprint cost aggregation, /cost command |
 | `workflow.ts` | Workflow engine: loads config/workflow.yaml, tracks state transitions, transition enforcement, retry policies |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
-| `code-review.ts` | Adversarial code review before merge |
+| `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
 | `feedback-loop.ts` | Learning from retros → permanent agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
@@ -136,6 +136,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Documentation & Maintenance (S27):** Automated documentation freshness enforcement. CI step (`scripts/doc-freshness.ts`) verifies every PR: all `src/*.ts` modules appear in CLAUDE.md module table, all `bot.command()` registrations appear in commands table, test count within ±10 of documented value. Conventional commit format enforced by pre-push hook (regex, no external deps). `git-cliff` generates CHANGELOG.md from commit history. `scripts/doc-check.ts` proposes CLAUDE.md updates interactively (`bun run doc:check`). Architecture Decision Records in `docs/adr/`. TSDoc `@module`/`@description` headers on all source modules.
 
+**CLI Optimization (S28):** Centralized `spawnClaude()` function in `agent.ts` replaces 5 duplicated spawn calls. All CLI flags are conditionally constructed: `--output-format json` + `--json-schema` for structured output (replaces <<<JSON>>> markers as primary, kept as fallback), `--effort` per agent role (low/medium/high/max), `--model` + `--fallback-model` for model routing (Opus for architect/dev, Sonnet for analyst/pm/qa, Haiku for sm), `--max-budget-usd` as per-agent cost guard, `--append-system-prompt` for system/task prompt separation, `-w` for worktree isolation (exec/code-review), `--from-pr` for code review PR context. Multi-model pricing in `cost-tracking.ts` (Opus $15/$75, Sonnet $3/$15, Haiku $0.80/$4 per 1M tokens). Agent CLI config (effort, model, budget) defined in `bmad-agents.ts` as source of truth. Backward compatible: all flags are optional, omitted when not set.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -160,7 +162,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  658 tests (unit + integration)
+tests/                  711 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -168,7 +170,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (658 tests, all must pass before merge)
+- Tests: `bun test` (711 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

@@ -13,11 +13,11 @@
  * S15-08: Gate integration pre-merge
  */
 
-import { spawn, spawnSync } from "bun";
+import { spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildFullAgentPrompt } from "./bmad-prompts.ts";
+import { spawnClaude } from "./agent.ts";
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
 
@@ -52,7 +52,8 @@ export interface CodeReviewResult {
 export async function runCodeReview(
   branchName: string,
   taskTitle: string,
-  onProgress?: (msg: string) => Promise<void>
+  onProgress?: (msg: string) => Promise<void>,
+  prNumber?: number
 ): Promise<CodeReviewResult> {
   // Get the diff between master and the branch
   const diffResult = spawnSync(
@@ -131,13 +132,14 @@ export async function runCodeReview(
   ].join("\n");
 
   try {
-    const proc = spawn(
-      [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
-      { stdout: "pipe", stderr: "pipe", cwd: PROJECT_DIR, env: { ...process.env } }
-    );
+    // S28: Use centralized spawnClaude with optional --from-pr
+    const result = await spawnClaude({
+      prompt,
+      fromPr: prNumber,
+      useWorktree: true,
+    });
 
-    const output = await new Response(proc.stdout).text();
-    await proc.exited;
+    const output = result.stdout;
 
     // Parse JSON from output
     const jsonMatch = output.match(/\{[\s\S]*\}/);

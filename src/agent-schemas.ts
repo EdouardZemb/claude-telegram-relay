@@ -187,6 +187,186 @@ export function getSchemaForRole(role: AgentRole): string {
   return SCHEMA_DESCRIPTIONS[role] || "";
 }
 
+// ── JSON Schema for --json-schema flag (S28-T4) ─────────────
+
+/** Standard JSON Schemas for Claude CLI --json-schema flag */
+const JSON_SCHEMAS: Record<string, object> = {
+  analyst: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "analyst" },
+      analysis: { type: "string" },
+      risks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            description: { type: "string" },
+          },
+          required: ["severity", "description"],
+        },
+      },
+      recommendations: { type: "array", items: { type: "string" } },
+      dependencies: { type: "array", items: { type: "string" } },
+      feasibility: { type: "string", enum: ["high", "medium", "low"] },
+    },
+    required: ["role", "analysis", "risks", "recommendations"],
+  },
+  pm: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "pm" },
+      subtasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+            priority: { type: "number" },
+            acceptance_criteria: { type: "string" },
+            dependencies: { type: "array", items: { type: "string" } },
+          },
+          required: ["title", "description", "priority"],
+        },
+      },
+      priorities: { type: "array", items: { type: "string" } },
+      risks: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "subtasks", "priorities"],
+  },
+  architect: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "architect" },
+      design: { type: "string" },
+      components: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            responsibility: { type: "string" },
+            interactions: { type: "array", items: { type: "string" } },
+          },
+          required: ["name", "responsibility"],
+        },
+      },
+      files_impacted: { type: "array", items: { type: "string" } },
+      patterns: { type: "array", items: { type: "string" } },
+      technical_risks: { type: "array", items: { type: "string" } },
+      decisions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            decision: { type: "string" },
+            rationale: { type: "string" },
+            alternatives: { type: "array", items: { type: "string" } },
+          },
+          required: ["decision", "rationale"],
+        },
+      },
+    },
+    required: ["role", "design", "files_impacted"],
+  },
+  dev: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "dev" },
+      files_modified: { type: "array", items: { type: "string" } },
+      tests_added: { type: "array", items: { type: "string" } },
+      summary: { type: "string" },
+      issues_encountered: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "files_modified", "summary"],
+  },
+  qa: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "qa" },
+      score: { type: "number", minimum: 0, maximum: 100 },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["critical", "important", "minor", "suggestion"] },
+            description: { type: "string" },
+            suggestion: { type: "string" },
+            file: { type: "string" },
+          },
+          required: ["severity", "description", "suggestion"],
+        },
+      },
+      summary: { type: "string" },
+      tests_missing: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "score", "findings", "summary"],
+  },
+  sm: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "sm" },
+      summary: { type: "string" },
+      blockers: { type: "array", items: { type: "string" } },
+      next_steps: { type: "array", items: { type: "string" } },
+      follow_ups: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "summary", "next_steps"],
+  },
+  gate_evaluation: {
+    type: "object",
+    properties: {
+      pass: { type: "boolean" },
+      score: { type: "number", minimum: 0, maximum: 100 },
+      issues: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["critical", "major", "minor"] },
+            description: { type: "string" },
+            suggestion: { type: "string" },
+          },
+          required: ["severity", "description"],
+        },
+      },
+      gate_name: { type: "string" },
+    },
+    required: ["pass", "score", "issues", "gate_name"],
+  },
+  drift_report: {
+    type: "object",
+    properties: {
+      coverage_score: { type: "number", minimum: 0, maximum: 100 },
+      drift_items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            fr_id: { type: "string" },
+            status: { type: "string", enum: ["implemented", "missing", "partial", "divergent"] },
+            details: { type: "string" },
+          },
+          required: ["fr_id", "status", "details"],
+        },
+      },
+      overall_verdict: { type: "string", enum: ["pass", "fail", "warning"] },
+    },
+    required: ["coverage_score", "drift_items", "overall_verdict"],
+  },
+};
+
+/**
+ * Get the JSON Schema for a role, suitable for --json-schema flag.
+ * S28: Returns a standard JSON Schema object for Claude CLI structured output.
+ */
+export function getJsonSchemaForRole(role: string): object | null {
+  return JSON_SCHEMAS[role] || null;
+}
+
 /**
  * Build the structured output instruction block for an agent prompt.
  * Tells the agent to wrap its output in a JSON block.
@@ -216,14 +396,25 @@ export function buildStructuredOutputInstructions(role: AgentRole): string {
 
 /**
  * Extract structured JSON from agent raw output.
- * Looks for <<<JSON>>> ... <<<END>>> markers.
+ * S28: First tries direct JSON parse (for --output-format json output).
+ * Then looks for <<<JSON>>> ... <<<END>>> markers.
  * Falls back to finding any JSON object in the output.
  */
 export function parseAgentOutput(
   rawOutput: string,
   role: AgentRole
 ): StructuredAgentOutput | null {
-  // Try marked JSON first
+  // S28: Try direct JSON parse first (output from --output-format json)
+  try {
+    const direct = JSON.parse(rawOutput);
+    if (validateAgentOutput(direct, role)) {
+      return { ...direct, role } as StructuredAgentOutput;
+    }
+  } catch {
+    // Not direct JSON, fall through to marker-based parsing
+  }
+
+  // Try marked JSON (<<<JSON>>> markers — legacy fallback)
   const markerMatch = rawOutput.match(
     /<<<JSON>>>\s*([\s\S]*?)\s*<<<END>>>/
   );

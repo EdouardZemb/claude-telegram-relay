@@ -19,6 +19,101 @@ import { runCodeReview, saveReviewResult, formatReviewResult } from "./code-revi
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
+
+// ── SpawnClaude — Centralized CLI spawn (S28-T1) ─────────────
+
+export interface SpawnClaudeOptions {
+  prompt: string;
+  systemPrompt?: string;
+  outputFormat?: "text" | "json";
+  jsonSchema?: object;
+  effort?: "low" | "medium" | "high" | "max";
+  model?: string;
+  fallbackModel?: string;
+  maxBudgetUsd?: number;
+  useWorktree?: boolean;
+  fromPr?: number;
+  cwd?: string;
+  timeout?: number;
+}
+
+export interface SpawnClaudeResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * Centralized function to spawn Claude Code CLI with all supported flags.
+ * Builds args conditionally: flags are only added if the option is provided.
+ */
+export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
+  const args: string[] = [CLAUDE_PATH];
+
+  // System prompt (--append-system-prompt) before task prompt
+  if (options.systemPrompt) {
+    args.push("--append-system-prompt", options.systemPrompt);
+  }
+
+  // Task prompt
+  args.push("-p", options.prompt);
+
+  // Output format
+  if (options.outputFormat === "json") {
+    args.push("--output-format", "json");
+  } else {
+    args.push("--output-format", "text");
+  }
+
+  // JSON schema for structured output
+  if (options.jsonSchema) {
+    args.push("--json-schema", JSON.stringify(options.jsonSchema));
+  }
+
+  // Model selection
+  if (options.model) {
+    args.push("--model", options.model);
+  }
+  if (options.fallbackModel) {
+    args.push("--fallback-model", options.fallbackModel);
+  }
+
+  // Effort level
+  if (options.effort) {
+    args.push("--effort", options.effort);
+  }
+
+  // Budget guard
+  if (options.maxBudgetUsd !== undefined) {
+    args.push("--max-budget-usd", String(options.maxBudgetUsd));
+  }
+
+  // Worktree isolation
+  if (options.useWorktree) {
+    args.push("-w");
+  }
+
+  // PR context for code review
+  if (options.fromPr !== undefined) {
+    args.push("--from-pr", String(options.fromPr));
+  }
+
+  // Always skip permissions for automation
+  args.push("--dangerously-skip-permissions");
+
+  const proc = spawn(args, {
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: options.cwd || PROJECT_DIR,
+    env: { ...process.env },
+  });
+
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+
+  return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
+}
 const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
 const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 
@@ -184,22 +279,6 @@ export async function executeTask(
   const prompt = buildAgentPrompt(task);
 
   try {
-    const args = [
-      CLAUDE_PATH,
-      "-p",
-      prompt,
-      "--output-format",
-      "text",
-      "--dangerously-skip-permissions",
-    ];
-
-    const proc = spawn(args, {
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: PROJECT_DIR,
-      env: { ...process.env },
-    });
-
     // Heartbeat: send periodic progress updates instead of hard timeout
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     if (onProgress) {
@@ -209,25 +288,25 @@ export async function executeTask(
       }, AGENT_HEARTBEAT_MS);
     }
 
-    // No hard timeout — let the process run until completion
-    const output = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
+    // S28: Use centralized spawnClaude
+    const result = await spawnClaude({ prompt });
 
     if (heartbeatTimer) clearInterval(heartbeatTimer);
 
     const durationMs = Date.now() - startTime;
 
-    if (exitCode !== 0) {
+    if (result.exitCode !== 0) {
       // Task failed — go back to master
       git("checkout", "master");
       return {
         success: false,
-        output: output.trim(),
-        error: stderr.trim(),
+        output: result.stdout,
+        error: result.stderr,
         durationMs,
       };
     }
+
+    const output = result.stdout;
 
     // Check if there are any changes to commit
     const status = git("status", "--porcelain");
@@ -379,27 +458,11 @@ export async function decomposeTask(
   const { enrichedPrompt: prompt } = enrichPromptWithAgent("plan", taskPrompt);
 
   try {
-    const args = [
-      CLAUDE_PATH,
-      "-p",
-      prompt,
-      "--output-format",
-      "text",
-      "--dangerously-skip-permissions",
-    ];
-
-    const proc = spawn(args, {
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: PROJECT_DIR,
-      env: { ...process.env },
-    });
-
-    const output = await new Response(proc.stdout).text();
-    await proc.exited;
+    // S28: Use centralized spawnClaude
+    const result = await spawnClaude({ prompt });
 
     // Extract JSON from the response
-    const jsonMatch = output.match(/\[[\s\S]*\]/);
+    const jsonMatch = result.stdout.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
 
     const tasks = JSON.parse(jsonMatch[0]);
