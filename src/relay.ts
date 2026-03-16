@@ -284,15 +284,6 @@ function clearError(messageId: number): void {
   errorCounts.delete(messageId);
 }
 
-// Cleanup old entries every 5 minutes
-setInterval(() => {
-  errorCounts.clear();
-  // Also clean up old rate limit timestamps to prevent memory leak
-  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
-  while (messageTimestamps.length > 0 && messageTimestamps[0] < cutoff) {
-    messageTimestamps.shift();
-  }
-}, 300_000);
 
 // ============================================================
 // REMINDERS
@@ -355,46 +346,6 @@ async function removePidFile(): Promise<void> {
   } catch {}
 }
 
-// Graceful shutdown
-let shuttingDown = false;
-async function gracefulShutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`${signal} received, shutting down gracefully...`);
-  try { bot?.stop(); } catch {}
-  await removePidFile();
-  process.exit(0);
-}
-
-process.on("exit", () => {
-  try {
-    const fs = require("fs");
-    const content = fs.readFileSync(LOCK_FILE, "utf-8").trim();
-    if (content === process.pid.toString()) {
-      fs.unlinkSync(LOCK_FILE);
-    }
-  } catch {}
-});
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-
-// ============================================================
-// SETUP
-// ============================================================
-
-if (!BOT_TOKEN) {
-  console.error("TELEGRAM_BOT_TOKEN not set!");
-  console.log("\nTo set up:");
-  console.log("1. Message @BotFather on Telegram");
-  console.log("2. Create a new bot with /newbot");
-  console.log("3. Copy the token to .env");
-  process.exit(1);
-}
-
-// Create directories
-await mkdir(TEMP_DIR, { recursive: true });
-await mkdir(UPLOADS_DIR, { recursive: true });
-
 // ============================================================
 // SUPABASE (optional — only if configured)
 // ============================================================
@@ -422,12 +373,8 @@ async function saveMessage(
   }
 }
 
-// Write PID file (mutual exclusion is handled by flock in start-relay.sh)
-await writePidFile();
-
-const bot = new Bot(BOT_TOKEN);
-initNotifications(bot);
-await startQueue(bot);
+// Module-level bot reference (set by createBot)
+let bot: Bot;
 
 // ============================================================
 // TOPIC FORUM HELPERS
@@ -531,10 +478,14 @@ function commandGuard(ctx: Context, command: string): string | null {
 }
 
 // ============================================================
-// SECURITY: Only respond to authorized user
+// BOT FACTORY (importable without side effects)
 // ============================================================
 
-bot.use(async (ctx, next) => {
+export function createBot(token: string): Bot {
+  bot = new Bot(token);
+
+  // SECURITY: Only respond to authorized user
+  bot.use(async (ctx, next) => {
   const userId = ctx.from?.id.toString();
   const chatId = ctx.chat?.id.toString();
 
@@ -2926,6 +2877,22 @@ bot.on("message:document", async (ctx) => {
   }
 });
 
+  // Error handler (must be registered last)
+  bot.catch(async (err) => {
+    console.error("Bot error:", err);
+    if (ALLOWED_USER_ID) {
+      try {
+        const errorMsg = `Erreur critique du bot:\n${String(err.error || err).substring(0, 500)}`;
+        await bot.api.sendMessage(parseInt(ALLOWED_USER_ID), errorMsg);
+      } catch {
+        // Can't notify — just log
+      }
+    }
+  });
+
+  return bot;
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -3121,92 +3088,129 @@ async function sendVoiceResponse(ctx: Context, response: string): Promise<void> 
   await sendResponse(ctx, response);
 }
 
+
+
 // ============================================================
-// REMINDER SCHEDULER
+// MAIN (only runs when executed directly, not when imported)
 // ============================================================
 
-setInterval(async () => {
-  const now = Date.now();
-  const due = reminders.filter((r) => r.triggerAt <= now);
-  if (due.length === 0) return;
-
-  for (const r of due) {
-    try {
-      const opts: Record<string, unknown> = {};
-      if (r.threadId) opts.message_thread_id = r.threadId;
-      await bot.api.sendMessage(r.chatId, `Rappel: ${r.text}`, opts);
-    } catch (error) {
-      console.error("Reminder send error:", error);
-    }
+if (import.meta.main) {
+  if (!BOT_TOKEN) {
+    console.error("TELEGRAM_BOT_TOKEN not set!");
+    console.log("\nTo set up:");
+    console.log("1. Message @BotFather on Telegram");
+    console.log("2. Create a new bot with /newbot");
+    console.log("3. Copy the token to .env");
+    process.exit(1);
   }
 
-  reminders = reminders.filter((r) => r.triggerAt > now);
-  await saveReminders();
-}, 30_000); // Check every 30 seconds
+  // Create directories
+  await mkdir(TEMP_DIR, { recursive: true });
+  await mkdir(UPLOADS_DIR, { recursive: true });
 
-// ============================================================
-// ERROR NOTIFICATION (wire up after bot is created)
-// ============================================================
+  // Write PID file
+  await writePidFile();
 
-bot.catch(async (err) => {
-  console.error("Bot error:", err);
-  if (ALLOWED_USER_ID) {
-    try {
-      const errorMsg = `Erreur critique du bot:\n${String(err.error || err).substring(0, 500)}`;
-      await bot.api.sendMessage(parseInt(ALLOWED_USER_ID), errorMsg);
-    } catch {
-      // Can't notify — just log
-    }
+  // Create and configure bot
+  const mainBot = createBot(BOT_TOKEN);
+  initNotifications(mainBot);
+  await startQueue(mainBot);
+
+  // Graceful shutdown
+  let shuttingDown = false;
+  async function gracefulShutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received, shutting down gracefully...`);
+    try { mainBot?.stop(); } catch {}
+    await removePidFile();
+    process.exit(0);
   }
-});
 
-// Catch uncaught exceptions and notify
-process.on("uncaughtException", async (error) => {
-  console.error("Uncaught exception:", error);
-  if (ALLOWED_USER_ID) {
+  process.on("exit", () => {
     try {
-      await bot.api.sendMessage(
-        parseInt(ALLOWED_USER_ID),
-        `Exception non geree dans le relay:\n${String(error).substring(0, 500)}\n\nLe bot va redemarrer via PM2.`
-      );
+      const fs = require("fs");
+      const content = fs.readFileSync(LOCK_FILE, "utf-8").trim();
+      if (content === process.pid.toString()) {
+        fs.unlinkSync(LOCK_FILE);
+      }
     } catch {}
+  });
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+
+  // Error cleanup interval
+  setInterval(() => {
+    errorCounts.clear();
+    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+    while (messageTimestamps.length > 0 && messageTimestamps[0] < cutoff) {
+      messageTimestamps.shift();
+    }
+  }, 300_000);
+
+  // Reminder scheduler
+  setInterval(async () => {
+    const now = Date.now();
+    const due = reminders.filter((r) => r.triggerAt <= now);
+    if (due.length === 0) return;
+
+    for (const r of due) {
+      try {
+        const opts: Record<string, unknown> = {};
+        if (r.threadId) opts.message_thread_id = r.threadId;
+        await mainBot.api.sendMessage(r.chatId, `Rappel: ${r.text}`, opts);
+      } catch (error) {
+        console.error("Reminder send error:", error);
+      }
+    }
+
+    reminders = reminders.filter((r) => r.triggerAt > now);
+    await saveReminders();
+  }, 30_000);
+
+  // Catch uncaught exceptions and notify
+  process.on("uncaughtException", async (error) => {
+    console.error("Uncaught exception:", error);
+    if (ALLOWED_USER_ID) {
+      try {
+        await mainBot.api.sendMessage(
+          parseInt(ALLOWED_USER_ID),
+          `Exception non geree dans le relay:\n${String(error).substring(0, 500)}\n\nLe bot va redemarrer via PM2.`
+        );
+      } catch {}
+    }
+    process.exit(1);
+  });
+
+  process.on("unhandledRejection", async (reason) => {
+    console.error("Unhandled rejection:", reason);
+    if (ALLOWED_USER_ID) {
+      try {
+        await mainBot.api.sendMessage(
+          parseInt(ALLOWED_USER_ID),
+          `Rejection non geree:\n${String(reason).substring(0, 500)}`
+        );
+      } catch {}
+    }
+  });
+
+  // Start
+  console.log("Starting Claude Telegram Relay...");
+  console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
+  console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
+
+  if (supabase) {
+    loadFeedbackRules(supabase).then((rules) => {
+      console.log(`Loaded ${rules.length} feedback rules (${rules.filter(r => r.active).length} active)`);
+    }).catch((e) => console.error("Failed to load feedback rules:", e));
   }
-  process.exit(1);
-});
 
-process.on("unhandledRejection", async (reason) => {
-  console.error("Unhandled rejection:", reason);
-  if (ALLOWED_USER_ID) {
-    try {
-      await bot.api.sendMessage(
-        parseInt(ALLOWED_USER_ID),
-        `Rejection non geree:\n${String(reason).substring(0, 500)}`
-      );
-    } catch {}
-  }
-});
+  await mainBot.api.deleteWebhook({ drop_pending_updates: true });
 
-// ============================================================
-// START
-// ============================================================
-
-console.log("Starting Claude Telegram Relay...");
-console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
-console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
-
-// Load feedback rules from retros on startup
-if (supabase) {
-  loadFeedbackRules(supabase).then((rules) => {
-    console.log(`Loaded ${rules.length} feedback rules (${rules.filter(r => r.active).length} active)`);
-  }).catch((e) => console.error("Failed to load feedback rules:", e));
+  mainBot.start({
+    drop_pending_updates: true,
+    onStart: () => {
+      console.log("Bot is running! (pending updates dropped)");
+    },
+  });
 }
-
-// Drop pending updates on startup to avoid re-processing old messages
-await bot.api.deleteWebhook({ drop_pending_updates: true });
-
-bot.start({
-  drop_pending_updates: true,
-  onStart: () => {
-    console.log("Bot is running! (pending updates dropped)");
-  },
-});

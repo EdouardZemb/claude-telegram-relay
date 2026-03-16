@@ -6,14 +6,9 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -62,3 +57,28 @@ jobs:
             echo "WARNING: Expected at least 600 tests, got $PASS_COUNT"
             exit 1
           fi
+
+  e2e:
+    needs: [check]
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup E2E environment
+        run: mkdir -p /tmp/claude-relay-e2e-${{ github.run_id }}
+
+      - name: Run E2E tests
+        run: bun test tests/e2e
+        env:
+          RELAY_DIR: /tmp/claude-relay-e2e-${{ github.run_id }}
+          TELEGRAM_USER_ID: "123456789"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+
+      - name: Cleanup E2E temp dir
+        if: always()
+        run: rm -rf /tmp/claude-relay-e2e-${{ github.run_id }}

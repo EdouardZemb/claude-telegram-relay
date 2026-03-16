@@ -12,7 +12,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 32 Telegram commands, voice, photos, docs |
+| `relay.ts` | Main bot: message handling, 32 Telegram commands, voice, photos, docs. Exports `createBot(token)` factory for E2E testing via `handleUpdate` |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
@@ -146,6 +146,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Production Readiness (S29):** Post-deploy validation pipeline. Smoke tests (`bun run smoke`) run 5 checks: PM2 services, Dashboard health, Supabase connectivity, Claude CLI, Telegram bot. Each with 10s timeout, report sent to Telegram. Auto-rollback in deploy.yml if smoke fails (`scripts/rollback.sh`). Feature flags in `config/features.json` with `/feature` command (list/enable/disable, hot-reload). Pre-implementation cost estimation (`/estimate <n> [pipeline]`) based on agent budgets from bmad-agents.ts with historical comparison. Production monitoring in alerts.ts: response time p50/p95/p99 (ring buffer), spawn success/failure rate per agent role, module error counters (1h window). `/monitor` command. `system-alerts.sh` activated via PM2 (every 15min) with 1h cooldown per alert type. Post-merge checklist generation from sprint tasks. `/rollback` command for manual rollback.
 
+**CI/CD & E2E Testing (S30):** Self-hosted GitHub Actions runner on the server (systemd, HTTPS outbound only — no firewall issues). CI (`ci.yml`) and deploy (`deploy.yml`) run on `[self-hosted, linux]`. Deploy is local (git pull + pm2 restart + smoke test + auto-rollback), replacing SSH-based deploy. Auto-deploy polling (`auto-deploy.sh`, `claude-autodeploy` PM2 service) removed — redundant with runner. E2E tests use Grammy's `bot.handleUpdate()` to inject synthetic Telegram updates into the bot's handler pipeline. `relay.ts` exports `createBot(token)` factory function; `import.meta.main` guards startup side effects (bot.start, PID file, intervals, process handlers). E2E framework (`tests/e2e/framework.ts`) intercepts `ctx.reply()` via Grammy API transformer — no real Telegram API calls. 8 E2E tests cover /help, /status, /feature, /workflow, /agents, /monitor, /estimate, /notify. Data isolation via `[E2E-<runId>]` prefix tags, cleanup after each test. E2E job in CI depends on check job, uses RELAY_DIR in /tmp.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -153,9 +155,14 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 **PM2 services** (ecosystem.config.cjs):
 - `claude-relay` — Main bot (start-relay.sh)
 - `claude-dashboard` — Kanban board (port 3456)
-- `claude-autodeploy` — CI/CD auto-deploy
 - `claude-alert-cron` — Hourly anomaly detection
 - `claude-system-alerts` — System health monitoring (every 15min)
+
+**GitHub Actions** (self-hosted runner):
+- Runner installed on server via `scripts/setup-runner.sh` (systemd service)
+- `ci.yml` — PR checks: type check, unit/integration/system tests, doc freshness, E2E tests
+- `deploy.yml` — Production deploy on push to master: git pull, pm2 restart, smoke test, auto-rollback
+- E2E job runs after unit tests, uses `handleUpdate` injection (no Telegram API dependency)
 
 **Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health
 
@@ -171,7 +178,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  749 tests (unit + integration)
+tests/                  763 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -179,7 +186,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (749 tests, all must pass before merge)
+- Tests: `bun test` (763 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
