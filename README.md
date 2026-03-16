@@ -2,351 +2,532 @@
 
 A self-improving agentic framework powered by Claude Code, piloted via Telegram.
 
-Not just a chatbot. A structured AI workflow system with BMad methodology, multi-project management, autonomous code execution, adversarial code review, and continuous improvement through retrospectives.
+Not just a chatbot — a structured AI workflow system with 6 specialized agents, quality gates, parallel execution, intelligent memory, and continuous improvement through retrospectives.
 
-**Created by [Goda Go](https://youtube.com/@GodaGo)** | [AI Productivity Hub Community](https://skool.com/autonomee)
+> **Originally based on [Goda Go](https://youtube.com/@GodaGo)**'s relay template | [AI Productivity Hub Community](https://skool.com/autonomee)
 
+## How It Works
+
+You talk to a Telegram bot. Behind the scenes, 6 AI agents collaborate through a structured pipeline to analyze, plan, code, test, and deploy — all orchestrated by the BMad methodology.
+
+```mermaid
+flowchart LR
+    User["👤 Telegram"]
+    Bot["🤖 Bot\n(Grammy)"]
+    Agents["🧠 BMad Agents\n(Claude Code)"]
+    DB["🗄️ Supabase\n(memory, tasks)"]
+    GH["📦 GitHub\n(PRs, CI/CD)"]
+    Deploy["🚀 Production\n(PM2)"]
+
+    User -->|text, voice, docs| Bot
+    Bot -->|orchestrate| Agents
+    Agents -->|read/write| DB
+    Agents -->|branch + PR| GH
+    GH -->|CI green + merge| Deploy
+    Deploy -->|notifications| User
 ```
-                        ┌─────────────────────────────────────┐
-                        │         BMad Workflow Engine         │
-                        │                                     │
-  Telegram ──────────▶  │  Analyse ─▶ PRD ─▶ Architecture     │
-  (text, voice, docs)   │     │        │        │              │
-                        │  Gate 1   Gate 2   Gate 3            │
-                        │     │        │        │              │
-                        │  Execution ─▶ Review ─▶ Merge        │
-                        │     │                                │
-                        │  Retrospective ──▶ Self-Improvement  │
-                        └──────────────┬──────────────────────┘
-                                       │
-                              Supabase (memory, tasks,
-                              PRDs, metrics, proposals)
+
+## Process A vs Process B
+
+Two ways to work with the bot — choose based on task complexity.
+
+```mermaid
+flowchart TB
+    subgraph A["Process A: Direct Conversation"]
+        A1["You type a message"] --> A2["Claude responds"]
+        A2 --> A3["You iterate"]
+        A3 --> A2
+    end
+
+    subgraph B["Process B: BMad Pipeline"]
+        B1["/orchestrate 42"] --> B2["Analyst: risks"]
+        B2 --> B3["PM: subtasks"]
+        B3 --> B4["Architect: design"]
+        B4 --> B5["Dev: code + tests"]
+        B5 --> B6["QA: review"]
+        B6 --> B7["PR + CI + deploy"]
+    end
 ```
 
-## Core Capabilities
+| | Process A (conversation) | Process B (pipeline) |
+|---|---|---|
+| **Best for** | Quick questions, brainstorming, small fixes | Features, sprints, multi-file changes |
+| **Quality gates** | None | 3 gates (PRD, architecture, code review) |
+| **Agents involved** | 1 (Claude) | Up to 6 specialized agents |
+| **Output** | Text reply | Branch, PR, CI, deploy |
+| **Cost** | Low (single call) | Higher (multi-agent, structured) |
+| **Traceability** | Chat history | Blackboard, metrics, retros |
 
-### BMad Method Integration
-6 specialized AI agents, each with a distinct persona, loaded from YAML templates:
+Process A is the default for free-form messages. Process B activates via `/exec`, `/orchestrate`, or `/autopipeline`.
 
-| Agent | Role | Trigger |
-|-------|------|---------|
-| Mary (Analyst) | Market research, competitive analysis, domain expertise | /patterns |
-| John (PM) | PRD creation, task decomposition, requirement discovery | /plan, /prd |
-| Winston (Architect) | Technical design, architecture decisions | via /plan |
-| Bob (Scrum Master) | Sprint planning, retrospectives, metrics analysis | /sprint, /retro, /metrics |
-| Amelia (Dev) | Code execution, test-driven implementation | /exec |
-| Quinn (QA) | Test automation, proactive alerts, code review | /alerts |
+## Architecture
 
-### 3-Gate Workflow
-Strict validation enforced before code reaches production:
+Modular TypeScript monolith: 54 source modules, 16,700 lines of code, 763 tests.
 
-- **Gate 1 — PRD**: No execution without an approved Product Requirements Document
-- **Gate 2 — Architecture**: Tasks must have sufficient technical context
-- **Gate 3 — Code Review**: Adversarial review (minimum 3 findings, score 0-100, blocks merge if < 50)
+```mermaid
+graph TB
+    subgraph Telegram["Telegram Interface"]
+        TG["Bot (Grammy)"]
+    end
 
-Gates can be bypassed with explicit user override via inline Telegram buttons.
+    subgraph Composers["Command Composers (10 modules)"]
+        Help["help.ts"]
+        Tasks["tasks.ts"]
+        Exec["execution.ts"]
+        Plan["planning.ts"]
+        Mem["memory-cmds.ts"]
+        Qual["quality.ts"]
+        Prof["profile.ts"]
+        Proj["project.ts"]
+        Util["utilities.ts"]
+        Msg["zz-messages.ts"]
+    end
 
-### Multi-Project Management
-Manage multiple projects from a single Telegram bot:
+    subgraph Core["Core Engine"]
+        Relay["relay.ts\n(243 lines)"]
+        Loader["loader.ts\n(auto-discover)"]
+        BotCtx["bot-context.ts\n(shared deps)"]
+        TopicCfg["topic-config.ts"]
+    end
 
-- `/project create <name>` to create a new project
-- Topic-based routing: each Telegram forum topic maps to a project
-- All commands auto-scope to the active project
-- Separate workflows, metrics, and retrospectives per project
-- Cross-project improvement propagation via voting mechanism
+    subgraph Pipeline["Agent Pipeline"]
+        Orch["orchestrator.ts"]
+        DAG["dag-executor.ts"]
+        Super["supervisor.ts"]
+        BB["blackboard.ts"]
+        Gates["gates.ts +\ngate-evaluator.ts"]
+        FanOut["fan-out.ts +\nworktree.ts"]
+    end
 
-### Document Sharding
-Large documents (PRDs, architecture) are split into indexed sections:
+    subgraph Agents["BMad Agents"]
+        Analyst["Mary (Analyst)"]
+        PM["John (PM)"]
+        Arch["Winston (Architect)"]
+        Dev["Amelia (Dev)"]
+        QA["Quinn (QA)"]
+        SM["Bob (Scrum Master)"]
+    end
 
-- Only relevant sections loaded into agent context (saves tokens)
-- Cross-references between document sections
-- Task execution automatically enriched with relevant document shards
+    subgraph Infra["Infrastructure"]
+        Supa["Supabase\n(15 tables, 4 Edge Fns)"]
+        MCP["MCP Memory Server"]
+        PM2["PM2 (5 services)"]
+        CI["GitHub Actions\n(self-hosted)"]
+        Dash["Dashboard\n(port 3456)"]
+    end
 
-### Continuous Improvement
-The system improves itself through data-driven retrospectives:
+    TG --> Relay
+    Relay --> Loader
+    Loader --> Composers
+    Composers --> BotCtx
+    BotCtx --> Pipeline
+    Orch --> DAG
+    DAG --> Super
+    Orch --> BB
+    Orch --> Gates
+    DAG --> FanOut
+    Pipeline --> Agents
+    Agents --> Supa
+    Agents --> CI
+```
 
-- Sprint metrics: completion rate, avg delivery time, first-pass rate
-- Multi-sprint pattern analysis across projects
-- Retro actions automatically propose workflow changes
-- Feedback loop: recurring retro patterns become permanent agent instructions
-- Cross-project voting: when 2+ projects suggest the same improvement, it promotes to reference template
-- Dynamic user profiling: learns communication style, activity patterns, autonomy level
-- Workflow config evolves based on evidence, not assumptions
+### Data Flow
 
-### Autonomous Pipelines
-- `/orchestrate` chains agents in configurable pipelines (DEFAULT, QUICK, REVIEW)
-- `/autopipeline` runs end-to-end without user intervention (PRD → dev → review → done)
-- `/planify` proactively analyzes backlog and suggests priority reordering
-- Structured JSON message passing between agents (typed schemas per role)
-- Dynamic pipeline selection based on task type and priority
+```mermaid
+sequenceDiagram
+    participant U as User (Telegram)
+    participant B as Bot
+    participant S as Supabase
+    participant O as Orchestrator
+    participant A as Agents (Claude Code)
+    participant G as GitHub
 
-### Blackboard Architecture
-Shared structured workspace for multi-agent collaboration:
+    U->>B: /orchestrate 42
+    B->>S: Load task, memory, PRD
+    B->>O: Start pipeline (DEFAULT)
 
-- 5 sections: spec, plan, tasks, implementation, verification
-- JSONB storage with optimistic locking and versioning
-- Role-based write authorization (agents only write their sections)
-- Gate Evaluator: LLM-based quality checks at each gate (score 0-100)
-- Adversarial Verifier: clean room spec-vs-implementation drift detection
-- Traceability report: FR → tasks → tests → files mapping
+    rect rgb(40, 40, 60)
+        Note over O,A: Pipeline Execution
+        O->>A: Analyst → feasibility + risks
+        O->>A: PM → subtasks + priorities
+        O->>A: Architect → design + decisions
+        O->>A: Dev → code + tests (in worktree)
+        O->>A: QA → review + score
+    end
+
+    A->>G: Branch + PR
+    G->>G: CI checks (self-hosted runner)
+    G-->>U: PR notification
+    U->>G: Merge
+    G->>B: Deploy (git pull + PM2 restart)
+    B-->>U: Deploy notification
+```
+
+## BMad Methodology
+
+### 6 Specialized Agents
+
+Each agent has a distinct persona, YAML-defined capabilities, and dedicated Claude Code CLI flags (model, effort, budget).
+
+| Agent | Persona | Role | Model |
+|-------|---------|------|-------|
+| Mary | Analyst | Market research, feasibility, domain expertise | Sonnet |
+| John | PM | PRD creation, task decomposition, priorities | Sonnet |
+| Winston | Architect | Technical design, architecture decisions | Opus |
+| Amelia | Dev | Code execution, test-driven implementation | Opus |
+| Quinn | QA | Test automation, code review, scoring | Sonnet |
+| Bob | Scrum Master | Sprint planning, retrospectives, metrics | Haiku |
+
+### 3 Quality Gates
+
+```mermaid
+flowchart LR
+    G1["Gate 1\nPRD Approval"]
+    G2["Gate 2\nArchitecture"]
+    G3["Gate 3\nCode Review"]
+    Merge["✅ Merge"]
+
+    G1 -->|approved| G2
+    G2 -->|validated| G3
+    G3 -->|score ≥ 50\n3+ findings| Merge
+
+    G1 -.->|reject| G1
+    G3 -.->|fail| G3
+```
+
+- **Gate 1** — No execution without an approved PRD
+- **Gate 2** — Tasks must have sufficient technical context
+- **Gate 3** — Adversarial code review (minimum 3 findings, score 0-100, blocks merge if < 50)
+- Gates can be bypassed with explicit user override via inline Telegram buttons
+
+### Pipelines
+
+| Pipeline | Agents | Auto-selected when |
+|----------|--------|--------------------|
+| DEFAULT | analyst → pm → architect → dev → qa | Standard features |
+| QUICK | dev → qa | Bugs, fixes, docs, simple P3 tasks |
+| REVIEW | qa → architect | Review, audit, refactor tasks |
+
+Dynamic pipeline selection based on task title, description keywords, and priority. Manual override available.
+
+### Workflow
+
+```mermaid
+stateDiagram-v2
+    [*] --> Request
+    Request --> Decomposition
+    Decomposition --> Validation
+    Decomposition --> Execution: auto-validated
+    Validation --> Execution
+    Validation --> Decomposition: rework
+    Execution --> Review
+    Execution --> Execution: checkpoint failed
+    Review --> Closure
+    Review --> Execution: rework
+    Closure --> [*]
+```
+
+Defined in `config/workflow.yaml`. Each step has configurable checkpoints (off / light / strict) with retry policies.
+
+## Key Features
 
 ### Parallel Execution
+
 DAG-based parallel scheduling for multi-agent pipelines:
 
-- Independent agents run concurrently (e.g., analyst + PM)
-- Fan-out N Dev agents on subtasks, each in isolated git worktree
-- Deterministic TypeScript supervisor (zero LLM cost): retry/skip/escalate
+- Independent agents run concurrently (e.g., analyst + PM in parallel)
+- Fan-out N Dev agents on subtasks, each in an isolated git worktree
+- Deterministic TypeScript supervisor: retry / skip / escalate (zero LLM cost)
 - Semaphore-gated concurrency (default max 3)
-- Speedup ratio tracking via ParallelMetrics
+- Activate with `--parallel` flag
 
-### Smart Notifications
-Proactive notification system with batching and quiet hours:
+### Blackboard Architecture
 
-- All notifications route through a batching queue
-- Flush after 5min interval or 5-message threshold
-- Quiet hours (default 20h-9h, timezone-aware) queue non-critical notifications
-- Critical alerts bypass quiet hours
-- Inline action buttons: start/complete tasks, promote ideas, view PRs
-- Morning digest: accumulated notifications flushed when quiet hours end
-- Per-type preferences via `/notify` command
+Shared structured workspace for multi-agent collaboration:
 
-### Cost Tracking
-Token usage monitoring across agent executions:
+```mermaid
+flowchart TB
+    subgraph Blackboard["Blackboard (JSONB, versioned)"]
+        Spec["spec"]
+        Plan["plan"]
+        TasksB["tasks"]
+        Impl["implementation"]
+        Verif["verification"]
+    end
 
-- Per-agent and per-task cost estimation
-- Sprint cost aggregation
-- `/cost` command for breakdown view
+    A1["Analyst"] -->|writes| Spec
+    A2["PM"] -->|writes| Plan
+    A2 -->|writes| TasksB
+    A3["Dev"] -->|writes| Impl
+    A4["QA"] -->|writes| Verif
+
+    GE["Gate Evaluator\n(score 0-100)"] -->|checks| Blackboard
+    AV["Adversarial Verifier\n(spec drift)"] -->|audits| Blackboard
+```
+
+- Optimistic locking with concurrent write retry
+- Role-based write authorization (agents only write their sections)
+- Gate Evaluator: LLM-based quality checks with evaluate-rework loop (max 2 iterations)
+- Adversarial Verifier: clean room spec-vs-implementation drift detection
+- Traceability report: FR → tasks → tests → files
+- Activate with `--blackboard` flag
 
 ### Intelligent Memory
+
 - Importance scoring with temporal decay (half-life 70 days)
 - Auto-classification via GPT-4o-mini (facts, goals, ideas)
 - Semantic deduplication and contradiction detection
 - Ideas pipeline: capture → review → promote to task or archive
 - MCP server for Claude Code sessions (search, list, capture)
 
-## Quick Start
+### Smart Notifications
 
-### Prerequisites
+- All notifications route through a batching queue
+- Flush after 5min interval or 5-message threshold
+- Quiet hours (default 20h-9h, timezone-aware) queue for morning digest
+- Critical alerts bypass quiet hours
+- Inline action buttons: start/complete tasks, promote ideas, view PRs
+- Per-type preferences via `/notify`
 
-- **[Bun](https://bun.sh)** runtime (`curl -fsSL https://bun.sh/install | bash`)
-- **[Claude Code](https://claude.ai/claude-code)** CLI installed and authenticated
-- A **Telegram** account
+### Continuous Improvement
 
-### Guided Setup (Recommended)
+- Sprint metrics: velocity, completion rate, rework rate, cycle time
+- Multi-sprint pattern analysis across projects
+- Retrospective actions automatically propose workflow changes
+- Feedback loop: recurring retro patterns become permanent agent instructions
+- Cross-project improvement propagation via voting
+- Dynamic user profiling: learns communication style and autonomy level
 
-```bash
-git clone https://github.com/godagoo/claude-telegram-relay.git
-cd claude-telegram-relay
-claude
+### Cost Tracking
+
+- Per-agent and per-task token usage tracking
+- Multi-model pricing (Opus $15/$75, Sonnet $3/$15, Haiku $0.80/$4 per 1M tokens)
+- Sprint cost aggregation
+- Pre-implementation cost estimation via `/estimate`
+
+### Multi-Project Management
+
+- Topic-based routing: each Telegram forum topic maps to a project
+- All commands auto-scope to the active project
+- Separate workflows, metrics, and retrospectives per project
+- Cross-project improvement propagation
+
+### Document Sharding
+
+Large documents (PRDs, architecture specs) are split into indexed sections. Only relevant sections are loaded into agent context, saving tokens significantly.
+
+## Extending the Bot
+
+Adding a new command requires a single file in `src/commands/`. The loader auto-discovers it.
+
+```mermaid
+flowchart LR
+    File["src/commands/my-cmd.ts"] --> Loader["loader.ts\n(Bun Glob scan)"]
+    Loader --> Mount["bot.use(errorBoundary, composer)"]
+    Mount --> Ready["Command available"]
 ```
 
-Claude Code reads `CLAUDE.md` and walks you through setup phase by phase.
+**3 steps to add a command:**
 
-### Manual Setup
+```typescript
+// src/commands/my-cmd.ts
+import { Composer, Context } from "grammy";
+import type { BotContext } from "../bot-context.ts";
 
-```bash
-git clone https://github.com/godagoo/claude-telegram-relay.git
-cd claude-telegram-relay
-bun run setup          # Install deps, create .env
-# Edit .env with your API keys
-bun run test:telegram  # Verify bot token
-bun run test:supabase  # Verify database
-bun run start          # Start the bot
+export default function myCommands(bctx: BotContext): Composer<Context> {
+  const composer = new Composer<Context>();
+  const { sendResponse, supabase } = bctx;
+
+  composer.command("mycommand", async (ctx) => {
+    await sendResponse(ctx, "It works!");
+  });
+
+  return composer;
+}
 ```
+
+1. Create `src/commands/my-cmd.ts` exporting a factory `(BotContext) => Composer`
+2. Register commands inside the Composer using `composer.command()` or `composer.on()`
+3. Restart the bot — the loader picks it up automatically
+
+No changes to `relay.ts` needed. See [ADR-007](docs/adr/007-composer-extensibility.md) for design rationale.
 
 ## Telegram Commands
 
-### Workflow BMad
-
-| Phase | Command | Agent | Description |
-|-------|---------|-------|-------------|
-| Analyse | /prd \<description\> | John (PM) | Create a Product Requirements Document |
-| Planification | /plan \<description\> | John (PM) | Decompose into sub-tasks |
-| Execution | /exec \<id\> | Amelia (Dev) | Launch autonomous code agent |
-| Qualite | /metrics [sprint] | Bob (SM) | Sprint metrics |
-| Qualite | /retro [sprint] | Bob (SM) | Retrospective analysis |
-| Qualite | /patterns | Mary (Analyst) | Multi-sprint trend analysis |
-| Qualite | /alerts | Quinn (QA) | Proactive issue detection |
-| Orchestration | /orchestrate \<id\> | All agents | Multi-agent pipeline |
-| Orchestration | /autopipeline \<id\> | All agents | Autonomous end-to-end |
-| Planification | /planify | — | Proactive backlog analysis |
-| Process | /workflow | — | View full BMad process |
-| Process | /agents | — | List all agents and capabilities |
-
-### Backlog & Sprint
+### Workflow
 
 | Command | Description |
 |---------|-------------|
-| /task \<title\> | Add a task to backlog |
-| /backlog [project] | View backlog |
-| /sprint [id] | Sprint status |
-| /start \<id\> | Start a task |
-| /done \<id\> | Complete a task |
+| `/prd <description>` | Create, list, view, approve, or reject a PRD |
+| `/plan <description>` | Decompose request into subtasks |
+| `/planify` | Proactive backlog analysis and priority reordering |
+| `/exec <id>` | Launch Claude Code agent (requires Gate 1 approval) |
+| `/orchestrate <id>` | Full multi-agent pipeline (`--blackboard`, `--parallel`) |
+| `/autopipeline <id>` | Autonomous end-to-end pipeline |
+| `/workflow` | View BMad process overview |
+| `/agents` | List all agents and capabilities |
 
-### Projects
+### Tasks & Sprint
 
 | Command | Description |
 |---------|-------------|
-| /projects | List all projects |
-| /project create \<name\> | Create new project |
-| /project switch \<slug\> | Switch active project |
-| /project archive \<slug\> | Archive a project |
-| /project topic \<slug\> | Link topic to project |
+| `/task <title>` | Create task (`--desc`, `--priority`, `--hours`) |
+| `/backlog` | View backlog |
+| `/sprint` | Sprint status with progress bar |
+| `/start <id>` | Mark task in progress |
+| `/done <id>` | Complete a task |
+
+### Quality & Metrics
+
+| Command | Description |
+|---------|-------------|
+| `/metrics [sprint]` | Sprint metrics (velocity, rework, cycle time) |
+| `/retro <sprint>` | Generate retrospective |
+| `/patterns` | Multi-sprint pattern analysis |
+| `/alerts` | Check anomalies (stuck tasks, rework spikes) |
+| `/cost` | Token usage and cost breakdown |
+| `/estimate` | Pre-implementation cost estimation |
+| `/monitor` | Production monitoring (response time, spawn stats) |
 
 ### Intelligence
 
 | Command | Description |
 |---------|-------------|
-| /brain | Memory synthesis: patterns, health, ideas, suggestions |
-| /ideas | Ideas pipeline: list, add, review, promote, archive |
-| /cost | Token usage and cost tracking (per sprint or total) |
-| /notify | Notification preferences: quiet hours, on/off per type |
+| `/brain` | Memory synthesis: patterns, health, ideas, suggestions |
+| `/ideas` | Ideas pipeline: list, add, review, promote, archive |
+| `/remind <msg>` | Set a reminder |
+| `/profile` | User profile and insights |
+| `/notify` | Notification preferences (quiet hours, per-type toggle) |
+
+### Projects
+
+| Command | Description |
+|---------|-------------|
+| `/projects` | List all projects |
+| `/project` | Create, switch, archive, or link topic to a project |
 
 ### Utilities
 
 | Command | Description |
 |---------|-------------|
-| /status | Server health (CPU, RAM, PM2, messages) |
-| /remind \<time\> \<text\> | Set a reminder |
-| /speak [text] | Text-to-speech |
-| /profile | User profile insights |
-| /export | Export all data as JSON |
-| /help | Command reference |
+| `/help` | Command reference |
+| `/status` | System health (CPU, RAM, PM2, messages) |
+| `/speak <text>` | Text-to-speech |
+| `/export` | Export all data as JSON |
+| `/feature` | Feature flags (list, enable, disable) |
+| `/rollback` | Rollback to previous commit |
 
-## Architecture
+## Infrastructure
 
+### PM2 Services
+
+| Service | Schedule | Purpose |
+|---------|----------|---------|
+| `claude-relay` | Always on | Main Telegram bot |
+| `claude-dashboard` | Always on | Kanban board (port 3456) |
+| `claude-alert-cron` | Hourly | Anomaly detection + morning digest |
+| `claude-autonomy-cron` | Daily 8h | Autonomous task creation from codebase scan |
+| `claude-system-alerts` | Every 15min | System health monitoring |
+
+### CI/CD
+
+Self-hosted GitHub Actions runner on the production server.
+
+```mermaid
+flowchart LR
+    PR["Pull Request"] --> CI["CI Job\n(type check, 763 tests,\ndoc freshness, E2E)"]
+    CI -->|pass| Merge["Merge to master"]
+    Merge --> Deploy["Deploy Job\n(git pull, PM2 restart)"]
+    Deploy --> Smoke["Smoke Test\n(5 checks, 10s each)"]
+    Smoke -->|pass| Done["✅ Live"]
+    Smoke -->|fail| Rollback["⬅️ Auto-rollback"]
+    Rollback --> Done
 ```
-src/
-  relay.ts                # Main bot — commands, handlers, Claude CLI integration
-  bmad-agents.ts          # Agent registry — 6 BMad agents mapped to commands
-  bmad-prompts.ts         # YAML-powered system prompts with context-aware instructions
-  gates.ts                # Gate enforcement — PRD, Architecture, Code Review
-  code-review.ts          # Adversarial code review with scoring
-  agent.ts                # Sub-agent execution — branch/PR/CI workflow
-  tasks.ts                # Task CRUD — backlog, sprints, priorities
-  projects.ts             # Multi-project management with topic routing
-  document-sharding.ts    # Document splitting, indexing, context loading
-  workflow.ts             # Configurable workflow engine (workflow.yaml)
-  workflow-propagation.ts # Cross-project improvement proposals + voting
-  patterns.ts             # Multi-sprint pattern analysis
-  alerts.ts               # Proactive issue detection
-  memory.ts               # Facts, goals, semantic search (pgvector)
-  orchestrator.ts         # Multi-agent pipeline orchestrator
-  auto-pipeline.ts        # Autonomous end-to-end pipeline
-  story-files.ts          # Structured task specs (acceptance criteria, steps, tests)
-  feedback-loop.ts        # Retro-driven learning → agent prompt enrichment
-  proactive-planner.ts    # Daily backlog analysis + recommendations
-  prd.ts                  # PRD generation and lifecycle
-  notifications.ts        # Proactive notifications routed through queue
-  notification-queue.ts   # Batching queue: flush, digest, inline buttons, quiet hours
-  notification-prefs.ts   # Notification preferences: quiet hours, per-type config
-  profile-evolution.ts    # Dynamic user profiling
-  cost-tracking.ts        # Token usage tracking and cost estimation
-  blackboard.ts           # Shared JSONB workspace with optimistic locking
-  dag-executor.ts         # DAG-based parallel agent scheduler
-  semaphore.ts            # Counting semaphore for concurrency control
-  supervisor.ts           # Deterministic agent supervisor (retry/skip/escalate)
-  fan-out.ts              # Subtask parallelism with git worktrees
-  worktree.ts             # Git worktree lifecycle management
-  gate-evaluator.ts       # LLM-based quality checks at pipeline gates
-  adversarial-verifier.ts # Spec-vs-implementation drift detection
-  agent-schemas.ts        # Typed JSON schemas per agent role
-  autonomy-scanner.ts     # Proactive task creation from codebase analysis
-  autonomy-cron.ts        # Scheduled autonomy runner (daily via PM2)
-  transcribe.ts           # Voice transcription (Groq / local Whisper)
-  tts.ts                  # Text-to-speech (Piper)
-  alert-cron.ts           # Hourly scheduled alert runner + morning digest
 
-config/
-  bmad-templates/         # BMad Method v6 templates
-    agents/               # Agent YAML definitions (persona, capabilities, menus)
-    workflows/            # Step-file workflows (analysis, planning, solutioning)
-    tasks/                # Reusable task templates
-    data/                 # Reference data
-  workflow.yaml           # Configurable workflow (steps, transitions, checkpoints)
-  profile.md              # User personalization
+- Feature branch workflow enforced: branch → PR → CI → merge
+- `/exec` creates branches and PRs automatically
+- Adversarial code review at Gate 3
+- Deploy notification sent to Telegram
+- Conventional commit format enforced by pre-push hook
 
-dashboard/
-  server.ts               # HTTP server (port 3456) with API proxy
-  index.html              # Kanban board + PRDs + metrics + retros
+### Dashboard
 
-db/
-  schema.sql              # Complete Supabase schema
-
-supabase/functions/
-  embed/index.ts          # Auto-embedding Edge Function
-  search/index.ts         # Semantic search Edge Function
-  classify-thought/       # Message classification (GPT-4o-mini)
-  memory-mcp/             # Memory CRUD API for MCP server
-
-mcp/
-  memory-server.ts        # Local MCP server for Claude Code sessions
-
-scripts/
-  doc-freshness.ts        # CI documentation freshness checker
-  doc-check.ts            # Interactive doc maintenance tool
-  wait-ci.sh              # CI status verification after PR creation
-
-docs/
-  adr/                    # Architecture Decision Records
-```
+Kanban board at port 3456 with:
+- Project filter
+- Sprint progress visualization
+- Task cards with status
+- API: `/api/projects`, `/api/tasks`, `/api/prds`, `/api/health`
 
 ## Database
 
-### Tables
+15 tables in Supabase with pgvector for semantic search.
+
 | Table | Purpose |
 |-------|---------|
-| messages | Conversation history with pgvector embeddings |
-| memory | Facts and goals with embeddings |
-| tasks | Backlog with BMad story fields (AC, subtasks, dev notes) |
-| prds | Product Requirements Documents with status lifecycle |
-| projects | Multi-project registry with topic mapping |
-| document_shards | Indexed document sections for efficient context |
-| sprint_metrics | Quantitative sprint data |
-| retros | Retrospective analyses and accepted actions |
-| workflow_logs | Transition tracking for workflow engine |
-| workflow_proposals | Cross-project improvement proposals |
-| feedback_rules | Learned patterns from retros → agent prompt enrichment |
-| cost_tracking | Token usage and cost per agent execution |
-| blackboard | Shared JSONB workspace for multi-agent pipelines |
-| logs | System logs |
+| `messages` | Conversation history with embeddings |
+| `memory` / `memory_archive` | Facts, goals, ideas with importance scoring |
+| `tasks` | Backlog with BMad story fields (AC, subtasks, dev notes) |
+| `prds` | Product Requirements Documents lifecycle |
+| `projects` | Multi-project registry with topic mapping |
+| `sprint_metrics` | Quantitative sprint data |
+| `retros` | Retrospective analyses and accepted actions |
+| `workflow_logs` | Transition tracking |
+| `feedback_rules` | Learned patterns from retros |
+| `workflow_proposals` | Cross-project improvement proposals |
+| `document_shards` | Indexed document sections |
+| `cost_tracking` | Token usage and cost per agent |
+| `blackboard` | Shared JSONB workspace for pipelines |
+| `logs` | System logs |
 
 ### Edge Functions
-- **embed** — Auto-generates embeddings on INSERT (DB webhooks)
-- **search** — Semantic search endpoint
-- **classify-thought** — GPT-4o-mini message classification with idea detection
-- **memory-mcp** — Memory CRUD + semantic search API for MCP server
 
-## Process Management
+| Function | Purpose |
+|----------|---------|
+| `embed` | Auto-generates embeddings on INSERT (via DB webhooks) |
+| `search` | Semantic search endpoint |
+| `classify-thought` | GPT-4o-mini message classification with idea detection |
+| `memory-mcp` | Memory CRUD + semantic search API for MCP server |
 
-Five services managed by PM2:
+## Project Structure
 
-| Service | Description |
-|---------|-------------|
-| claude-relay | Main Telegram bot |
-| claude-dashboard | Kanban board (port 3456) |
-| claude-alert-cron | Hourly anomaly detection |
-| claude-autonomy-cron | Daily autonomous task scanner |
-| claude-system-alerts | System health monitoring (every 15min) |
-
-```bash
-npx pm2 status                      # Check services
-npx pm2 logs claude-relay           # View logs
-npx pm2 restart claude-relay        # Restart bot
-npx pm2 start ecosystem.config.cjs  # Start all
 ```
+src/                        54 TypeScript modules
+  relay.ts                  Bot entrypoint (243 lines)
+  bot-context.ts            Shared dependencies for Composers
+  loader.ts                 Auto-discovers Composer modules
+  topic-config.ts           Per-topic system prompts
+  commands/                 10 Composer modules (33 commands + 4 handlers)
+  orchestrator.ts           Multi-agent pipeline engine
+  blackboard.ts             Shared workspace (JSONB, versioned)
+  dag-executor.ts           Parallel agent scheduler
+  supervisor.ts             Deterministic retry/skip/escalate
+  fan-out.ts + worktree.ts  Parallel dev agents in git worktrees
+  memory.ts                 Facts, goals, ideas, semantic search
+  gates.ts                  3-gate quality enforcement
+  gate-evaluator.ts         LLM-based gate scoring
+  adversarial-verifier.ts   Spec drift detection
+  bmad-agents.ts            6 agent definitions (YAML templates)
+  agent.ts                  Claude Code CLI integration
+  cost-tracking.ts          Multi-model token accounting
+  workflow.ts               Configurable state machine
+  notifications.ts          Proactive notification routing
+  notification-queue.ts     Batching, quiet hours, digests
+  ...                       (20+ more modules)
 
-## CI/CD
+config/
+  workflow.yaml             Workflow state machine
+  profile.md                User personalization
+  features.json             Feature flags
+  bmad-templates/           Agent YAML definitions + workflows
 
-Feature branch workflow enforced at all levels:
-
-1. `/exec` creates a feature branch
-2. Agent writes code + tests
-3. Adversarial code review (Gate 3)
-4. Push + PR creation
-5. CI checks on self-hosted GitHub Actions runner
-6. Merge to master triggers deploy via self-hosted runner (git pull + PM2 restart + smoke test)
-7. Auto-rollback if smoke test fails, deploy notification sent to Telegram
+dashboard/                  Kanban board (server.ts + index.html)
+db/schema.sql               Authoritative database schema
+mcp/memory-server.ts        MCP memory server for Claude Code
+supabase/functions/         4 Edge Functions
+tests/                      763 tests (unit + integration + E2E)
+scripts/                    Deploy, setup, CI utilities
+docs/adr/                   7 Architecture Decision Records
+```
 
 ## Resilience
 
@@ -356,22 +537,38 @@ Feature branch workflow enforced at all levels:
 - Graceful shutdown with Supabase session cleanup
 - PM2 auto-restart (max 10 with 5s delay)
 - Heartbeat during long agent operations
-- Offset management prevents crash loops on startup
+- Auto-rollback on failed deploys
+- Feature flags for safe rollout
 
-## The Full Version
+## Quick Start
 
-This free relay covers the essentials. The full version in the [AI Productivity Hub](https://skool.com/autonomee) unlocks:
+**Prerequisites:** [Bun](https://bun.sh), [Claude Code](https://claude.ai/claude-code) CLI, a Telegram account.
 
-- 6 Specialized AI Agents via Telegram forum topics
-- VPS Deployment with hybrid mode ($2-5/month)
-- Real Integrations (Gmail, Calendar, Notion via MCP)
-- Human-in-the-Loop actions via inline buttons
-- Voice & Phone Calls (ElevenLabs)
-- Fallback AI Models (OpenRouter, Ollama)
-- Production Infrastructure (watchdog, auto-deploy)
+```bash
+git clone https://github.com/EdouardZemb/claude-telegram-relay.git
+cd claude-telegram-relay
+claude
+```
 
-**YouTube:** [youtube.com/@GodaGo](https://youtube.com/@GodaGo)
-**Community:** [skool.com/autonomee](https://skool.com/autonomee)
+Claude Code reads `CLAUDE.md` and walks you through 5 setup phases: Telegram bot, Supabase database, personalization, testing, and PM2 services.
+
+<details>
+<summary>Manual setup (without Claude Code)</summary>
+
+```bash
+bun run setup          # Install deps, create .env template
+# Edit .env with your API keys
+bun run test:telegram  # Verify bot token
+bun run test:supabase  # Verify database
+bun run start          # Start the bot
+```
+
+</details>
+
+```bash
+bun test               # All 763 tests
+bun run smoke          # Production smoke tests
+```
 
 ## License
 
@@ -379,4 +576,4 @@ MIT
 
 ---
 
-Built by [Goda Go](https://youtube.com/@GodaGo)
+Originally based on the relay template by [Goda Go](https://youtube.com/@GodaGo).

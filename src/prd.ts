@@ -192,18 +192,16 @@ export async function getPRD(
   supabase: SupabaseClient,
   idPrefix: string
 ): Promise<PRD | null> {
-  const { data, error } = await supabase
+  const { data: allPrds, error } = await supabase
     .from("prds")
-    .select("*")
-    .like("id", `${idPrefix}%`)
-    .limit(1)
-    .single();
+    .select("*");
 
   if (error) {
     console.error("getPRD error:", error);
     return null;
   }
-  return data as PRD;
+  const match = (allPrds || []).find((p: { id: string }) => p.id.startsWith(idPrefix));
+  return (match as PRD) ?? null;
 }
 
 export async function getPRDs(

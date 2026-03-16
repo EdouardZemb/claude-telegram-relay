@@ -41,14 +41,14 @@ export default function execution(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const { data: matches } = await bctx.supabase
+    const { data: allExecTasks } = await bctx.supabase
       .from("tasks")
       .select("*")
-      .like("id", `${idPrefix}%`)
-      .in("status", ["backlog", "in_progress"])
-      .limit(2);
+      .in("status", ["backlog", "in_progress"]);
 
-    if (!matches || matches.length === 0) {
+    const matches = (allExecTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+
+    if (matches.length === 0) {
       await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, bctx.threadOpts(ctx));
       return;
     }
@@ -214,26 +214,26 @@ export default function execution(bctx: BotContext): Composer<Context> {
     }
 
     // Find task
-    const { data: matches } = await bctx.supabase
+    const { data: allOrchTasks } = await bctx.supabase
       .from("tasks")
       .select("*")
-      .like("id", `${idPrefix}%`)
-      .in("status", ["backlog", "in_progress"])
-      .limit(2);
+      .in("status", ["backlog", "in_progress"]);
 
-    if (!matches || matches.length === 0) {
+    const orchMatches = (allOrchTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+
+    if (orchMatches.length === 0) {
       await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, bctx.threadOpts(ctx));
       return;
     }
-    if (matches.length > 1) {
+    if (orchMatches.length > 1) {
       await ctx.reply(
-        `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+        `Plusieurs taches correspondent:\n${orchMatches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
         bctx.threadOpts(ctx)
       );
       return;
     }
 
-    const task = matches[0];
+    const task = orchMatches[0];
 
     // Resolve pipeline
     let pipeline: AgentRole[];
@@ -304,26 +304,26 @@ export default function execution(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const { data: matches } = await bctx.supabase
+    const { data: allAutoTasks } = await bctx.supabase
       .from("tasks")
       .select("*")
-      .like("id", `${idPrefix}%`)
-      .in("status", ["backlog", "in_progress"])
-      .limit(2);
+      .in("status", ["backlog", "in_progress"]);
 
-    if (!matches || matches.length === 0) {
+    const autoMatches = (allAutoTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+
+    if (autoMatches.length === 0) {
       await ctx.reply(`Aucune tache trouvee avec l'ID "${idPrefix}".`, bctx.threadOpts(ctx));
       return;
     }
-    if (matches.length > 1) {
+    if (autoMatches.length > 1) {
       await ctx.reply(
-        `Plusieurs taches correspondent:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+        `Plusieurs taches correspondent:\n${autoMatches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
         bctx.threadOpts(ctx)
       );
       return;
     }
 
-    const task = matches[0];
+    const task = autoMatches[0];
 
     await ctx.reply(
       `AUTO-PIPELINE lance pour: ${task.title}\nMode: ${mode}\nLe pipeline tourne en autonomie. Notifications a chaque phase.`,

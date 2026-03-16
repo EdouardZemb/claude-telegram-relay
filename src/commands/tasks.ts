@@ -120,14 +120,14 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     }
 
     // Find task by ID prefix
-    const { data: matches } = await bctx.supabase
+    const { data: allDoneTasks } = await bctx.supabase
       .from("tasks")
       .select("id, title")
-      .like("id", `${idPrefix}%`)
-      .neq("status", "done")
-      .limit(2);
+      .neq("status", "done");
 
-    if (!matches || matches.length === 0) {
+    const matches = (allDoneTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+
+    if (matches.length === 0) {
       await ctx.reply(`Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`, bctx.threadOpts(ctx));
       return;
     }
@@ -159,23 +159,23 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     const blocked = bctx.commandGuard(ctx, "start");
     if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
 
-    const { data: matches } = await bctx.supabase
+    const { data: allStartTasks } = await bctx.supabase
       .from("tasks")
       .select("id, title")
-      .like("id", `${idPrefix}%`)
-      .eq("status", "backlog")
-      .limit(2);
+      .eq("status", "backlog");
 
-    if (!matches || matches.length === 0) {
+    const startMatches = (allStartTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+
+    if (startMatches.length === 0) {
       await ctx.reply(`Aucune tache backlog trouvee avec l'ID "${idPrefix}".`, bctx.threadOpts(ctx));
       return;
     }
-    if (matches.length > 1) {
-      await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, bctx.threadOpts(ctx));
+    if (startMatches.length > 1) {
+      await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${startMatches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, bctx.threadOpts(ctx));
       return;
     }
 
-    const updated = await updateTaskStatus(bctx.supabase, matches[0].id, "in_progress");
+    const updated = await updateTaskStatus(bctx.supabase, startMatches[0].id, "in_progress");
     if (updated) {
       await ctx.reply(`En cours: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
