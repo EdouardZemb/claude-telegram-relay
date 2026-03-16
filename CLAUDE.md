@@ -12,7 +12,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Main bot: message handling, 28 Telegram commands, voice, photos, docs |
+| `relay.ts` | Main bot: message handling, 32 Telegram commands, voice, photos, docs |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
@@ -51,6 +51,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `autonomy-scanner.ts` | Proactive task creation: scans codebase for improvements, creates auto-generated tasks |
 | `autonomy-cron.ts` | Scheduled autonomy runner: daily scan trigger via PM2 cron |
 | `alert-cron.ts` | Hourly scheduled alert runner + memory archival + morning digest flush |
+| `feature-flags.ts` | Feature flags: file-based toggle system, hot-reload, /feature command |
+| `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets and historical data |
 
 ### Telegram Commands
 
@@ -85,6 +87,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/brain` | Memory synthesis: patterns, health, ideas, suggestions |
 | `/ideas` | Ideas pipeline: list, add, review, promote, archive |
 | `/notify` | Notification preferences: status, quiet hours, on/off per type, immediate mode |
+| `/estimate` | Pre-implementation cost estimation per sprint/pipeline |
+| `/feature` | Feature flags: list, enable, disable |
+| `/rollback` | Rollback to previous commit |
+| `/monitor` | Production monitoring: response time, spawn stats, module errors |
 
 ### Database (Supabase)
 
@@ -138,6 +144,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **CLI Optimization (S28):** Centralized `spawnClaude()` function in `agent.ts` replaces 5 duplicated spawn calls. All CLI flags are conditionally constructed: `--output-format json` + `--json-schema` for structured output (replaces <<<JSON>>> markers as primary, kept as fallback), `--effort` per agent role (low/medium/high/max), `--model` + `--fallback-model` for model routing (Opus for architect/dev, Sonnet for analyst/pm/qa, Haiku for sm), `--max-budget-usd` as per-agent cost guard, `--append-system-prompt` for system/task prompt separation, `-w` for worktree isolation (exec/code-review), `--from-pr` for code review PR context. Multi-model pricing in `cost-tracking.ts` (Opus $15/$75, Sonnet $3/$15, Haiku $0.80/$4 per 1M tokens). Agent CLI config (effort, model, budget) defined in `bmad-agents.ts` as source of truth. Backward compatible: all flags are optional, omitted when not set.
 
+**Production Readiness (S29):** Post-deploy validation pipeline. Smoke tests (`bun run smoke`) run 5 checks: PM2 services, Dashboard health, Supabase connectivity, Claude CLI, Telegram bot. Each with 10s timeout, report sent to Telegram. Auto-rollback in deploy.yml if smoke fails (`scripts/rollback.sh`). Feature flags in `config/features.json` with `/feature` command (list/enable/disable, hot-reload). Pre-implementation cost estimation (`/estimate <n> [pipeline]`) based on agent budgets from bmad-agents.ts with historical comparison. Production monitoring in alerts.ts: response time p50/p95/p99 (ring buffer), spawn success/failure rate per agent role, module error counters (1h window). `/monitor` command. `system-alerts.sh` activated via PM2 (every 15min) with 1h cooldown per alert type. Post-merge checklist generation from sprint tasks. `/rollback` command for manual rollback.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -147,13 +155,14 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 - `claude-dashboard` — Kanban board (port 3456)
 - `claude-autodeploy` — CI/CD auto-deploy
 - `claude-alert-cron` — Hourly anomaly detection
+- `claude-system-alerts` — System health monitoring (every 15min)
 
 **Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health
 
 ### Project Structure
 
 ```
-src/                    40 TypeScript modules (core logic)
+src/                    42 TypeScript modules (core logic)
 dashboard/              Kanban board (server.ts + index.html)
 config/
   profile.md            User profile
@@ -162,7 +171,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  711 tests (unit + integration)
+tests/                  749 tests (unit + integration)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -170,7 +179,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (711 tests, all must pass before merge)
+- Tests: `bun test` (749 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

@@ -35,10 +35,28 @@ send_alert() {
 }
 
 ALERTS=""
+COOLDOWN_DIR="/tmp/system-alerts-cooldown"
+mkdir -p "$COOLDOWN_DIR"
+
+# Cooldown: 1h per alert type
+check_cooldown() {
+    local alert_type="$1"
+    local cooldown_file="$COOLDOWN_DIR/$alert_type"
+    if [ -f "$cooldown_file" ]; then
+        local last_sent=$(cat "$cooldown_file")
+        local now=$(date +%s)
+        local diff=$((now - last_sent))
+        if [ "$diff" -lt 3600 ]; then
+            return 1  # Still in cooldown
+        fi
+    fi
+    date +%s > "$cooldown_file"
+    return 0
+}
 
 # Check disk usage
 DISK_USAGE=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
-if [ "$DISK_USAGE" -gt 85 ]; then
+if [ "$DISK_USAGE" -gt 85 ] && check_cooldown "disk"; then
     ALERTS="${ALERTS}DISQUE: ${DISK_USAGE}% utilise (seuil: 85%)\n"
 fi
 
@@ -46,7 +64,7 @@ fi
 MEM_TOTAL=$(free -m | awk 'NR==2 {print $2}')
 MEM_USED=$(free -m | awk 'NR==2 {print $3}')
 MEM_PCT=$((MEM_USED * 100 / MEM_TOTAL))
-if [ "$MEM_PCT" -gt 90 ]; then
+if [ "$MEM_PCT" -gt 90 ] && check_cooldown "memory"; then
     ALERTS="${ALERTS}MEMOIRE: ${MEM_PCT}% utilisee (${MEM_USED}/${MEM_TOTAL} MB)\n"
 fi
 
@@ -55,25 +73,31 @@ NCPU=$(nproc)
 LOAD=$(awk '{print $1}' /proc/loadavg)
 LOAD_INT=$(echo "$LOAD" | cut -d. -f1)
 THRESHOLD=$((NCPU * 2))
-if [ "$LOAD_INT" -gt "$THRESHOLD" ]; then
+if [ "$LOAD_INT" -gt "$THRESHOLD" ] && check_cooldown "load"; then
     ALERTS="${ALERTS}CHARGE: load average ${LOAD} (seuil: ${THRESHOLD})\n"
 fi
 
 # Check PM2 services
 for SERVICE in claude-relay claude-dashboard; do
     STATUS=$(npx pm2 jlist 2>/dev/null | python3 -c "import sys,json;apps=json.load(sys.stdin);[print(a['pm2_env']['status']) for a in apps if a['name']=='${SERVICE}']" 2>/dev/null || echo "unknown")
-    if [ "$STATUS" != "online" ]; then
+    if [ "$STATUS" != "online" ] && check_cooldown "service_${SERVICE}"; then
         ALERTS="${ALERTS}SERVICE: ${SERVICE} est ${STATUS}\n"
     fi
 done
 
+# Check PM2 excessive restarts (> 5 in last hour)
+TOTAL_RESTARTS=$(npx pm2 jlist 2>/dev/null | python3 -c "import sys,json;apps=json.load(sys.stdin);print(sum(a['pm2_env'].get('restart_time',0) for a in apps))" 2>/dev/null || echo "0")
+if [ "$TOTAL_RESTARTS" -gt 5 ] && check_cooldown "restarts"; then
+    ALERTS="${ALERTS}RESTARTS: ${TOTAL_RESTARTS} restarts PM2 total\n"
+fi
+
 # Check if SSH is running
-if ! systemctl is-active --quiet sshd; then
+if ! systemctl is-active --quiet sshd 2>/dev/null && check_cooldown "ssh"; then
     ALERTS="${ALERTS}SSH: le service sshd n'est pas actif\n"
 fi
 
 # Check fail2ban
-if ! systemctl is-active --quiet fail2ban; then
+if ! systemctl is-active --quiet fail2ban 2>/dev/null && check_cooldown "fail2ban"; then
     ALERTS="${ALERTS}SECURITE: fail2ban n'est pas actif\n"
 fi
 

@@ -1,6 +1,6 @@
 /**
  * @module relay
- * @description Main bot: message handling, 28 Telegram commands, voice, photos, docs.
+ * @description Main bot: message handling, 32 Telegram commands, voice, photos, docs.
  */
 
 /**
@@ -86,7 +86,7 @@ import {
   applyWorkflowSuggestions,
 } from "./workflow.ts";
 import { analyzePatterns, formatPatterns, type WorkflowSuggestion } from "./patterns.ts";
-import { runAllChecks, formatAlerts } from "./alerts.ts";
+import { runAllChecks, formatAlerts, recordResponseTime, formatMonitoringStats } from "./alerts.ts";
 import {
   proposeWorkflowChange,
   extractProposalsFromRetro,
@@ -132,6 +132,15 @@ import {
   loadFeedbackRules,
   processRetroFeedback,
 } from "./feedback-loop.ts";
+import {
+  isFeatureEnabled,
+  setFeature,
+  formatFeatures,
+} from "./feature-flags.ts";
+import {
+  estimateSprintCost,
+  formatCostEstimate,
+} from "./cost-estimate.ts";
 import {
   analyzeBacklog as analyzeBacklogProactive,
   formatPlannerResult as formatPlannerResultTg,
@@ -703,6 +712,12 @@ bot.command("help", async (ctx) => {
     "PROJETS",
     "  /projects -- Tous les projets",
     "  /project create|switch|archive -- Gerer",
+    "",
+    "PRODUCTION",
+    "  /estimate <n> [pipeline] -- Estimation cout sprint (DEFAULT/QUICK/REVIEW)",
+    "  /monitor -- Monitoring production (temps reponse, spawn, erreurs)",
+    "  /feature [list|enable|disable] -- Feature flags",
+    "  /rollback [raison] -- Rollback au commit precedent",
     "",
     "UTILITAIRES",
     "  /status -- Etat serveur",
@@ -2589,10 +2604,103 @@ bot.command("export", async (ctx) => {
   }
 });
 
+// /feature — manage feature flags (S29-T2)
+bot.command("feature", async (ctx) => {
+  const blocked = commandGuard(ctx, "feature");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+
+  const input = ctx.match?.trim() || "";
+  const parts = input.split(/\s+/);
+  const sub = parts[0]?.toLowerCase();
+
+  if (!sub || sub === "list") {
+    await ctx.reply(formatFeatures(), threadOpts(ctx));
+    return;
+  }
+
+  if (sub === "enable" && parts[1]) {
+    setFeature(parts[1], true);
+    await ctx.reply(`Feature "${parts[1]}" activee.`, threadOpts(ctx));
+    return;
+  }
+
+  if (sub === "disable" && parts[1]) {
+    setFeature(parts[1], false);
+    await ctx.reply(`Feature "${parts[1]}" desactivee.`, threadOpts(ctx));
+    return;
+  }
+
+  await ctx.reply("Usage: /feature [list|enable <flag>|disable <flag>]", threadOpts(ctx));
+});
+
+// /estimate — pre-implementation cost estimation (S29-T8)
+bot.command("estimate", async (ctx) => {
+  const blocked = commandGuard(ctx, "estimate");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+
+  const input = ctx.match?.trim() || "";
+  const parts = input.split(/\s+/);
+  const taskCount = parseInt(parts[0] || "0", 10);
+  const pipeline = parts[1]?.toUpperCase() || "DEFAULT";
+
+  if (!taskCount || taskCount < 1) {
+    await ctx.reply("Usage: /estimate <nombre_taches> [pipeline]\nPipelines: DEFAULT, QUICK, REVIEW", threadOpts(ctx));
+    return;
+  }
+
+  try {
+    const result = await estimateSprintCost(supabase, taskCount, pipeline);
+    await ctx.reply(formatCostEstimate(result), threadOpts(ctx));
+  } catch (error) {
+    console.error("Estimate error:", error);
+    await ctx.reply("Erreur lors de l'estimation.", threadOpts(ctx));
+  }
+});
+
+// /rollback — manual rollback to previous commit (S29-T5)
+bot.command("rollback", async (ctx) => {
+  const blocked = commandGuard(ctx, "rollback");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+
+  const reason = ctx.match?.trim() || "rollback manuel via Telegram";
+
+  await ctx.reply("Rollback en cours...", threadOpts(ctx));
+
+  try {
+    const { spawn } = await import("bun");
+    const proc = spawn(["bash", "./scripts/rollback.sh", reason], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stdout = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+
+    if (exitCode === 0) {
+      await ctx.reply(`Rollback termine avec succes.\n\n${stdout.trim().slice(-500)}`, threadOpts(ctx));
+    } else {
+      await ctx.reply(`Rollback echoue (exit ${exitCode}).\n\n${stdout.trim().slice(-500)}`, threadOpts(ctx));
+    }
+  } catch (error) {
+    console.error("Rollback error:", error);
+    await ctx.reply("Erreur lors du rollback.", threadOpts(ctx));
+  }
+});
+
+// /monitor — feature-level monitoring stats (S29-T11)
+bot.command("monitor", async (ctx) => {
+  const blocked = commandGuard(ctx, "monitor");
+  if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+
+  await ctx.reply(formatMonitoringStats(), threadOpts(ctx));
+});
+
 // Text messages
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
   const messageId = ctx.message.message_id;
+  const handlerStart = Date.now(); // S29: response time tracking
 
   const threadId = getThreadId(ctx);
   const topicName = getTopicName(ctx);
@@ -2632,6 +2740,7 @@ bot.on("message:text", async (ctx) => {
 
     await saveMessage("assistant", response, meta);
     await sendResponse(ctx, response);
+    recordResponseTime(Date.now() - handlerStart); // S29: record response time
     clearError(messageId);
   } catch (error) {
     console.error("Text handler error:", error);
