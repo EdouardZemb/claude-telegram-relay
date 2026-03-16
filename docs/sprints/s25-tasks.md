@@ -201,7 +201,7 @@ Adversarial (3):
 - All FR-XXX traceable to code
 - All AC-XXX traceable to tests
 
-Files: all test files, config/specs/s25-parallel-execution.md (check items), CLAUDE.md
+Files: all test files, docs/sprints/s25-parallel-execution.md (check items), CLAUDE.md
 
 
 ## Dependency Graph

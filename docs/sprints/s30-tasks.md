@@ -228,7 +228,7 @@ Adversarial (3):
 - [ ] Tous les FR-XXX tracables vers du code
 - [ ] Tous les AC-XXX tracables vers des tests
 
-Files: CLAUDE.md, config/specs/s30-cicd-e2e-testing.md (cocher les items)
+Files: CLAUDE.md, docs/sprints/s30-cicd-e2e-testing.md (cocher les items)
 
 
 ## Dependency Graph

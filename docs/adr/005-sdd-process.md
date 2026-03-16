@@ -26,5 +26,5 @@ No code is written before Gate 3 approval. Each gate requires explicit user vali
 - Traceability matrix ensures every FR has tests
 - User stays in control at each gate (can redirect before effort is spent)
 - Adds overhead for truly trivial changes (mitigated by QUICK pipeline for bugs/fixes)
-- Sprint specs in config/specs/ serve as permanent documentation of decisions
+- Sprint specs in docs/sprints/ serve as permanent documentation of decisions
 - The process itself is documented and can evolve based on retro feedback
