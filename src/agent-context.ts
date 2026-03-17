@@ -12,6 +12,7 @@ import { isFeatureEnabled } from "./feature-flags.ts";
 import { getGraph, formatGraphContext, findAffectedModules } from "./code-graph.ts";
 import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
 import { buildTaskContext } from "./document-sharding.ts";
+import { buildMemoryChains, findSimilarPastTasks } from "./memory.ts";
 
 const PROJECT_ROOT = process.env.PROJECT_DIR || process.cwd();
 
@@ -70,24 +71,30 @@ export async function buildAgentContext(
   const enhanced = isFeatureEnabled("enhanced_agent_context");
 
   try {
-    // Base fetches (always)
+    // Base fetches (always) — S41: use memory chains when flag enabled
+    const memoryFetch = isFeatureEnabled("memory_chains")
+      ? buildMemoryChains(supabase, role)
+      : fetchMemoryContext(supabase);
+
     const baseFetches: Promise<string>[] = [
-      fetchMemoryContext(supabase),
+      memoryFetch,
       fetchSprintContext(supabase, sprintId),
       fetchRecentTasks(supabase, projectId),
       loadProfile(),
     ];
 
     // S40: Enhanced fetches (parallel)
+    // S41: Add similar past tasks fetch
     const enhancedFetches: Promise<string>[] = enhanced
       ? [
           fetchTrustContext(role),
           fetchSprintMetrics(supabase, sprintId),
           fetchDocumentContext(supabase, projectId, options.taskTitle),
+          fetchSimilarTasksContext(supabase, options.taskTitle),
         ]
-      : [Promise.resolve(""), Promise.resolve(""), Promise.resolve("")];
+      : [Promise.resolve(""), Promise.resolve(""), Promise.resolve(""), Promise.resolve("")];
 
-    const [memoryCtx, sprintCtx, tasksCtx, profileCtx, trustCtx, metricsCtx, docCtx] =
+    const [memoryCtx, sprintCtx, tasksCtx, profileCtx, trustCtx, metricsCtx, docCtx, similarCtx] =
       await Promise.all([...baseFetches, ...enhancedFetches]);
 
     // S39: Code graph context
@@ -109,16 +116,18 @@ export async function buildAgentContext(
     }
 
     // Priority-based truncation with role-aware weights
+    // S41: Rebalanced shares to include similar tasks section
     const sections: Array<{ label: string; content: string; share: number }> = [];
 
-    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.25 });
+    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.23 });
     if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.10 });
-    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.15 });
+    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.13 });
     if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: 0.10 });
-    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: 0.08 });
-    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: 0.10 });
-    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: 0.12 });
-    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.10 });
+    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: 0.07 });
+    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: 0.09 });
+    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: 0.10 });
+    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.08 });
+    if (similarCtx) sections.push({ label: "TACHES SIMILAIRES", content: similarCtx, share: 0.10 });
 
     if (sections.length === 0) return "";
 
@@ -351,6 +360,34 @@ export async function fetchDocumentContext(
 
   try {
     return await buildTaskContext(supabase, taskTitle, projectId, 1500);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch similar past tasks for estimation context (S41-05).
+ * Shows completed tasks with matching keywords: estimated vs actual hours.
+ */
+export async function fetchSimilarTasksContext(
+  supabase: SupabaseClient,
+  taskTitle?: string
+): Promise<string> {
+  if (!taskTitle) return "";
+
+  try {
+    const similar = await findSimilarPastTasks(supabase, taskTitle);
+    if (similar.length === 0) return "";
+
+    return similar
+      .map((t) => {
+        const parts: string[] = [`- ${t.title}`];
+        if (t.estimatedHours != null) parts.push(`est:${t.estimatedHours}h`);
+        if (t.actualHours != null) parts.push(`reel:${t.actualHours}h`);
+        if (t.sprint) parts.push(`(${t.sprint})`);
+        return parts.join(" ");
+      })
+      .join("\n");
   } catch {
     return "";
   }

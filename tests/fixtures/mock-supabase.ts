@@ -80,6 +80,7 @@ class MockQueryBuilder {
   private _upsertData: Row | null = null;
   private _upsertConflict: string | null = null;
   private _mode: "select" | "insert" | "update" | "upsert" = "select";
+  private _orFilters: string | null = null;
 
   constructor(store: MockStore, table: string) {
     this.store = store;
@@ -138,6 +139,12 @@ class MockQueryBuilder {
 
   in(column: string, values: any[]) {
     this.filters.push({ column, op: "in", value: values });
+    return this;
+  }
+
+  or(filterStr: string) {
+    // Parse PostgREST OR filter string: "col.op.val,col.op.val"
+    this._orFilters = filterStr;
     return this;
   }
 
@@ -263,7 +270,25 @@ class MockQueryBuilder {
   }
 
   private _applyFilters(rows: Row[]): Row[] {
-    return rows.filter((r) => matchFilter(r, this.filters));
+    let filtered = rows.filter((r) => matchFilter(r, this.filters));
+
+    // Apply OR filter if set (PostgREST format: "col.op.val,col.op.val")
+    if (this._orFilters) {
+      const conditions = this._orFilters.split(",");
+      filtered = filtered.filter((row) =>
+        conditions.some((cond) => {
+          const parts = cond.split(".");
+          if (parts.length < 3) return false;
+          const col = parts[0];
+          const op = parts[1];
+          const val = parts.slice(2).join(".");
+          const filter: Filter = { column: col, op, value: val };
+          return matchFilter(row, [filter]);
+        })
+      );
+    }
+
+    return filtered;
   }
 
   private _applyOrder(rows: Row[]): Row[] {

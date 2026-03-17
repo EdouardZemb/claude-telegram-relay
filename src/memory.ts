@@ -1072,3 +1072,476 @@ export async function archiveOldMemories(
     return 0;
   }
 }
+
+// ── Link Classification (S41-02) ────────────────────────────
+
+/**
+ * Classify the relationship between two memory contents using heuristics.
+ * - "contradicts": one negates/replaces the other (high entity overlap + negation)
+ * - "extends": one elaborates on the other (high overlap, different length)
+ * - "supports": similar conclusions (high overlap, similar length)
+ * - "related": default fallback
+ */
+export function classifyLinkContent(sourceContent: string, targetContent: string): string {
+  const srcLower = sourceContent.toLowerCase();
+  const tgtLower = targetContent.toLowerCase();
+
+  const negationPatterns = [
+    /\bne\s+\w+\s+pas\b/,
+    /\bn[']\w+\s+pas\b/,
+    /\bpas\b/,
+    /\bnon\b/,
+    /\bplus\s+de\b/,
+    /\bau lieu de\b/,
+    /\bcontrairement\b/,
+    /\binstead\b/,
+    /\bnot\b/,
+    /\bno longer\b/,
+    /\bremplac/,
+    /\breplac/,
+    /\bannul/,
+    /\bcancel/,
+    /\brevert/,
+  ];
+
+  // Extract meaningful words (3+ chars, exclude common stop words)
+  const stopWords = new Set(["est", "les", "des", "une", "par", "sur", "dans", "pour", "avec", "que", "qui", "the", "and", "for", "are", "was", "has", "its", "this", "that", "with", "from"]);
+  const srcWords = new Set(srcLower.split(/\W+/).filter((w) => w.length >= 3 && !stopWords.has(w)));
+  const tgtWords = new Set(tgtLower.split(/\W+/).filter((w) => w.length >= 3 && !stopWords.has(w)));
+  const overlap = [...srcWords].filter((w) => tgtWords.has(w));
+  // Use min(sizes) so asymmetric comparisons work (short text fully covered = high ratio)
+  const minSize = Math.min(srcWords.size, tgtWords.size, Infinity);
+  const overlapRatio = minSize > 0 && overlap.length >= 2 ? overlap.length / minSize : 0;
+
+  // Contradicts: high entity overlap but one has negation
+  if (overlapRatio > 0.3) {
+    const srcHasNeg = negationPatterns.some((p) => p.test(srcLower));
+    const tgtHasNeg = negationPatterns.some((p) => p.test(tgtLower));
+    if (srcHasNeg !== tgtHasNeg) {
+      return "contradicts";
+    }
+  }
+
+  // Extends: high overlap, one is significantly longer
+  if (overlapRatio > 0.4) {
+    const lenRatio =
+      Math.max(sourceContent.length, targetContent.length) /
+      Math.max(Math.min(sourceContent.length, targetContent.length), 1);
+    if (lenRatio > 1.5) {
+      return "extends";
+    }
+  }
+
+  // Supports: moderate overlap, similar length
+  if (overlapRatio > 0.3) {
+    return "supports";
+  }
+
+  return "related";
+}
+
+// ── Memory Chains (S41-01) ──────────────────────────────────
+
+/** A node in a multi-hop memory chain */
+export interface MemoryChainNode {
+  id: string;
+  content: string;
+  type: string;
+  depth: number;
+  links: Array<{
+    targetId: string;
+    similarity: number;
+    linkType: string;
+  }>;
+}
+
+/** Max nodes in a chain traversal */
+const MAX_CHAIN_NODES = 50;
+
+/**
+ * Multi-hop BFS traversal of memory links.
+ * Starting from a memory ID, follows links up to `maxDepth` levels.
+ * Returns all visited nodes with their links and depth info.
+ */
+export async function getMemoryChain(
+  supabase: SupabaseClient | null,
+  memoryId: string,
+  maxDepth: number = 3
+): Promise<MemoryChainNode[]> {
+  if (!supabase || !memoryId) return [];
+
+  try {
+    // Fetch the root node
+    const { data: rootData } = await supabase
+      .from("memory")
+      .select("id, content, type")
+      .eq("id", memoryId)
+      .single();
+
+    if (!rootData) return [];
+
+    const visited = new Map<string, MemoryChainNode>();
+    visited.set(memoryId, {
+      id: rootData.id,
+      content: rootData.content,
+      type: rootData.type,
+      depth: 0,
+      links: [],
+    });
+
+    let frontier = [memoryId];
+    let depth = 0;
+
+    while (depth < maxDepth && frontier.length > 0 && visited.size < MAX_CHAIN_NODES) {
+      const { data: links, error } = await supabase.rpc("get_linked_memories", {
+        p_memory_ids: frontier,
+      });
+
+      if (error || !links?.length) break;
+
+      const nextFrontier: string[] = [];
+
+      for (const link of links as LinkedMemory[]) {
+        // Enrich link type using content heuristic
+        const origin = visited.get(link.origin_id);
+        const enrichedType = origin
+          ? classifyLinkContent(origin.content, link.linked_content)
+          : link.link_type;
+
+        // Add link to origin node
+        if (origin) {
+          origin.links.push({
+            targetId: link.linked_id,
+            similarity: link.similarity,
+            linkType: enrichedType,
+          });
+        }
+
+        // Add linked node if not visited
+        if (!visited.has(link.linked_id) && visited.size < MAX_CHAIN_NODES) {
+          visited.set(link.linked_id, {
+            id: link.linked_id,
+            content: link.linked_content,
+            type: link.linked_type,
+            depth: depth + 1,
+            links: [],
+          });
+          nextFrontier.push(link.linked_id);
+        }
+      }
+
+      frontier = nextFrontier;
+      depth++;
+    }
+
+    return Array.from(visited.values());
+  } catch (error) {
+    console.error("getMemoryChain error:", error);
+    return [];
+  }
+}
+
+// ── Memory Clustering (S41-03) ──────────────────────────────
+
+/** A cluster of semantically related memories */
+export interface MemoryCluster {
+  id: number;
+  label: string;
+  memories: Array<{ id: string; content: string; type: string }>;
+  size: number;
+}
+
+/**
+ * Find connected components in the memory link graph.
+ * Fetches top facts and their links, groups into clusters.
+ * Only returns clusters with 2+ members. Max 10 clusters.
+ */
+export async function clusterMemories(
+  supabase: SupabaseClient | null,
+  maxFacts: number = 50,
+  maxClusters: number = 10
+): Promise<MemoryCluster[]> {
+  if (!supabase) return [];
+
+  try {
+    const { data: facts } = await supabase.rpc("get_facts");
+    if (!facts?.length) return [];
+
+    const topFacts = facts.slice(0, maxFacts);
+    const factIds = topFacts.map((f: any) => f.id).filter(Boolean);
+
+    // Fetch all links (use RPC directly to avoid 3-link cap)
+    const { data: allLinks } = await supabase.rpc("get_linked_memories", {
+      p_memory_ids: factIds,
+    });
+
+    // Build adjacency list and node map
+    const adj = new Map<string, Set<string>>();
+    const nodeMap = new Map<string, { id: string; content: string; type: string }>();
+
+    for (const fact of topFacts) {
+      nodeMap.set(fact.id, { id: fact.id, content: fact.content, type: "fact" });
+      if (!adj.has(fact.id)) adj.set(fact.id, new Set());
+    }
+
+    for (const link of (allLinks || []) as LinkedMemory[]) {
+      if (!adj.has(link.origin_id)) adj.set(link.origin_id, new Set());
+      adj.get(link.origin_id)!.add(link.linked_id);
+
+      if (!adj.has(link.linked_id)) adj.set(link.linked_id, new Set());
+      adj.get(link.linked_id)!.add(link.origin_id);
+
+      if (!nodeMap.has(link.linked_id)) {
+        nodeMap.set(link.linked_id, {
+          id: link.linked_id,
+          content: link.linked_content,
+          type: link.linked_type,
+        });
+      }
+    }
+
+    // Find connected components via BFS
+    const visited = new Set<string>();
+    const clusters: MemoryCluster[] = [];
+    let clusterId = 0;
+
+    for (const nodeId of nodeMap.keys()) {
+      if (visited.has(nodeId)) continue;
+
+      const component: string[] = [];
+      const queue = [nodeId];
+      visited.add(nodeId);
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        component.push(current);
+
+        for (const neighbor of adj.get(current) || []) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      // Only include clusters with 2+ members
+      if (component.length >= 2) {
+        const memories = component
+          .map((id) => nodeMap.get(id))
+          .filter(Boolean) as Array<{ id: string; content: string; type: string }>;
+
+        clusters.push({
+          id: clusterId++,
+          label: memories[0].content.slice(0, 80),
+          memories,
+          size: memories.length,
+        });
+      }
+    }
+
+    return clusters.sort((a, b) => b.size - a.size).slice(0, maxClusters);
+  } catch (error) {
+    console.error("clusterMemories error:", error);
+    return [];
+  }
+}
+
+/**
+ * Format memory clusters for display (plain text, no markdown).
+ */
+export function formatClusters(clusters: MemoryCluster[]): string {
+  if (clusters.length === 0) return "Aucun cluster detecte.";
+
+  const lines: string[] = [`CLUSTERS DE MEMOIRE (${clusters.length})`];
+
+  for (const cluster of clusters) {
+    lines.push("");
+    lines.push(`Cluster ${cluster.id + 1} (${cluster.size} memoires):`);
+    for (const mem of cluster.memories.slice(0, 5)) {
+      lines.push(`  - [${mem.type}] ${mem.content}`);
+    }
+    if (cluster.memories.length > 5) {
+      lines.push(`  ... et ${cluster.memories.length - 5} autres`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// ── Memory Chains for Agents (S41-04) ───────────────────────
+
+/**
+ * Build structured memory chains for agent context.
+ * Strategic roles (analyst, pm, architect, qa) get chains with linked context.
+ * Tactical roles (dev, sm) get flat facts for efficiency.
+ */
+export async function buildMemoryChains(
+  supabase: SupabaseClient | null,
+  role: string
+): Promise<string> {
+  if (!supabase) return "";
+
+  try {
+    const [factsResult, goalsResult] = await Promise.all([
+      supabase.rpc("get_facts"),
+      supabase.rpc("get_active_goals"),
+    ]);
+
+    const facts = (factsResult.data || []).slice(0, MAX_FACTS_IN_CONTEXT);
+    const goals = (goalsResult.data || []).slice(0, MAX_GOALS_IN_CONTEXT);
+
+    if (facts.length === 0 && goals.length === 0) return "";
+
+    // Fetch links for all memories
+    const allIds = [
+      ...facts.map((f: any) => f.id),
+      ...goals.map((g: any) => g.id),
+    ].filter(Boolean);
+
+    const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
+    const parts: string[] = [];
+    const servedIds: string[] = [];
+
+    if (role === "dev" || role === "sm") {
+      // Tactical roles: flat facts
+      if (facts.length) {
+        parts.push(
+          "Faits cles:\n" +
+            facts
+              .slice(0, 10)
+              .map((f: any) => `- ${f.content}`)
+              .join("\n")
+        );
+        servedIds.push(...facts.slice(0, 10).map((f: any) => f.id));
+      }
+      if (goals.length) {
+        parts.push(
+          "Objectifs:\n" +
+            goals
+              .slice(0, 5)
+              .map((g: any) => `- ${g.content}`)
+              .join("\n")
+        );
+        servedIds.push(...goals.slice(0, 5).map((g: any) => g.id));
+      }
+    } else {
+      // Strategic roles: structured chains
+      const usedInChain = new Set<string>();
+      const chains: string[] = [];
+
+      for (const fact of facts) {
+        if (usedInChain.has(fact.id)) continue;
+        servedIds.push(fact.id);
+        usedInChain.add(fact.id);
+
+        const links = linkedMap.get(fact.id) || [];
+        if (links.length > 0) {
+          const chainLines = [`- ${fact.content}`];
+          for (const link of links) {
+            const enrichedType = classifyLinkContent(fact.content, link.linked_content);
+            chainLines.push(`  [${enrichedType}] ${link.linked_content}`);
+            usedInChain.add(link.linked_id);
+          }
+          chains.push(chainLines.join("\n"));
+        } else {
+          chains.push(`- ${fact.content}`);
+        }
+      }
+
+      if (chains.length) {
+        parts.push("Faits et chaines:\n" + chains.join("\n"));
+      }
+
+      // Goals with linked context
+      if (goals.length) {
+        const goalLines = goals.map((g: any) => {
+          const deadline = g.deadline
+            ? ` (echeance: ${new Date(g.deadline).toLocaleDateString("fr-FR")})`
+            : "";
+          const links = linkedMap.get(g.id) || [];
+          servedIds.push(g.id);
+          if (links.length > 0) {
+            const linkLines = links.map(
+              (l: LinkedMemory) =>
+                `  [${classifyLinkContent(g.content, l.linked_content)}] ${l.linked_content}`
+            );
+            return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
+          }
+          return `- ${g.content}${deadline}`;
+        });
+        parts.push("Objectifs et contexte:\n" + goalLines.join("\n"));
+      }
+    }
+
+    // Bump access (fire and forget)
+    if (servedIds.length > 0) {
+      bumpMemoryAccess(supabase, servedIds).catch(() => {});
+    }
+
+    return parts.join("\n\n");
+  } catch (error) {
+    console.error("buildMemoryChains error:", error);
+    return "";
+  }
+}
+
+// ── Similar Past Tasks (S41-05) ─────────────────────────────
+
+/** A completed task similar to the current one */
+export interface SimilarTask {
+  id: string;
+  title: string;
+  estimatedHours: number | null;
+  actualHours: number | null;
+  sprint: string | null;
+  tags: string[];
+}
+
+/**
+ * Find completed tasks similar to a given title using keyword matching.
+ * Returns historical data: estimated vs actual hours, sprint, tags.
+ * Used by agents to calibrate effort estimation.
+ */
+export async function findSimilarPastTasks(
+  supabase: SupabaseClient | null,
+  taskTitle: string,
+  limit: number = 5
+): Promise<SimilarTask[]> {
+  if (!supabase || !taskTitle) return [];
+
+  try {
+    // Extract keywords (words with 4+ chars)
+    const keywords = taskTitle
+      .toLowerCase()
+      .split(/[\s\-_:]+/)
+      .filter((w) => w.length >= 4)
+      .slice(0, 3);
+
+    if (keywords.length === 0) return [];
+
+    // Search done tasks with matching keywords
+    const filters = keywords.map((k) => `title.ilike.%${k}%`);
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("id, title, estimated_hours, actual_hours, sprint, tags")
+      .eq("status", "done")
+      .or(filters.join(","))
+      .order("completed_at", { ascending: false })
+      .limit(limit);
+
+    if (error || !data?.length) return [];
+
+    return data.map((t: any) => ({
+      id: t.id,
+      title: t.title,
+      estimatedHours: t.estimated_hours,
+      actualHours: t.actual_hours,
+      sprint: t.sprint,
+      tags: t.tags || [],
+    }));
+  } catch (error) {
+    console.error("findSimilarPastTasks error:", error);
+    return [];
+  }
+}

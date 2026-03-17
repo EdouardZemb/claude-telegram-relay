@@ -7,7 +7,7 @@
 
 import { Composer, Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
-import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch } from "../memory.ts";
+import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch, clusterMemories, formatClusters } from "../memory.ts";
 import type { LinkedMemory } from "../memory.ts";
 import { notifyIdeaCreated, notifyIdeaPromoted } from "../notifications.ts";
 import { addTask } from "../tasks.ts";
@@ -88,23 +88,9 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         .filter((r: any) => r.metadata?.auto_classified)
         .slice(0, 5);
 
-      // Fetch memory clusters (S36-02): linked memories for top facts
-      const factIds = facts.slice(0, 10).map((f: any) => f.id).filter(Boolean);
-      const linkedMap = factIds.length > 0
-        ? await getLinkedMemoriesBatch(bctx.supabase!, factIds)
-        : new Map<string, LinkedMemory[]>();
-
-      // Build cluster text
-      const clusterLines: string[] = [];
-      for (const fact of facts.slice(0, 10)) {
-        const links = linkedMap.get(fact.id) || [];
-        if (links.length > 0) {
-          clusterLines.push(`- ${fact.content}`);
-          for (const link of links) {
-            clusterLines.push(`  -> [${link.link_type}] ${link.linked_content} (sim: ${link.similarity.toFixed(2)})`);
-          }
-        }
-      }
+      // Fetch memory clusters (S41-03): connected components clustering
+      const clusters = await clusterMemories(bctx.supabase!);
+      const clusterText = formatClusters(clusters);
 
       // Signal/noise ratio (S36-06)
       const msgCount = recentMessages.data?.length || 0;
@@ -128,9 +114,7 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         `GOALS ACTIFS:`,
         ...goals.map((g: any) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`),
         "",
-        clusterLines.length > 0 ? `CLUSTERS DE MEMOIRE (liens detectes):` : "",
-        ...clusterLines,
-        clusterLines.length > 0 ? "" : "",
+        clusters.length > 0 ? clusterText : "",
         autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
         ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
         "",

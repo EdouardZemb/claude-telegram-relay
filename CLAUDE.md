@@ -27,10 +27,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
 | `commands/zz-messages.ts` | Composer: message:text (with intent routing), message:voice, message:photo, message:document handlers (loaded last) |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
-| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph, trust scores, sprint metrics, document shards with token budgets per role |
+| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph, trust scores, sprint metrics, document shards, similar past tasks with token budgets per role |
 | `code-graph.ts` | Knowledge graph of the codebase: regex-based TypeScript indexer, dependency/dependent queries, BFS impact radius, complexity estimation, agent context formatting |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
-| `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
+| `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection, multi-hop chains, link classification, memory clustering, similar past tasks |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
 | `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection, cost tracking per agent, blackboard integration, parallel DAG execution |
 | `blackboard.ts` | Shared structured workspace: versioned JSONB sections, optimistic locking, role authorization, traceability reports, concurrent write retry, fan-in merge |
@@ -189,6 +189,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Agent Context Complet (S40):** Enriched agent context with full Supabase data. (1) Token Budgets Increased: +30% per role (analyst 4000, pm/architect 3500, dev/sm 2000, qa 2500) to accommodate new sections. (2) Trust Score Context: `fetchTrustContext()` reads from in-memory cache (no DB call), injects agent's own trust score + peer scores, shows auto-approval eligibility and consecutive failure warnings. (3) Sprint Metrics: `fetchSprintMetrics()` queries `sprint_metrics` table for last 3 sprints — velocity, rework rate, cycle time. Gives agents historical performance awareness. (4) Document Shards: `fetchDocumentContext()` delegates to `buildTaskContext()` from document-sharding.ts — injects relevant PRD/architecture shards for the current task (1500 token budget). (5) Double-loop Closure: feedback rules from gate evaluations (S35) already injected via `buildFeedbackContext()` in agent system prompts. Trust scores provide the confidence signal for progressive autonomy. (6) Section Rebalancing: 8 sections with updated weights — memory 25%, tasks 15%, docs 12%, sprint/graph/metrics/profile 10% each, trust 8%. Behind `enhanced_agent_context` feature flag (enabled by default).
 
+**Memoire Relationnelle Active (S41):** Six features for structured memory reasoning. (1) Multi-hop Chains: `getMemoryChain()` BFS traversal of memory links up to depth 3. Returns connected memory tree with enriched link types and similarity scores. Max 50 nodes per traversal. (2) Link Classification: `classifyLinkContent()` heuristic classifies link relationships — "extends" (one elaborates), "supports" (similar conclusions), "contradicts" (negation/opposition), "related" (default). Uses entity overlap + negation patterns + length ratio. Stop word filtering for French/English. `contradicts` added to `memory_links.link_type` CHECK constraint. (3) Memory Clustering: `clusterMemories()` finds connected components in the memory graph via BFS. Returns clusters with 2+ members, sorted by size. `formatClusters()` for display. `/brain` uses proper clustering instead of manual link listing. (4) Reasoning Chains for Agents: `buildMemoryChains()` replaces flat fact injection. Strategic roles (analyst, pm, architect, qa) receive structured chains: fact → [link_type] linked_content. Tactical roles (dev, sm) receive flat facts for efficiency. Link types enriched via `classifyLinkContent()` at display time. (5) Similar Past Tasks: `findSimilarPastTasks()` searches completed tasks by keyword matching. Returns estimated vs actual hours, sprint, tags. `fetchSimilarTasksContext()` in agent-context injects historical data for estimation calibration. New "TACHES SIMILAIRES" section (10% budget). (6) Section Rebalancing: 9 sections with adjusted weights — memory 23%, tasks 13%, similar tasks 10%, graph 10%, docs 10%, sprint 10%, metrics 9%, profile 8%, trust 7%. Behind `memory_chains` feature flag (disabled by default). 43 new tests.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -220,7 +222,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1228 tests (unit + integration + E2E)
+tests/                  1271 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -228,7 +230,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1228 tests, all must pass before merge)
+- Tests: `bun test` (1271 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

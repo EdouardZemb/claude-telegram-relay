@@ -517,7 +517,7 @@ CREATE TABLE IF NOT EXISTS memory_links (
   source_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
   target_id UUID NOT NULL REFERENCES memory(id) ON DELETE CASCADE,
   similarity FLOAT NOT NULL CHECK (similarity >= 0 AND similarity <= 1),
-  link_type TEXT NOT NULL DEFAULT 'related' CHECK (link_type IN ('related', 'extends', 'supports')),
+  link_type TEXT NOT NULL DEFAULT 'related' CHECK (link_type IN ('related', 'extends', 'supports', 'contradicts')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (source_id, target_id),
   CHECK (source_id != target_id)
