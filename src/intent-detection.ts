@@ -1,9 +1,11 @@
 /**
  * @module intent-detection
- * @description Intent detection spike: detects user intent from natural language messages
- * and suggests matching bot commands. Uses pattern matching with LLM fallback.
- * Behind feature flag "intent_detection".
+ * @description Intent detection: detects user intent from natural language messages
+ * and resolves to bot commands. Two-tier approach: fast regex matching for high-confidence
+ * cases, LLM fallback (Haiku) for ambiguous messages. Behind feature flag "intent_detection".
  */
+
+import { getAllActions, getAction, formatActionsForLLM, type ActionDefinition } from "./action-registry.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -12,6 +14,10 @@ export interface DetectedIntent {
   command: string;
   confidence: number;
   args?: string;
+  /** The resolved action definition from the registry */
+  action?: ActionDefinition;
+  /** Source of detection: "regex" or "llm" */
+  source: "regex" | "llm";
 }
 
 export interface IntentResult {
@@ -32,7 +38,7 @@ interface IntentPattern {
 const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "view_backlog",
-    command: "/backlog",
+    command: "backlog",
     patterns: [
       /\b(backlog|taches?\s+(en\s+attente|a\s+faire)|quoi\s+faire|liste\s+(des\s+)?taches?)\b/i,
       /\b(qu'?est[- ]ce\s+qu'?il\s+(y\s+a|reste)\s+(a\s+faire|dans\s+le\s+backlog))\b/i,
@@ -41,7 +47,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "view_sprint",
-    command: "/sprint",
+    command: "sprint",
     patterns: [
       /\b(sprint\s+(actuel|en\s+cours)|avancement|progression|ou\s+en\s+est(-on)?)\b/i,
       /\b(comment\s+avance|etat\s+du\s+sprint)\b/i,
@@ -49,7 +55,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "create_task",
-    command: "/task",
+    command: "task",
     patterns: [
       /\b(cree|ajoute|nouvelle)\s+(une\s+)?tache\b/i,
       /\b(il\s+faut|on\s+doit|faudrait)\s+(ajouter|creer|faire)\b/i,
@@ -61,7 +67,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "view_metrics",
-    command: "/metrics",
+    command: "metrics",
     patterns: [
       /\b(metriques?|statistiques?|stats?|velocite|performance)\b/i,
       /\b(comment\s+va\s+le\s+sprint)\b/i,
@@ -69,7 +75,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "run_retro",
-    command: "/retro",
+    command: "retro",
     patterns: [
       /\b(retro(spective)?|bilan|retour\s+d'?experience)\b/i,
       /\bretrospective\b/i,
@@ -77,7 +83,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "get_help",
-    command: "/help",
+    command: "help",
     patterns: [
       /\b(aide|help|comment\s+(ca\s+marche|utiliser)|quelles?\s+commandes?)\b/i,
       /\b(qu'?est[- ]ce\s+que\s+tu\s+(peux|sais)\s+faire)\b/i,
@@ -85,35 +91,35 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "view_cost",
-    command: "/cost",
+    command: "cost",
     patterns: [
       /\b(couts?|depenses?|budget|tokens?|combien\s+ca\s+coute)\b/i,
     ],
   },
   {
     intent: "brain_synthesis",
-    command: "/brain",
+    command: "brain",
     patterns: [
       /\b(synthese|resume\s+memoire|qu'?est[- ]ce\s+que\s+tu\s+sais|memoire)\b/i,
     ],
   },
   {
     intent: "view_alerts",
-    command: "/alerts",
+    command: "alerts",
     patterns: [
       /\b(alertes?|anomalies?|problemes?|bugs?\s+detectes?)\b/i,
     ],
   },
   {
     intent: "view_ideas",
-    command: "/ideas",
+    command: "ideas",
     patterns: [
       /\b(idees?|suggestions?|propositions?)\b/i,
     ],
   },
   {
     intent: "plan_task",
-    command: "/plan",
+    command: "plan",
     patterns: [
       /\b(planifie|decompose|decoupe|organise)\s+(\w+\s+)?(tache|feature|fonctionnalite)\b/i,
       /\b(planifie|decompose|decoupe)\s+/i,
@@ -125,38 +131,53 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "execute_task",
-    command: "/exec",
+    command: "exec",
     patterns: [
-      /\b(execute|lance|demarre|implemente)\s+(la\s+)?tache\b/i,
+      /\b(execute|implemente)\s+(la\s+)?tache\b/i,
+      /\b(lance)\s+(l'?agent|l'?execution|l'?implementation)\b/i,
     ],
   },
   {
     intent: "view_projects",
-    command: "/projects",
+    command: "projects",
     patterns: [
       /\b(projets?|liste\s+des\s+projets?|quels?\s+projets?)\b/i,
     ],
   },
   {
     intent: "start_task",
-    command: "/start",
+    command: "start",
     patterns: [
       /\b(commence|demarre|prends?)\s+(la\s+)?tache\b/i,
     ],
   },
   {
     intent: "done_task",
-    command: "/done",
+    command: "done",
     patterns: [
       /\b(termine|fini|complete|cloture)\s+(la\s+)?tache\b/i,
     ],
   },
+  {
+    intent: "view_monitor",
+    command: "monitor",
+    patterns: [
+      /\b(monitor(ing)?|surveillance|supervision)\b/i,
+    ],
+  },
+  {
+    intent: "rollback",
+    command: "rollback",
+    patterns: [
+      /\b(rollback|revenir?\s+en\s+arriere|annuler?\s+(le\s+)?deploy)\b/i,
+    ],
+  },
 ];
 
-// ── Core Detection ───────────────────────────────────────────
+// ── Core Regex Detection ─────────────────────────────────────
 
 /**
- * Detect intent from a natural language message.
+ * Detect intent from a natural language message using regex patterns.
  * Returns detected intent with confidence score, or null if no match.
  *
  * Confidence levels:
@@ -184,7 +205,7 @@ export function detectIntent(text: string): IntentResult {
     if (matchCount === 0) continue;
 
     // Confidence: 0.7 base + 0.1 per additional match, max 0.95
-    const confidence = Math.min(0.7 + (matchCount - 1) * 0.1, 0.95);
+    const confidence = Math.min(Math.round((0.7 + (matchCount - 1) * 0.1) * 100) / 100, 0.95);
 
     if (confidence > bestConfidence) {
       bestConfidence = confidence;
@@ -194,6 +215,8 @@ export function detectIntent(text: string): IntentResult {
         command: pattern.command,
         confidence,
         args,
+        action: getAction(pattern.command),
+        source: "regex",
       };
     }
   }
@@ -203,13 +226,95 @@ export function detectIntent(text: string): IntentResult {
   }
 
   const suggestion = bestMatch.args
-    ? `${bestMatch.command} ${bestMatch.args}`
-    : bestMatch.command;
+    ? `/${bestMatch.command} ${bestMatch.args}`
+    : `/${bestMatch.command}`;
 
   return {
     detected: bestMatch,
     suggestion,
   };
+}
+
+// ── LLM Intent Detection ────────────────────────────────────
+
+export interface LLMIntentOptions {
+  callLLM: (prompt: string) => Promise<string>;
+  recentMessages?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Detect intent using LLM (Haiku) as fallback for ambiguous messages.
+ * Only called when regex detection returns null or low confidence.
+ */
+export async function detectIntentWithLLM(
+  text: string,
+  options: LLMIntentOptions,
+): Promise<IntentResult> {
+  // Fast path: try regex first
+  const regexResult = detectIntent(text);
+  if (regexResult.detected && regexResult.detected.confidence >= 0.9) {
+    return regexResult;
+  }
+
+  // LLM fallback
+  try {
+    const actionList = formatActionsForLLM();
+    const prompt = [
+      "Tu es un routeur d'intent. Analyse le message utilisateur et determine s'il correspond a une commande.",
+      "",
+      "COMMANDES DISPONIBLES:",
+      actionList,
+      "",
+      options.recentMessages ? `CONVERSATION RECENTE:\n${options.recentMessages}\n` : "",
+      `MESSAGE UTILISATEUR: ${text}`,
+      "",
+      "Reponds UNIQUEMENT en JSON valide, sans markdown:",
+      '{"command": "nom_commande_sans_slash", "args": "arguments extraits ou vide", "confidence": 0.0-1.0}',
+      "",
+      'Si aucune commande ne correspond, reponds: {"command": null, "args": "", "confidence": 0}',
+      "Ne force pas un match si le message est juste une conversation normale.",
+    ].filter(Boolean).join("\n");
+
+    const timeoutMs = options.timeoutMs ?? 5000;
+    const result = await Promise.race([
+      options.callLLM(prompt),
+      new Promise<string>((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), timeoutMs)),
+    ]);
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return regexResult;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.command || parsed.confidence < 0.6) return regexResult;
+
+    const action = getAction(parsed.command);
+    if (!action) return regexResult;
+
+    // LLM result must beat regex result
+    const llmConfidence = Math.min(parsed.confidence, 0.92); // Cap LLM slightly below max
+    if (regexResult.detected && regexResult.detected.confidence >= llmConfidence) {
+      return regexResult;
+    }
+
+    const detected: DetectedIntent = {
+      intent: `llm_${parsed.command}`,
+      command: parsed.command,
+      confidence: llmConfidence,
+      args: parsed.args || undefined,
+      action,
+      source: "llm",
+    };
+
+    return {
+      detected,
+      suggestion: detected.args ? `/${detected.command} ${detected.args}` : `/${detected.command}`,
+    };
+  } catch (error) {
+    console.error("LLM intent detection error:", error);
+    // Fall back to regex result
+    return regexResult;
+  }
 }
 
 /**
