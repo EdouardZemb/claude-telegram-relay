@@ -523,11 +523,13 @@ export function validateAgentOutput(
 /**
  * Build structured context from previous agent messages.
  * Instead of dumping raw text, extracts relevant fields per role.
+ * S38: Optionally includes inter-agent messages.
  */
 export function buildStructuredChainContext(
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  interAgentContext?: string
 ): string {
-  if (messages.length === 0) return "";
+  if (messages.length === 0 && !interAgentContext) return "";
 
   const parts: string[] = ["CONTEXTE STRUCTURE DES AGENTS PRECEDENTS:"];
 
@@ -545,6 +547,12 @@ export function buildStructuredChainContext(
       parts.push(truncated);
       if (msg.rawOutput.length > 2000) parts.push("...(tronque)");
     }
+  }
+
+  // S38: Include inter-agent messages context
+  if (interAgentContext) {
+    parts.push("");
+    parts.push(interAgentContext);
   }
 
   parts.push("");
