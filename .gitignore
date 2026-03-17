@@ -39,3 +39,6 @@ deploy_key*
 # Logs
 *.log
 ~/.claude-relay/
+
+# Test temp files
+tests/unit/.tts-test-tmp/
