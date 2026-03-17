@@ -7,7 +7,8 @@
 
 import { Composer, Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
-import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList } from "../memory.ts";
+import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch } from "../memory.ts";
+import type { LinkedMemory } from "../memory.ts";
 import { notifyIdeaCreated, notifyIdeaPromoted } from "../notifications.ts";
 import { addTask } from "../tasks.ts";
 import { resolveProjectContext } from "../projects.ts";
@@ -80,6 +81,24 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         .filter((r: any) => r.metadata?.auto_classified)
         .slice(0, 5);
 
+      // Fetch memory clusters (S36-02): linked memories for top facts
+      const factIds = facts.slice(0, 10).map((f: any) => f.id).filter(Boolean);
+      const linkedMap = factIds.length > 0
+        ? await getLinkedMemoriesBatch(bctx.supabase!, factIds)
+        : new Map<string, LinkedMemory[]>();
+
+      // Build cluster text
+      const clusterLines: string[] = [];
+      for (const fact of facts.slice(0, 10)) {
+        const links = linkedMap.get(fact.id) || [];
+        if (links.length > 0) {
+          clusterLines.push(`- ${fact.content}`);
+          for (const link of links) {
+            clusterLines.push(`  -> [${link.link_type}] ${link.linked_content} (sim: ${link.similarity.toFixed(2)})`);
+          }
+        }
+      }
+
       // Build the synthesis prompt
       const contextParts = [
         `STATISTIQUES MEMOIRE`,
@@ -94,6 +113,9 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         `GOALS ACTIFS:`,
         ...goals.map((g: any) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`),
         "",
+        clusterLines.length > 0 ? `CLUSTERS DE MEMOIRE (liens detectes):` : "",
+        ...clusterLines,
+        clusterLines.length > 0 ? "" : "",
         autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
         ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
         "",
@@ -115,9 +137,10 @@ Produis:
 1. RESUME: ce qui s'est passe recemment (2-3 phrases)
 2. DECISIONS CLES: les decisions importantes prises
 3. PATTERNS: les sujets recurrents ou tendances
-4. IDEES: synthese des idees actives, lesquelles meritent d'etre promues en taches, lesquelles sont redondantes ou obsoletes
-5. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
-6. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
+4. CLUSTERS: analyse des groupes de memories connectees, quels themes emergent des liens
+5. IDEES: synthese des idees actives, lesquelles meritent d'etre promues en taches, lesquelles sont redondantes ou obsoletes
+6. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
+7. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
 
 Reponds en texte brut, sans markdown.`;
 

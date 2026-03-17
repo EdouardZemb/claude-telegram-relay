@@ -203,30 +203,40 @@ export async function getMemoryContext(
     const parts: string[] = [];
     const servedIds: string[] = [];
 
-    if (factsResult.data?.length) {
-      // Take top N facts (already ordered by importance_score DESC from DB)
-      const topFacts = factsResult.data.slice(0, MAX_FACTS_IN_CONTEXT);
-      parts.push(
-        "FACTS:\n" +
-          topFacts.map((f: any) => `- ${f.content}`).join("\n")
-      );
+    const topFacts = (factsResult.data || []).slice(0, MAX_FACTS_IN_CONTEXT);
+    const topGoals = (goalsResult.data || []).slice(0, MAX_GOALS_IN_CONTEXT);
+
+    // Batch fetch linked memories for all served facts/goals (S36-02)
+    const allIds = [
+      ...topFacts.map((f: any) => f.id).filter(Boolean),
+      ...topGoals.map((g: any) => g.id).filter(Boolean),
+    ];
+    const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
+
+    if (topFacts.length) {
+      const factLines = topFacts.map((f: any) => {
+        const links = linkedMap.get(f.id) || [];
+        const linkLines = links.map(
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+        );
+        return [`- ${f.content}`, ...linkLines].join("\n");
+      });
+      parts.push("FACTS:\n" + factLines.join("\n"));
       servedIds.push(...topFacts.map((f: any) => f.id).filter(Boolean));
     }
 
-    if (goalsResult.data?.length) {
-      // Take top N goals (already ordered by importance_score DESC from DB)
-      const topGoals = goalsResult.data.slice(0, MAX_GOALS_IN_CONTEXT);
-      parts.push(
-        "GOALS:\n" +
-          topGoals
-            .map((g: any) => {
-              const deadline = g.deadline
-                ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
-                : "";
-              return `- ${g.content}${deadline}`;
-            })
-            .join("\n")
-      );
+    if (topGoals.length) {
+      const goalLines = topGoals.map((g: any) => {
+        const deadline = g.deadline
+          ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
+          : "";
+        const links = linkedMap.get(g.id) || [];
+        const linkLines = links.map(
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+        );
+        return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
+      });
+      parts.push("GOALS:\n" + goalLines.join("\n"));
       servedIds.push(...topGoals.map((g: any) => g.id).filter(Boolean));
     }
 
@@ -464,6 +474,86 @@ export async function linkMemories(
   } catch (error) {
     console.error("link_memory error:", error);
     return 0;
+  }
+}
+
+// ── Memory Link Retrieval (S36-02) ────────────────────────────
+
+/** A linked memory returned by get_linked_memories RPC */
+export interface LinkedMemory {
+  origin_id: string;
+  linked_id: string;
+  linked_content: string;
+  linked_type: string;
+  similarity: number;
+  link_type: string;
+}
+
+/** Max linked memories shown per memory in context */
+const MAX_LINKS_PER_MEMORY_IN_CONTEXT = 3;
+
+/**
+ * Get all memories linked to a given memory ID.
+ * Returns links sorted by similarity (descending), 1 level of depth only.
+ */
+export async function getLinkedMemories(
+  supabase: SupabaseClient | null,
+  memoryId: string
+): Promise<LinkedMemory[]> {
+  if (!supabase || !memoryId) return [];
+
+  try {
+    const { data, error } = await supabase.rpc("get_linked_memories", {
+      p_memory_ids: [memoryId],
+    });
+
+    if (error) {
+      console.error("get_linked_memories error:", error);
+      return [];
+    }
+
+    return (data || []) as LinkedMemory[];
+  } catch (error) {
+    console.error("get_linked_memories error:", error);
+    return [];
+  }
+}
+
+/**
+ * Batch fetch linked memories for multiple memory IDs.
+ * Returns a Map of origin_id → linked memories (max 3 per origin).
+ * Used by getMemoryContext() to enrich facts/goals with their links.
+ */
+export async function getLinkedMemoriesBatch(
+  supabase: SupabaseClient | null,
+  memoryIds: string[]
+): Promise<Map<string, LinkedMemory[]>> {
+  if (!supabase || memoryIds.length === 0) return new Map();
+
+  try {
+    const { data, error } = await supabase.rpc("get_linked_memories", {
+      p_memory_ids: memoryIds,
+    });
+
+    if (error) {
+      console.error("get_linked_memories batch error:", error);
+      return new Map();
+    }
+
+    // Group by origin_id, limit MAX_LINKS_PER_MEMORY_IN_CONTEXT per origin
+    const grouped = new Map<string, LinkedMemory[]>();
+    for (const link of (data || []) as LinkedMemory[]) {
+      const existing = grouped.get(link.origin_id) || [];
+      if (existing.length < MAX_LINKS_PER_MEMORY_IN_CONTEXT) {
+        existing.push(link);
+        grouped.set(link.origin_id, existing);
+      }
+    }
+
+    return grouped;
+  } catch (error) {
+    console.error("get_linked_memories batch error:", error);
+    return new Map();
   }
 }
 

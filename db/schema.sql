@@ -630,6 +630,32 @@ CREATE TRIGGER memory_auto_link_insert
   WHEN (NEW.embedding IS NOT NULL)
   EXECUTE FUNCTION auto_link_memory();
 
+-- get_linked_memories() RPC: batch fetch linked memories for a set of memory IDs (S36-02)
+CREATE OR REPLACE FUNCTION get_linked_memories(p_memory_ids UUID[])
+RETURNS TABLE(
+  origin_id UUID,
+  linked_id UUID,
+  linked_content TEXT,
+  linked_type TEXT,
+  similarity FLOAT,
+  link_type TEXT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    ml.source_id AS origin_id,
+    ml.target_id AS linked_id,
+    m.content AS linked_content,
+    m.type AS linked_type,
+    ml.similarity,
+    ml.link_type
+  FROM public.memory_links ml
+  JOIN public.memory m ON m.id = ml.target_id
+  WHERE ml.source_id = ANY(p_memory_ids)
+  ORDER BY ml.similarity DESC;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
 -- ============================================================
 -- MEMORY ARCHIVE TABLE (Old memories for retention management)
 -- ============================================================
