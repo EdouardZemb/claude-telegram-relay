@@ -101,12 +101,14 @@ export interface ThoughtClassification {
   action_items: string[];
   is_memorable: boolean;
   is_idea?: boolean;
+  actionability_score?: number; // S36-06: 0-10 scale
   summary: string;
 }
 
 /**
  * Parse Claude's response for memory intent tags.
  * Saves facts/goals to Supabase and returns the cleaned response.
+ * S36-03/04/05: Applies conflict resolution for facts (dedup/update/merge).
  */
 export async function processMemoryIntents(
   supabase: SupabaseClient | null,
@@ -116,13 +118,22 @@ export async function processMemoryIntents(
 
   let clean = response;
 
-  // [REMEMBER: fact to store]
+  // [REMEMBER: fact to store] — with S36-03/04/05 conflict resolution
   for (const match of response.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)) {
-    const { error } = await supabase.from("memory").insert({
-      type: "fact",
-      content: match[1],
-    });
-    if (error) console.error("memory insert (fact) error:", error);
+    const resolution = await resolveMemoryConflict(supabase, match[1]);
+    if (resolution.action === "skip") {
+      // Duplicate found, access already bumped
+    } else if (resolution.action === "update") {
+      await updateMemoryWithRevision(supabase, resolution.existingId, match[1], "update");
+    } else if (resolution.action === "merge") {
+      await updateMemoryWithRevision(supabase, resolution.existingId, match[1], "merge");
+    } else {
+      const { error } = await supabase.from("memory").insert({
+        type: "fact",
+        content: match[1],
+      });
+      if (error) console.error("memory insert (fact) error:", error);
+    }
     clean = clean.replace(match[0], "");
   }
 
@@ -203,30 +214,40 @@ export async function getMemoryContext(
     const parts: string[] = [];
     const servedIds: string[] = [];
 
-    if (factsResult.data?.length) {
-      // Take top N facts (already ordered by importance_score DESC from DB)
-      const topFacts = factsResult.data.slice(0, MAX_FACTS_IN_CONTEXT);
-      parts.push(
-        "FACTS:\n" +
-          topFacts.map((f: any) => `- ${f.content}`).join("\n")
-      );
+    const topFacts = (factsResult.data || []).slice(0, MAX_FACTS_IN_CONTEXT);
+    const topGoals = (goalsResult.data || []).slice(0, MAX_GOALS_IN_CONTEXT);
+
+    // Batch fetch linked memories for all served facts/goals (S36-02)
+    const allIds = [
+      ...topFacts.map((f: any) => f.id).filter(Boolean),
+      ...topGoals.map((g: any) => g.id).filter(Boolean),
+    ];
+    const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
+
+    if (topFacts.length) {
+      const factLines = topFacts.map((f: any) => {
+        const links = linkedMap.get(f.id) || [];
+        const linkLines = links.map(
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+        );
+        return [`- ${f.content}`, ...linkLines].join("\n");
+      });
+      parts.push("FACTS:\n" + factLines.join("\n"));
       servedIds.push(...topFacts.map((f: any) => f.id).filter(Boolean));
     }
 
-    if (goalsResult.data?.length) {
-      // Take top N goals (already ordered by importance_score DESC from DB)
-      const topGoals = goalsResult.data.slice(0, MAX_GOALS_IN_CONTEXT);
-      parts.push(
-        "GOALS:\n" +
-          topGoals
-            .map((g: any) => {
-              const deadline = g.deadline
-                ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
-                : "";
-              return `- ${g.content}${deadline}`;
-            })
-            .join("\n")
-      );
+    if (topGoals.length) {
+      const goalLines = topGoals.map((g: any) => {
+        const deadline = g.deadline
+          ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
+          : "";
+        const links = linkedMap.get(g.id) || [];
+        const linkLines = links.map(
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+        );
+        return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
+      });
+      parts.push("GOALS:\n" + goalLines.join("\n"));
       servedIds.push(...topGoals.map((g: any) => g.id).filter(Boolean));
     }
 
@@ -342,6 +363,8 @@ function resolveMemoryType(classification: ThoughtClassification): "idea" | "pre
  * Called when classify-thought flags is_memorable=true.
  * Routes to the correct memory type: idea, preference, or fact.
  * Also auto-creates goals from detected action_items.
+ * S36-03/04/05: Applies conflict resolution for facts.
+ * S36-06: Applies actionability filter (bypass for ideas).
  */
 export async function autoRemember(
   supabase: SupabaseClient | null,
@@ -354,6 +377,15 @@ export async function autoRemember(
     const memoryContent = classification.summary || content;
     const memoryType = resolveMemoryType(classification);
 
+    // S36-06: Actionability filter (bypass for ideas)
+    if (memoryType !== "idea") {
+      const actionability = classification.actionability_score ?? 7; // EC-003: default 7
+      if (actionability < ACTIONABILITY_THRESHOLD) {
+        console.log(`Memory filtered by actionability (score: ${actionability}): "${memoryContent}"`);
+        return;
+      }
+    }
+
     // Semantic deduplication for ideas (S21-04)
     if (memoryType === "idea") {
       const duplicate = await findDuplicateIdea(supabase, memoryContent);
@@ -361,6 +393,21 @@ export async function autoRemember(
         console.log(`Idea deduplicated (similar to: "${duplicate}")`);
         return;
       }
+    }
+
+    // S36-03/04/05: Conflict resolution for facts
+    if (memoryType === "fact") {
+      const resolution = await resolveMemoryConflict(supabase, memoryContent);
+      if (resolution.action === "skip") {
+        await autoCreateGoals(supabase, classification);
+        return;
+      }
+      if (resolution.action === "update" || resolution.action === "merge") {
+        await updateMemoryWithRevision(supabase, resolution.existingId, memoryContent, resolution.action);
+        await autoCreateGoals(supabase, classification);
+        return;
+      }
+      // action === "insert": fall through to normal insertion
     }
 
     const metadata: Record<string, unknown> = {
@@ -388,18 +435,29 @@ export async function autoRemember(
     else if (memoryType === "idea") await notifyIdeaCreated(memoryContent, "auto-detect");
 
     // Auto-create goals from action_items
-    if (classification.action_items?.length) {
-      for (const item of classification.action_items) {
-        const { error: goalError } = await supabase.from("memory").insert({
-          type: "goal",
-          content: item,
-          metadata: { auto_classified: true, source: "action-item", topics: classification.topics },
-        });
-        if (goalError) console.error("auto-remember goal insert error:", goalError);
-      }
-    }
+    await autoCreateGoals(supabase, classification);
   } catch (error) {
     console.error("auto-remember error:", error);
+  }
+}
+
+/**
+ * Auto-create goals from classification action_items.
+ * Extracted for reuse in conflict resolution paths (S36-03/04/05).
+ */
+async function autoCreateGoals(
+  supabase: SupabaseClient,
+  classification: ThoughtClassification
+): Promise<void> {
+  if (!classification.action_items?.length) return;
+
+  for (const item of classification.action_items) {
+    const { error: goalError } = await supabase.from("memory").insert({
+      type: "goal",
+      content: item,
+      metadata: { auto_classified: true, source: "action-item", topics: classification.topics },
+    });
+    if (goalError) console.error("auto-remember goal insert error:", goalError);
   }
 }
 
@@ -428,6 +486,343 @@ export async function findDuplicateIdea(
   } catch {
     // Search not available — skip deduplication, allow insert
     return null;
+  }
+}
+
+// ── Memory Linking (S36-01) ───────────────────────────────────
+
+/**
+ * Create semantic links between a memory and its nearest neighbors.
+ * Wraps the link_memory RPC. The DB trigger handles auto-linking on
+ * embedding creation; this function is for manual/on-demand use.
+ *
+ * @returns Number of links created (forward + reverse)
+ */
+export async function linkMemories(
+  supabase: SupabaseClient | null,
+  memoryId: string,
+  threshold?: number,
+  maxLinks?: number
+): Promise<number> {
+  if (!supabase || !memoryId) return 0;
+
+  try {
+    const params: Record<string, any> = { p_memory_id: memoryId };
+    if (threshold !== undefined) params.p_threshold = threshold;
+    if (maxLinks !== undefined) params.p_max_links = maxLinks;
+
+    const { data, error } = await supabase.rpc("link_memory", params);
+
+    if (error) {
+      console.error("link_memory error:", error);
+      return 0;
+    }
+
+    return data || 0;
+  } catch (error) {
+    console.error("link_memory error:", error);
+    return 0;
+  }
+}
+
+// ── Memory Link Retrieval (S36-02) ────────────────────────────
+
+/** A linked memory returned by get_linked_memories RPC */
+export interface LinkedMemory {
+  origin_id: string;
+  linked_id: string;
+  linked_content: string;
+  linked_type: string;
+  similarity: number;
+  link_type: string;
+}
+
+/** Max linked memories shown per memory in context */
+const MAX_LINKS_PER_MEMORY_IN_CONTEXT = 3;
+
+/**
+ * Get all memories linked to a given memory ID.
+ * Returns links sorted by similarity (descending), 1 level of depth only.
+ */
+export async function getLinkedMemories(
+  supabase: SupabaseClient | null,
+  memoryId: string
+): Promise<LinkedMemory[]> {
+  if (!supabase || !memoryId) return [];
+
+  try {
+    const { data, error } = await supabase.rpc("get_linked_memories", {
+      p_memory_ids: [memoryId],
+    });
+
+    if (error) {
+      console.error("get_linked_memories error:", error);
+      return [];
+    }
+
+    return (data || []) as LinkedMemory[];
+  } catch (error) {
+    console.error("get_linked_memories error:", error);
+    return [];
+  }
+}
+
+/**
+ * Batch fetch linked memories for multiple memory IDs.
+ * Returns a Map of origin_id → linked memories (max 3 per origin).
+ * Used by getMemoryContext() to enrich facts/goals with their links.
+ */
+export async function getLinkedMemoriesBatch(
+  supabase: SupabaseClient | null,
+  memoryIds: string[]
+): Promise<Map<string, LinkedMemory[]>> {
+  if (!supabase || memoryIds.length === 0) return new Map();
+
+  try {
+    const { data, error } = await supabase.rpc("get_linked_memories", {
+      p_memory_ids: memoryIds,
+    });
+
+    if (error) {
+      console.error("get_linked_memories batch error:", error);
+      return new Map();
+    }
+
+    // Group by origin_id, limit MAX_LINKS_PER_MEMORY_IN_CONTEXT per origin
+    const grouped = new Map<string, LinkedMemory[]>();
+    for (const link of (data || []) as LinkedMemory[]) {
+      const existing = grouped.get(link.origin_id) || [];
+      if (existing.length < MAX_LINKS_PER_MEMORY_IN_CONTEXT) {
+        existing.push(link);
+        grouped.set(link.origin_id, existing);
+      }
+    }
+
+    return grouped;
+  } catch (error) {
+    console.error("get_linked_memories batch error:", error);
+    return new Map();
+  }
+}
+
+// ── Memory Evolution (S36-03/04/05) ──────────────────────────
+
+/** Threshold for duplicate detection (skip insertion) */
+const DUPLICATE_THRESHOLD = 0.85;
+/** Threshold for contradiction detection (update existing) */
+const CONTRADICTION_THRESHOLD = 0.80;
+/** Threshold for complement detection (merge into existing) */
+const COMPLEMENT_THRESHOLD = 0.75;
+/** Actionability threshold for auto-remember filtering (S36-06) */
+const ACTIONABILITY_THRESHOLD = 5;
+
+/** A semantically similar existing memory */
+export interface SimilarMemory {
+  id: string;
+  content: string;
+  type: string;
+  similarity: number;
+}
+
+/**
+ * Find the most similar existing fact to a given content.
+ * Uses the search Edge Function for semantic similarity.
+ */
+export async function findSimilarFact(
+  supabase: SupabaseClient | null,
+  content: string,
+  threshold: number = COMPLEMENT_THRESHOLD
+): Promise<SimilarMemory | null> {
+  if (!supabase || !content) return null;
+
+  try {
+    const { data, error } = await supabase.functions.invoke("search", {
+      body: { query: content, table: "memory", match_count: 1, match_threshold: threshold },
+    });
+
+    if (error || !data?.length) return null;
+
+    const match = data.find((m: any) => m.type === "fact");
+    if (!match) return null;
+
+    return {
+      id: match.id,
+      content: match.content,
+      type: match.type,
+      similarity: match.similarity,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type ConflictResolution =
+  | { action: "skip"; existingId: string }
+  | { action: "update"; existingId: string }
+  | { action: "merge"; existingId: string }
+  | { action: "insert" };
+
+/**
+ * Determine how to handle a new fact based on similarity to existing facts.
+ * - >= 0.85: duplicate → skip, bump access
+ * - >= 0.80: contradiction → update existing
+ * - >= 0.75: complement → merge into existing
+ * - < 0.75: new → insert normally
+ */
+export async function resolveMemoryConflict(
+  supabase: SupabaseClient | null,
+  content: string
+): Promise<ConflictResolution> {
+  if (!supabase) return { action: "insert" };
+
+  const similar = await findSimilarFact(supabase, content, COMPLEMENT_THRESHOLD);
+  if (!similar) return { action: "insert" };
+
+  if (similar.similarity >= DUPLICATE_THRESHOLD) {
+    await bumpMemoryAccess(supabase, [similar.id]);
+    console.log(`Memory deduplicated (sim: ${similar.similarity.toFixed(2)}): "${content}"`);
+    return { action: "skip", existingId: similar.id };
+  }
+
+  if (similar.similarity >= CONTRADICTION_THRESHOLD) {
+    console.log(`Memory contradiction detected (sim: ${similar.similarity.toFixed(2)}): "${content}" vs "${similar.content}"`);
+    return { action: "update", existingId: similar.id };
+  }
+
+  console.log(`Memory complement detected (sim: ${similar.similarity.toFixed(2)}): "${content}" → enriching "${similar.content}"`);
+  return { action: "merge", existingId: similar.id };
+}
+
+/**
+ * Update an existing memory with revision tracking.
+ * - "update" mode: replace content (contradiction)
+ * - "merge" mode: append new content (complement)
+ * Stores previous version in metadata.previous_versions[].
+ * Clears embedding to trigger regeneration via webhook.
+ */
+export async function updateMemoryWithRevision(
+  supabase: SupabaseClient | null,
+  existingId: string,
+  newContent: string,
+  mode: "update" | "merge"
+): Promise<boolean> {
+  if (!supabase || !existingId) return false;
+
+  try {
+    const { data: existing, error: fetchError } = await supabase
+      .from("memory")
+      .select("content, metadata")
+      .eq("id", existingId)
+      .single();
+
+    if (fetchError || !existing) return false;
+
+    const metadata = (existing.metadata || {}) as Record<string, any>;
+    const previousVersions = Array.isArray(metadata.previous_versions)
+      ? [...metadata.previous_versions]
+      : [];
+    previousVersions.push(existing.content);
+
+    const finalContent = mode === "update"
+      ? newContent
+      : `${existing.content}. ${newContent}`;
+
+    const { error } = await supabase
+      .from("memory")
+      .update({
+        content: finalContent,
+        metadata: {
+          ...metadata,
+          previous_versions: previousVersions,
+          revision_count: (metadata.revision_count || 0) + 1,
+          last_revised_at: new Date().toISOString(),
+        },
+        embedding: null, // Clear to trigger regeneration via webhook
+      })
+      .eq("id", existingId);
+
+    if (error) {
+      console.error("updateMemoryWithRevision error:", error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("updateMemoryWithRevision error:", error);
+    return false;
+  }
+}
+
+// ── Working Memory Promotion (S36-08) ────────────────────────
+
+/** Working memory data structure from blackboard */
+export interface WorkingMemoryData {
+  decisions?: Array<{ agent: string; decision: string; reasoning: string }>;
+  discoveries?: Array<{ agent: string; fact: string; source: string }>;
+  blockers?: Array<{ agent: string; issue: string; status: string }>;
+  context_updates?: Array<{ agent: string; key: string; value: string }>;
+}
+
+/**
+ * Promote significant working memory items to permanent memories.
+ * Extracts decisions and discoveries, persists them with conflict resolution.
+ * Called at pipeline end by the orchestrator.
+ */
+export async function promoteWorkingMemory(
+  supabase: SupabaseClient | null,
+  workingMemory: WorkingMemoryData | null,
+  sessionId: string
+): Promise<number> {
+  if (!supabase || !workingMemory) return 0;
+
+  try {
+    let promoted = 0;
+    const items: Array<{ content: string; agent: string }> = [];
+
+    // Collect decisions (always promote)
+    if (Array.isArray(workingMemory.decisions)) {
+      for (const d of workingMemory.decisions) {
+        items.push({ content: `${d.decision} (raison: ${d.reasoning})`, agent: d.agent });
+      }
+    }
+
+    // Collect discoveries
+    if (Array.isArray(workingMemory.discoveries)) {
+      for (const d of workingMemory.discoveries) {
+        items.push({ content: d.fact, agent: d.agent });
+      }
+    }
+
+    // Persist each item with conflict resolution
+    for (const item of items) {
+      const resolution = await resolveMemoryConflict(supabase, item.content);
+      if (resolution.action === "skip") continue;
+
+      if (resolution.action === "update" || resolution.action === "merge") {
+        const ok = await updateMemoryWithRevision(
+          supabase, resolution.existingId, item.content, resolution.action
+        );
+        if (ok) promoted++;
+        continue;
+      }
+
+      // Insert new fact
+      const { error } = await supabase.from("memory").insert({
+        type: "fact",
+        content: item.content,
+        metadata: {
+          source: "working_memory_promotion",
+          pipeline_session_id: sessionId,
+          agent: item.agent,
+        },
+      });
+      if (!error) promoted++;
+    }
+
+    return promoted;
+  } catch (error) {
+    console.error("promoteWorkingMemory error:", error);
+    return 0;
   }
 }
 

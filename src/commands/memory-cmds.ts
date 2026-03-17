@@ -7,7 +7,8 @@
 
 import { Composer, Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
-import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList } from "../memory.ts";
+import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch } from "../memory.ts";
+import type { LinkedMemory } from "../memory.ts";
 import { notifyIdeaCreated, notifyIdeaPromoted } from "../notifications.ts";
 import { addTask } from "../tasks.ts";
 import { resolveProjectContext } from "../projects.ts";
@@ -30,8 +31,9 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
     await ctx.replyWithChatAction("typing");
 
     try {
-      // Gather recent facts, goals, ideas, and all memory stats
-      const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas] = await Promise.all([
+      // Gather recent facts, goals, ideas, memory stats, and signal/noise data (S36-06)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas, recentMessages, recentMemories] = await Promise.all([
         bctx.supabase.rpc("get_facts"),
         bctx.supabase.rpc("get_active_goals"),
         bctx.supabase.from("memory")
@@ -40,6 +42,12 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
           .limit(50),
         listIdeas(bctx.supabase, ["new", "reviewed"]),
         listIdeas(bctx.supabase, ["new", "reviewed", "promoted", "archived"]),
+        bctx.supabase.from("messages")
+          .select("id")
+          .gte("created_at", sevenDaysAgo),
+        bctx.supabase.from("memory")
+          .select("id")
+          .gte("created_at", sevenDaysAgo),
       ]);
 
       const facts = factsResult.data || [];
@@ -80,11 +88,37 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         .filter((r: any) => r.metadata?.auto_classified)
         .slice(0, 5);
 
+      // Fetch memory clusters (S36-02): linked memories for top facts
+      const factIds = facts.slice(0, 10).map((f: any) => f.id).filter(Boolean);
+      const linkedMap = factIds.length > 0
+        ? await getLinkedMemoriesBatch(bctx.supabase!, factIds)
+        : new Map<string, LinkedMemory[]>();
+
+      // Build cluster text
+      const clusterLines: string[] = [];
+      for (const fact of facts.slice(0, 10)) {
+        const links = linkedMap.get(fact.id) || [];
+        if (links.length > 0) {
+          clusterLines.push(`- ${fact.content}`);
+          for (const link of links) {
+            clusterLines.push(`  -> [${link.link_type}] ${link.linked_content} (sim: ${link.similarity.toFixed(2)})`);
+          }
+        }
+      }
+
+      // Signal/noise ratio (S36-06)
+      const msgCount = recentMessages.data?.length || 0;
+      const memCount = recentMemories.data?.length || 0;
+      const signalNoiseRatio = msgCount > 0
+        ? `${memCount}/${msgCount} (${Math.round((memCount / msgCount) * 100)}%)`
+        : "N/A";
+
       // Build the synthesis prompt
       const contextParts = [
         `STATISTIQUES MEMOIRE`,
         `Total facts: ${facts.length}`,
         `Goals actifs: ${goals.length}`,
+        `Signal/bruit (7j): ${signalNoiseRatio} messages memorises`,
         `Entrees recentes (50 dernieres): ${JSON.stringify(typeCounts)}`,
         topTopics ? `Topics frequents: ${topTopics}` : "",
         "",
@@ -94,6 +128,9 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         `GOALS ACTIFS:`,
         ...goals.map((g: any) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`),
         "",
+        clusterLines.length > 0 ? `CLUSTERS DE MEMOIRE (liens detectes):` : "",
+        ...clusterLines,
+        clusterLines.length > 0 ? "" : "",
         autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
         ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
         "",
@@ -115,9 +152,10 @@ Produis:
 1. RESUME: ce qui s'est passe recemment (2-3 phrases)
 2. DECISIONS CLES: les decisions importantes prises
 3. PATTERNS: les sujets recurrents ou tendances
-4. IDEES: synthese des idees actives, lesquelles meritent d'etre promues en taches, lesquelles sont redondantes ou obsoletes
-5. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
-6. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
+4. CLUSTERS: analyse des groupes de memories connectees, quels themes emergent des liens
+5. IDEES: synthese des idees actives, lesquelles meritent d'etre promues en taches, lesquelles sont redondantes ou obsoletes
+6. SUGGESTIONS: ce qui meriterait d'etre consolide, nettoye ou approfondi
+7. SANTE MEMOIRE: est-ce que la memoire est bien organisee, y a-t-il des doublons ou des trous
 
 Reponds en texte brut, sans markdown.`;
 

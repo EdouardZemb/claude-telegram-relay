@@ -416,3 +416,89 @@ describe("InMemoryBlackboard", () => {
     expect(full!.pipeline_type).toBe("DEFAULT");
   });
 });
+
+// ── working_memory section (S36-07) ──────────────────────────
+
+describe("working_memory section", () => {
+  it("createBlackboard initializes working_memory as null", async () => {
+    const supabase = createMockSupabase();
+    const result = await createBlackboard(supabase, "task-1", "session-wm", "DEFAULT");
+
+    expect(result).not.toBeNull();
+    expect(result!.sections.working_memory).toBeNull();
+  });
+
+  it("all agent roles can write to working_memory", () => {
+    const bb = new InMemoryBlackboard();
+    bb.create("task-1", "session-1");
+
+    const roles = ["analyst", "pm", "architect", "dev", "qa", "sm", "system"];
+    for (const role of roles) {
+      const result = bb.write("session-1", "working_memory", { test: role }, role, bb.get("session-1")!.version);
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("stores working_memory with full structure", () => {
+    const bb = new InMemoryBlackboard();
+    bb.create("task-1", "session-1");
+
+    const wmData = {
+      decisions: [{ agent: "architect", decision: "Use REST API", reasoning: "Simpler" }],
+      discoveries: [{ agent: "qa", fact: "85% coverage", source: "tests" }],
+      blockers: [{ agent: "dev", issue: "API rate limited", status: "active" }],
+      context_updates: [{ agent: "pm", key: "deadline", value: "2026-04-01" }],
+    };
+
+    const result = bb.write("session-1", "working_memory", wmData, "dev", 1);
+    expect(result.success).toBe(true);
+
+    const stored = bb.read("session-1", "working_memory");
+    expect(stored.decisions).toHaveLength(1);
+    expect(stored.decisions[0].decision).toBe("Use REST API");
+    expect(stored.discoveries).toHaveLength(1);
+    expect(stored.blockers).toHaveLength(1);
+    expect(stored.context_updates).toHaveLength(1);
+  });
+
+  it("InMemoryBlackboard includes working_memory in sections", () => {
+    const bb = new InMemoryBlackboard();
+    const row = bb.create("task-1", "session-1");
+
+    expect(row.sections).toHaveProperty("working_memory");
+    expect(row.sections.working_memory).toBeNull();
+  });
+
+  it("Supabase writeSection accepts working_memory (role auth check)", async () => {
+    const supabase = createMockSupabase({
+      blackboard: [{
+        id: "bb-1",
+        session_id: "session-wm",
+        version: 1,
+        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null },
+        history: [],
+        status: "active",
+      }],
+    });
+
+    const result = await writeSection(
+      supabase,
+      "session-wm",
+      "working_memory",
+      { decisions: [], discoveries: [], blockers: [], context_updates: [] },
+      "dev",
+      1
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.newVersion).toBe(2);
+  });
+
+  it("dev-sub-N roles can write to working_memory", () => {
+    const bb = new InMemoryBlackboard();
+    bb.create("task-1", "session-1");
+
+    const result = bb.write("session-1", "working_memory", { test: true }, "dev-sub-0", 1);
+    expect(result.success).toBe(true);
+  });
+});

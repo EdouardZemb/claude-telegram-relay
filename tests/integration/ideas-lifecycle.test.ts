@@ -247,9 +247,10 @@ describe("Ideas Deduplication Integration", () => {
     expect(ideas.length).toBe(1);
   });
 
-  it("does not deduplicate facts even with high similarity", async () => {
+  it("deduplicates facts with high similarity (S36-03)", async () => {
+    supabase._registerRpc("bump_memory_access", () => null);
     supabase._registerFunction("search", () => [
-      { content: "Le serveur tourne sur le port 3000", type: "fact", similarity: 0.95 },
+      { id: "f1", content: "Le serveur tourne sur le port 3000", type: "fact", similarity: 0.95 },
     ]);
 
     await autoRemember(supabase, "Le serveur utilise le port 3000", makeClassification({
@@ -259,8 +260,8 @@ describe("Ideas Deduplication Integration", () => {
     }));
 
     const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(1);
-    expect(memory[0].type).toBe("fact");
+    // S36-03: duplicate fact is skipped (sim >= 0.85), no new memory created
+    expect(memory.length).toBe(0);
   });
 });
 
