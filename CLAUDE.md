@@ -27,7 +27,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
 | `commands/zz-messages.ts` | Composer: message:text (with intent routing), message:voice, message:photo, message:document handlers (loaded last) |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
-| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile with token budgets per role |
+| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph with token budgets per role |
+| `code-graph.ts` | Knowledge graph of the codebase: regex-based TypeScript indexer, dependency/dependent queries, BFS impact radius, complexity estimation, agent context formatting |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
 | `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
@@ -184,6 +185,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Inter-Agent Communication (S38):** Agents in a pipeline can communicate during execution via structured messages on the blackboard. (1) Agent Event Log: `agent-events.ts` provides event sourcing with `agent_events` table — tracks spawned, started, completed, failed, clarification_requested, clarification_resolved events per agent per pipeline. In-memory fallback when Supabase unavailable. (2) Inter-Agent Messaging: `agent-messaging.ts` adds a `messages` section to the blackboard. Message types: directive, question, observation, warning, escalation. All roles can write. Truncation at 20 messages (keep 15 most recent). (3) Clarification Protocol: downstream agents can ask questions to upstream agents. Max 1 round-trip per agent pair per pipeline to prevent loops. Supervisor detects unresolved questions after each agent step. (4) Conflict Detection: lexical overlap (Jaccard > 0.5) on working_memory decisions detects contradictions between agents. Higher-ranked agent mediates (architect > pm > analyst). Escalation to user if unresolved. (5) Enriched Context: inter-agent messages injected into agent prompts, prioritized by type (escalation > warning > question). Token budget: 2000 max for messages. (6) Monitoring: /monitor shows agent timeline and message flow summary for latest pipeline. Behind `inter_agent_messaging` feature flag (disabled by default). Backward compatible: pipelines without the flag behave identically.
 
+**Knowledge Graph (S39):** Structural understanding of the codebase for agents. (1) Regex-based Indexer: `code-graph.ts` parses all `src/**/*.ts` files — extracts imports, exports (function, class, interface, type, const), and inter-module edges. No TypeScript compiler dependency. (2) Local Cache: graph stored in `config/code-graph.json`, regenerated via `bun run graph:index`. In-memory cache for fast queries. (3) Graph Queries: `getModuleDependencies()` (what a module imports), `getDependents()` (what imports it), `getImpactRadius()` (BFS of transitive dependents with depth limit), `getRelatedModules()` (imports + importers), `findNode()` (partial match). (4) Agent Context Integration: `buildAgentContext()` injects relevant subgraph when `code_graph` flag enabled. Uses `findAffectedModules()` to match task title to module names, then formats graph context per role (architect/qa get impact radius). (5) LLM Router Enhancement: `routeTask()` includes complexity hint from graph — affected module count and max complexity score — to improve pipeline selection. (6) MCP Tools: `query_dependencies`, `query_dependents`, `query_impact_radius` exposed in MCP memory server for Claude Code agent real-time graph queries. (7) Monitoring: `/monitor` shows graph stats (modules, edges, exports, avg dependencies, most connected). (8) Complexity Estimation: `estimateComplexity()` scores 0-10 based on dependencies, dependents, impact radius, and line count. Behind `code_graph` feature flag (disabled by default).
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -205,7 +208,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 ### Project Structure
 
 ```
-src/                    44 TypeScript modules (core logic)
+src/                    45 TypeScript modules (core logic)
   commands/             10 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/
@@ -215,7 +218,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1165 tests (unit + integration + E2E)
+tests/                  1216 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -223,7 +226,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (948 tests, all must pass before merge)
+- Tests: `bun test` (1216 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
