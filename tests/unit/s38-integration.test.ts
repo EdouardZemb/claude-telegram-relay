@@ -1,89 +1,16 @@
 /**
- * Tests for S38 integration: supervisor extensions, blackboard messages section,
+ * Tests for S38 integration: blackboard messages section,
  * context enrichment, and backward compatibility.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Supervisor, type SupervisorReport } from "../../src/supervisor.ts";
 import {
   InMemoryBlackboard,
   type SectionName,
 } from "../../src/blackboard.ts";
 import { buildStructuredChainContext } from "../../src/agent-schemas.ts";
 import type { AgentMessage } from "../../src/agent-schemas.ts";
-import { isFeatureEnabled } from "../../src/feature-flags.ts";
 
-// ── Supervisor S38 Extensions ────────────────────────────────
-
-describe("Supervisor S38 extensions", () => {
-  let supervisor: Supervisor;
-
-  beforeEach(() => {
-    supervisor = new Supervisor({ maxAttempts: 2 });
-    supervisor.register("dev", "dev");
-    supervisor.register("qa", "qa");
-    supervisor.startPipeline();
-  });
-
-  it("tracks message count", () => {
-    supervisor.recordMessage();
-    supervisor.recordMessage();
-    expect(supervisor.getInterAgentMetrics().messageCount).toBe(2);
-  });
-
-  it("tracks clarification count", () => {
-    supervisor.recordClarification();
-    expect(supervisor.getInterAgentMetrics().clarificationCount).toBe(1);
-  });
-
-  it("tracks conflict count", () => {
-    supervisor.recordConflict();
-    supervisor.recordConflict();
-    expect(supervisor.getInterAgentMetrics().conflictCount).toBe(2);
-  });
-
-  it("includes S38 metrics in report", () => {
-    supervisor.recordMessage();
-    supervisor.recordMessage();
-    supervisor.recordMessage();
-    supervisor.recordClarification();
-    supervisor.recordConflict();
-
-    supervisor.markStarted("dev");
-    supervisor.markCompleted("dev", {
-      agentId: "dev", agentName: "Dev", success: true,
-      output: "ok", structured: null, durationMs: 1000,
-    });
-
-    const report = supervisor.generateReport();
-    expect(report.message_count).toBe(3);
-    expect(report.clarification_count).toBe(1);
-    expect(report.conflict_count).toBe(1);
-  });
-
-  // AC-030: Pipeline metrics with counts
-  it("defaults to zero S38 metrics", () => {
-    const report = supervisor.generateReport();
-    expect(report.message_count).toBe(0);
-    expect(report.clarification_count).toBe(0);
-    expect(report.conflict_count).toBe(0);
-  });
-
-  // Backward compatible: existing supervisor behavior unchanged
-  it("preserves existing supervisor behavior", () => {
-    supervisor.markStarted("dev");
-    supervisor.markCompleted("dev", {
-      agentId: "dev", agentName: "Dev", success: true,
-      output: "ok", structured: null, durationMs: 1000,
-    });
-
-    const status = supervisor.getStatus("dev");
-    expect(status?.status).toBe("succeeded");
-
-    const report = supervisor.generateReport();
-    expect(report.succeeded.length).toBe(1);
-  });
-});
 
 // ── Blackboard Messages Section ──────────────────────────────
 
@@ -189,18 +116,6 @@ describe("buildStructuredChainContext with inter-agent context", () => {
   });
 });
 
-// ── Feature Flag ─────────────────────────────────────────────
-
-describe("inter_agent_messaging feature flag", () => {
-  // SC-008: Feature flag disabled by default
-  it("inter_agent_messaging flag exists and is disabled by default", () => {
-    // The flag is defined in config/features.json
-    // We can't easily test the default without resetting, but we can verify
-    // isFeatureEnabled doesn't crash
-    const result = isFeatureEnabled("inter_agent_messaging");
-    expect(typeof result).toBe("boolean");
-  });
-});
 
 // ── SC-007: Backward Compatibility ───────────────────────────
 

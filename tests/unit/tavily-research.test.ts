@@ -37,7 +37,6 @@ import {
 } from "../../src/llm-router";
 import { getAction } from "../../src/action-registry";
 import { detectIntent } from "../../src/intent-detection";
-import { isFeatureEnabled } from "../../src/feature-flags";
 
 // ── Tavily MCP Config ──────────────────────────────────────────
 
@@ -326,10 +325,3 @@ describe("Intent detection research patterns", () => {
   });
 });
 
-// ── Feature Flag ───────────────────────────────────────────────
-
-describe("tavily_search feature flag", () => {
-  it("tavily_search flag exists and is enabled", () => {
-    expect(isFeatureEnabled("tavily_search")).toBe(true);
-  });
-});

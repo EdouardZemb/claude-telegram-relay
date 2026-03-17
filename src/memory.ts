@@ -23,7 +23,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { notifyIdeaCreated } from "./notifications.ts";
+import { enqueue } from "./notification-queue.ts";
 
 // ── Memory Importance & Decay (S23-02) ───────────────────────
 
@@ -166,7 +166,18 @@ export async function processMemoryIntents(
       metadata: { source: "intent-tag" },
     });
     if (error) console.error("memory insert (idea) error:", error);
-    else await notifyIdeaCreated(match[1], "intent-tag");
+    else {
+      const ideaPreview = match[1].length > 80 ? match[1].slice(0, 80) + "..." : match[1];
+      const ts = new Date().toLocaleTimeString("fr-FR", {
+        hour: "2-digit", minute: "2-digit",
+        timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+      });
+      await enqueue({
+        type: "idea",
+        severity: "normal",
+        message: `[${ts}] Nouvelle idee (intent-tag): ${ideaPreview}`,
+      });
+    }
     clean = clean.replace(match[0], "");
   }
 
@@ -432,7 +443,18 @@ export async function autoRemember(
     });
 
     if (error) console.error("auto-remember insert error:", error);
-    else if (memoryType === "idea") await notifyIdeaCreated(memoryContent, "auto-detect");
+    else if (memoryType === "idea") {
+      const autoPreview = memoryContent.length > 80 ? memoryContent.slice(0, 80) + "..." : memoryContent;
+      const ts = new Date().toLocaleTimeString("fr-FR", {
+        hour: "2-digit", minute: "2-digit",
+        timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+      });
+      await enqueue({
+        type: "idea",
+        severity: "normal",
+        message: `[${ts}] Nouvelle idee (auto-detect): ${autoPreview}`,
+      });
+    }
 
     // Auto-create goals from action_items
     await autoCreateGoals(supabase, classification);

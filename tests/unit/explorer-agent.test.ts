@@ -23,7 +23,6 @@ import {
   buildMcpToolInstructions,
   isToolAllowed,
 } from "../../src/mcp-config";
-import { isFeatureEnabled } from "../../src/feature-flags";
 
 // ── Agent Definition ────────────────────────────────────────────
 
@@ -190,10 +189,3 @@ describe("Explorer MCP Config", () => {
   });
 });
 
-// ── Feature Flag ────────────────────────────────────────────────
-
-describe("Explorer Feature Flag", () => {
-  it("explore_mode flag exists and is enabled", () => {
-    expect(isFeatureEnabled("explore_mode")).toBe(true);
-  });
-});

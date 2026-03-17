@@ -88,7 +88,15 @@
           "kind": "function"
         },
         {
+          "name": "getAutoApproveThresholds",
+          "kind": "function"
+        },
+        {
           "name": "shouldAutoApprove",
+          "kind": "function"
+        },
+        {
+          "name": "getAutonomyLevel",
           "kind": "function"
         },
         {
@@ -124,7 +132,7 @@
           "kind": "const"
         }
       ],
-      "lineCount": 240
+      "lineCount": 287
     },
     {
       "id": "src/tts.ts",
@@ -165,40 +173,6 @@
         }
       ],
       "lineCount": 263
-    },
-    {
-      "id": "src/fan-out.ts",
-      "exports": [
-        {
-          "name": "parseSubtasks",
-          "kind": "function"
-        },
-        {
-          "name": "shouldFanOut",
-          "kind": "function"
-        },
-        {
-          "name": "fanOut",
-          "kind": "function"
-        },
-        {
-          "name": "fanIn",
-          "kind": "function"
-        },
-        {
-          "name": "Subtask",
-          "kind": "interface"
-        },
-        {
-          "name": "FanOutResult",
-          "kind": "interface"
-        },
-        {
-          "name": "RunDevAgentFn",
-          "kind": "type"
-        }
-      ],
-      "lineCount": 208
     },
     {
       "id": "src/notification-prefs.ts",
@@ -422,7 +396,7 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 386
+      "lineCount": 451
     },
     {
       "id": "src/intent-detection.ts",
@@ -452,7 +426,7 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 329
+      "lineCount": 364
     },
     {
       "id": "src/tasks.ts",
@@ -547,6 +521,32 @@
       "lineCount": 271
     },
     {
+      "id": "src/explore-graph.ts",
+      "exports": [
+        {
+          "name": "extractModuleName",
+          "kind": "function"
+        },
+        {
+          "name": "detectGraphQuery",
+          "kind": "function"
+        },
+        {
+          "name": "tryGraphResponse",
+          "kind": "function"
+        },
+        {
+          "name": "GraphQueryResult",
+          "kind": "interface"
+        },
+        {
+          "name": "GraphQueryType",
+          "kind": "type"
+        }
+      ],
+      "lineCount": 369
+    },
+    {
       "id": "src/gate-evaluator.ts",
       "exports": [
         {
@@ -626,7 +626,7 @@
           "kind": "const"
         }
       ],
-      "lineCount": 738
+      "lineCount": 735
     },
     {
       "id": "src/auto-pipeline.ts",
@@ -717,32 +717,6 @@
         }
       ],
       "lineCount": 175
-    },
-    {
-      "id": "src/supervisor.ts",
-      "exports": [
-        {
-          "name": "Supervisor",
-          "kind": "class"
-        },
-        {
-          "name": "AgentStatus",
-          "kind": "interface"
-        },
-        {
-          "name": "SupervisorReport",
-          "kind": "interface"
-        },
-        {
-          "name": "AgentStatusType",
-          "kind": "type"
-        },
-        {
-          "name": "SupervisorDecision",
-          "kind": "type"
-        }
-      ],
-      "lineCount": 260
     },
     {
       "id": "src/bot-context.ts",
@@ -837,6 +811,56 @@
       "lineCount": 80
     },
     {
+      "id": "src/pipeline-selection.ts",
+      "exports": [
+        {
+          "name": "selectPipeline",
+          "kind": "function"
+        },
+        {
+          "name": "selectAdaptivePipeline",
+          "kind": "function"
+        },
+        {
+          "name": "classifyPipeline",
+          "kind": "function"
+        },
+        {
+          "name": "classifyAdaptivePipeline",
+          "kind": "function"
+        },
+        {
+          "name": "PipelineType",
+          "kind": "type"
+        },
+        {
+          "name": "DEFAULT_PIPELINE",
+          "kind": "const"
+        },
+        {
+          "name": "QUICK_PIPELINE",
+          "kind": "const"
+        },
+        {
+          "name": "REVIEW_PIPELINE",
+          "kind": "const"
+        },
+        {
+          "name": "SOLO_PIPELINE",
+          "kind": "const"
+        },
+        {
+          "name": "LIGHT_PIPELINE",
+          "kind": "const"
+        },
+        {
+          "name": "RESEARCH_PIPELINE",
+          "kind": "const"
+        }
+      ],
+      "lineCount": 190
+    },
+    {
       "id": "src/agent-messaging.ts",
       "exports": [
         {
@@ -924,15 +948,11 @@
       "id": "src/orchestrator.ts",
       "exports": [
         {
+          "name": "runAgentStep",
+          "kind": "function"
+        },
+        {
           "name": "orchestrate",
-          "kind": "function"
-        },
-        {
-          "name": "selectPipeline",
-          "kind": "function"
-        },
-        {
-          "name": "classifyPipeline",
           "kind": "function"
         },
         {
@@ -941,10 +961,6 @@
         },
         {
           "name": "AgentStepResult",
-          "kind": "interface"
-        },
-        {
-          "name": "ParallelMetrics",
           "kind": "interface"
         },
         {
@@ -958,25 +974,9 @@
         {
           "name": "AgentRole",
           "kind": "type"
-        },
-        {
-          "name": "PipelineType",
-          "kind": "type"
-        },
-        {
-          "name": "DEFAULT_PIPELINE",
-          "kind": "const"
-        },
-        {
-          "name": "QUICK_PIPELINE",
-          "kind": "const"
-        },
-        {
-          "name": "REVIEW_PIPELINE",
-          "kind": "const"
         }
       ],
-      "lineCount": 1469
+      "lineCount": 1226
     },
     {
       "id": "src/transcribe.ts",
@@ -1028,7 +1028,7 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 521
+      "lineCount": 560
     },
     {
       "id": "src/gate-persistence.ts",
@@ -1065,6 +1065,84 @@
       "lineCount": 225
     },
     {
+      "id": "src/conversation-session.ts",
+      "exports": [
+        {
+          "name": "getSession",
+          "kind": "function"
+        },
+        {
+          "name": "hasActiveSession",
+          "kind": "function"
+        },
+        {
+          "name": "addMessage",
+          "kind": "function"
+        },
+        {
+          "name": "addIntent",
+          "kind": "function"
+        },
+        {
+          "name": "addConstraint",
+          "kind": "function"
+        },
+        {
+          "name": "addDecision",
+          "kind": "function"
+        },
+        {
+          "name": "setActiveTask",
+          "kind": "function"
+        },
+        {
+          "name": "extractConstraints",
+          "kind": "function"
+        },
+        {
+          "name": "formatSessionForIntent",
+          "kind": "function"
+        },
+        {
+          "name": "buildConversationContext",
+          "kind": "function"
+        },
+        {
+          "name": "cleanupExpiredSessions",
+          "kind": "function"
+        },
+        {
+          "name": "getActiveSessionCount",
+          "kind": "function"
+        },
+        {
+          "name": "_resetSessions",
+          "kind": "function"
+        },
+        {
+          "name": "DetectedConstraint",
+          "kind": "interface"
+        },
+        {
+          "name": "SessionDecision",
+          "kind": "interface"
+        },
+        {
+          "name": "IntentEntry",
+          "kind": "interface"
+        },
+        {
+          "name": "ConversationSession",
+          "kind": "interface"
+        },
+        {
+          "name": "SessionPhase",
+          "kind": "type"
+        }
+      ],
+      "lineCount": 387
+    },
+    {
       "id": "src/commands/help.ts",
       "exports": [
         {
@@ -1072,7 +1150,7 @@
           "kind": "default"
         }
       ],
-      "lineCount": 244
+      "lineCount": 255
     },
     {
       "id": "src/commands/project.ts",
@@ -1092,7 +1170,7 @@
           "kind": "default"
         }
       ],
-      "lineCount": 194
+      "lineCount": 212
     },
     {
       "id": "src/commands/profile.ts",
@@ -1112,7 +1190,7 @@
           "kind": "default"
         }
       ],
-      "lineCount": 337
+      "lineCount": 347
     },
     {
       "id": "src/commands/planning.ts",
@@ -1142,7 +1220,7 @@
           "kind": "default"
         }
       ],
-      "lineCount": 375
+      "lineCount": 399
     },
     {
       "id": "src/commands/memory-cmds.ts",
@@ -1152,7 +1230,7 @@
           "kind": "default"
         }
       ],
-      "lineCount": 393
+      "lineCount": 404
     },
     {
       "id": "src/commands/quality.ts",
@@ -1162,7 +1240,39 @@
           "kind": "default"
         }
       ],
-      "lineCount": 298
+      "lineCount": 267
+    },
+    {
+      "id": "src/commands/exploration.ts",
+      "exports": [
+        {
+          "name": "detectWebResearchIntent",
+          "kind": "function"
+        },
+        {
+          "name": "explorationCommands",
+          "kind": "default"
+        }
+      ],
+      "lineCount": 180
+    },
+    {
+      "id": "src/deliberation.ts",
+      "exports": [
+        {
+          "name": "runDeliberation",
+          "kind": "function"
+        },
+        {
+          "name": "shouldDeliberate",
+          "kind": "function"
+        },
+        {
+          "name": "getDeliberationReviewer",
+          "kind": "function"
+        }
+      ],
+      "lineCount": 139
     },
     {
       "id": "src/code-graph.ts",
@@ -1286,6 +1396,14 @@
           "kind": "function"
         },
         {
+          "name": "measureRuleEffectiveness",
+          "kind": "function"
+        },
+        {
+          "name": "promoteOrArchiveRules",
+          "kind": "function"
+        },
+        {
           "name": "formatFeedbackRules",
           "kind": "function"
         },
@@ -1294,7 +1412,45 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 332
+      "lineCount": 432
+    },
+    {
+      "id": "src/heartbeat-prompt.ts",
+      "exports": [
+        {
+          "name": "buildHeartbeatPrompt",
+          "kind": "function"
+        },
+        {
+          "name": "createDefaultState",
+          "kind": "function"
+        },
+        {
+          "name": "HeartbeatState",
+          "kind": "interface"
+        },
+        {
+          "name": "HeartbeatAction",
+          "kind": "interface"
+        },
+        {
+          "name": "HeartbeatDecision",
+          "kind": "interface"
+        },
+        {
+          "name": "HeartbeatDelta",
+          "kind": "interface"
+        },
+        {
+          "name": "HEARTBEAT_DECISION_SCHEMA",
+          "kind": "const"
+        },
+        {
+          "name": "HEARTBEAT_SYSTEM_PROMPT",
+          "kind": "const"
+        }
+      ],
+      "lineCount": 221
     },
     {
       "id": "src/llm-router.ts",
@@ -1312,11 +1468,35 @@
           "kind": "function"
         },
         {
+          "name": "analyzeDescription",
+          "kind": "function"
+        },
+        {
+          "name": "computeGraphScoreFromGraph",
+          "kind": "function"
+        },
+        {
+          "name": "computeHistoricalScore",
+          "kind": "function"
+        },
+        {
+          "name": "scoreToPipeline",
+          "kind": "function"
+        },
+        {
+          "name": "computeDifficultyScore",
+          "kind": "function"
+        },
+        {
           "name": "RouterDecision",
+          "kind": "interface"
+        },
+        {
+          "name": "DifficultyScore",
           "kind": "interface"
         }
       ],
-      "lineCount": 197
+      "lineCount": 432
     },
     {
       "id": "src/document-sharding.ts",
@@ -1488,11 +1668,27 @@
           "kind": "function"
         },
         {
+          "name": "fetchTrustContext",
+          "kind": "function"
+        },
+        {
+          "name": "fetchSprintMetrics",
+          "kind": "function"
+        },
+        {
+          "name": "fetchDocumentContext",
+          "kind": "function"
+        },
+        {
+          "name": "fetchSimilarTasksContext",
+          "kind": "function"
+        },
+        {
           "name": "AgentContextOptions",
           "kind": "interface"
         }
       ],
-      "lineCount": 242
+      "lineCount": 391
     },
     {
       "id": "src/workflow.ts",
@@ -1625,32 +1821,6 @@
       "lineCount": 770
     },
     {
-      "id": "src/workflow-propagation.ts",
-      "exports": [
-        {
-          "name": "proposeWorkflowChange",
-          "kind": "function"
-        },
-        {
-          "name": "getPendingProposals",
-          "kind": "function"
-        },
-        {
-          "name": "extractProposalsFromRetro",
-          "kind": "function"
-        },
-        {
-          "name": "formatProposals",
-          "kind": "function"
-        },
-        {
-          "name": "WorkflowProposal",
-          "kind": "interface"
-        }
-      ],
-      "lineCount": 227
-    },
-    {
       "id": "src/proactive-planner.ts",
       "exports": [
         {
@@ -1670,7 +1840,7 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 322
+      "lineCount": 417
     },
     {
       "id": "src/blackboard.ts",
@@ -1802,7 +1972,7 @@
           "kind": "function"
         }
       ],
-      "lineCount": 244
+      "lineCount": 242
     },
     {
       "id": "src/cost-tracking.ts",
@@ -1914,6 +2084,14 @@
           "kind": "interface"
         },
         {
+          "name": "PlannerOutput",
+          "kind": "interface"
+        },
+        {
+          "name": "ExplorerOutput",
+          "kind": "interface"
+        },
+        {
           "name": "AgentMessage",
           "kind": "interface"
         },
@@ -1922,7 +2100,7 @@
           "kind": "type"
         }
       ],
-      "lineCount": 665
+      "lineCount": 858
     },
     {
       "id": "src/action-registry.ts",
@@ -1960,7 +2138,7 @@
           "kind": "type"
         }
       ],
-      "lineCount": 444
+      "lineCount": 456
     },
     {
       "id": "src/notification-queue.ts",
@@ -1998,6 +2176,10 @@
           "kind": "function"
         },
         {
+          "name": "consumeMcpPending",
+          "kind": "function"
+        },
+        {
           "name": "startQueue",
           "kind": "function"
         },
@@ -2014,12 +2196,12 @@
           "kind": "interface"
         }
       ],
-      "lineCount": 337
+      "lineCount": 369
     },
     {
       "id": "src/alert-cron.ts",
       "exports": [],
-      "lineCount": 105
+      "lineCount": 111
     },
     {
       "id": "src/agent.ts",
@@ -2062,7 +2244,7 @@
     {
       "id": "src/autonomy-cron.ts",
       "exports": [],
-      "lineCount": 143
+      "lineCount": 149
     },
     {
       "id": "src/story-files.ts",
@@ -2129,42 +2311,66 @@
       "lineCount": 67
     },
     {
-      "id": "src/notifications.ts",
+      "id": "src/heartbeat.ts",
       "exports": [
         {
-          "name": "initNotifications",
+          "name": "loadState",
           "kind": "function"
         },
         {
-          "name": "sendToTopic",
+          "name": "saveState",
           "kind": "function"
         },
         {
-          "name": "notifyPRCreated",
+          "name": "getGitDelta",
           "kind": "function"
         },
         {
-          "name": "notifyTaskStarted",
+          "name": "getSprintDelta",
           "kind": "function"
         },
         {
-          "name": "notifyTaskDone",
+          "name": "getCIStatus",
           "kind": "function"
         },
         {
-          "name": "notifyIdeaCreated",
+          "name": "getOpenPRs",
           "kind": "function"
         },
         {
-          "name": "notifyIdeaPromoted",
+          "name": "getStaleTasks",
           "kind": "function"
+        },
+        {
+          "name": "collectAndTriage",
+          "kind": "function"
+        },
+        {
+          "name": "executeActions",
+          "kind": "function"
+        },
+        {
+          "name": "pulse",
+          "kind": "function"
+        },
+        {
+          "name": "TriageResult",
+          "kind": "interface"
         }
       ],
-      "lineCount": 122
+      "lineCount": 596
     },
     {
       "id": "src/mcp-config.ts",
       "exports": [
+        {
+          "name": "getTavilyToolsForRole",
+          "kind": "function"
+        },
+        {
+          "name": "getTavilyAllowedToolNames",
+          "kind": "function"
+        },
         {
           "name": "getMcpToolsForRole",
           "kind": "function"
@@ -2186,11 +2392,19 @@
           "kind": "type"
         },
         {
+          "name": "TavilyToolName",
+          "kind": "type"
+        },
+        {
           "name": "MCP_TOOLS",
+          "kind": "const"
+        },
+        {
+          "name": "TAVILY_TOOLS",
           "kind": "const"
         }
       ],
-      "lineCount": 182
+      "lineCount": 262
     },
     {
       "id": "src/dag-executor.ts",
@@ -2242,9 +2456,21 @@
         {
           "name": "REVIEW_DAG",
           "kind": "const"
+        },
+        {
+          "name": "SOLO_DAG",
+          "kind": "const"
+        },
+        {
+          "name": "LIGHT_DAG",
+          "kind": "const"
+        },
+        {
+          "name": "RESEARCH_DAG",
+          "kind": "const"
         }
       ],
-      "lineCount": 252
+      "lineCount": 278
     },
     {
       "id": "src/cost-estimate.ts",
@@ -2380,6 +2606,30 @@
           "kind": "function"
         },
         {
+          "name": "classifyLinkContent",
+          "kind": "function"
+        },
+        {
+          "name": "getMemoryChain",
+          "kind": "function"
+        },
+        {
+          "name": "clusterMemories",
+          "kind": "function"
+        },
+        {
+          "name": "formatClusters",
+          "kind": "function"
+        },
+        {
+          "name": "buildMemoryChains",
+          "kind": "function"
+        },
+        {
+          "name": "findSimilarPastTasks",
+          "kind": "function"
+        },
+        {
           "name": "ThoughtClassification",
           "kind": "interface"
         },
@@ -2400,11 +2650,23 @@
           "kind": "interface"
         },
         {
+          "name": "MemoryChainNode",
+          "kind": "interface"
+        },
+        {
+          "name": "MemoryCluster",
+          "kind": "interface"
+        },
+        {
+          "name": "SimilarTask",
+          "kind": "interface"
+        },
+        {
           "name": "ConflictResolution",
           "kind": "type"
         }
       ],
-      "lineCount": 1075
+      "lineCount": 1570
     },
     {
       "id": "src/projects.ts",
@@ -2497,6 +2759,14 @@
       "isTypeOnly": false
     },
     {
+      "source": "src/trust-scores.ts",
+      "target": "src/bmad-agents.ts",
+      "imports": [
+        "getAgent"
+      ],
+      "isTypeOnly": false
+    },
+    {
       "source": "src/code-review.ts",
       "target": "src/bmad-prompts.ts",
       "imports": [
@@ -2509,52 +2779,6 @@
       "target": "src/agent.ts",
       "imports": [
         "spawnClaude"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/fan-out.ts",
-      "target": "src/orchestrator.ts",
-      "imports": [
-        "AgentRole",
-        "AgentStepResult"
-      ],
-      "isTypeOnly": true
-    },
-    {
-      "source": "src/fan-out.ts",
-      "target": "src/tasks.ts",
-      "imports": [
-        "Task"
-      ],
-      "isTypeOnly": true
-    },
-    {
-      "source": "src/fan-out.ts",
-      "target": "src/agent-schemas.ts",
-      "imports": [
-        "StructuredAgentOutput",
-        "AgentMessage"
-      ],
-      "isTypeOnly": true
-    },
-    {
-      "source": "src/fan-out.ts",
-      "target": "src/semaphore.ts",
-      "imports": [
-        "Semaphore"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/fan-out.ts",
-      "target": "src/worktree.ts",
-      "imports": [
-        "createWorktree",
-        "cleanupWorktree",
-        "mergeWorktrees",
-        "detectFileOverlap",
-        "type WorktreeInfo"
       ],
       "isTypeOnly": false
     },
@@ -2606,6 +2830,22 @@
       "isTypeOnly": false
     },
     {
+      "source": "src/explore-graph.ts",
+      "target": "src/code-graph.ts",
+      "imports": [
+        "type CodeGraph",
+        "findNode",
+        "getModuleDependencies",
+        "getDependents",
+        "getImpactRadius",
+        "getRelatedModules",
+        "getGraphStats",
+        "estimateComplexity",
+        "findAffectedModules"
+      ],
+      "isTypeOnly": false
+    },
+    {
       "source": "src/gate-evaluator.ts",
       "target": "src/blackboard.ts",
       "imports": [
@@ -2639,14 +2879,6 @@
       "imports": [
         "persistGateEvaluation",
         "runDoubleLoopAnalysis"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/gate-evaluator.ts",
-      "target": "src/feature-flags.ts",
-      "imports": [
-        "isFeatureEnabled"
       ],
       "isTypeOnly": false
     },
@@ -2746,15 +2978,6 @@
       "isTypeOnly": true
     },
     {
-      "source": "src/supervisor.ts",
-      "target": "src/orchestrator.ts",
-      "imports": [
-        "AgentRole",
-        "AgentStepResult"
-      ],
-      "isTypeOnly": true
-    },
-    {
       "source": "src/bot-context.ts",
       "target": "src/transcribe.ts",
       "imports": [
@@ -2800,6 +3023,22 @@
       "target": "src/bot-context.ts",
       "imports": [
         "BotContext"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/pipeline-selection.ts",
+      "target": "src/tasks.ts",
+      "imports": [
+        "Task"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/pipeline-selection.ts",
+      "target": "src/orchestrator.ts",
+      "imports": [
+        "AgentRole"
       ],
       "isTypeOnly": true
     },
@@ -2963,43 +3202,9 @@
     },
     {
       "source": "src/orchestrator.ts",
-      "target": "src/dag-executor.ts",
-      "imports": [
-        "executeDag",
-        "getDAG",
-        "buildSequentialDAG",
-        "type DAGNode",
-        "type DAGExecutionResult"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/orchestrator.ts",
-      "target": "src/supervisor.ts",
-      "imports": [
-        "Supervisor",
-        "type SupervisorReport"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/orchestrator.ts",
-      "target": "src/fan-out.ts",
-      "imports": [
-        "fanOut",
-        "fanIn",
-        "parseSubtasks",
-        "shouldFanOut",
-        "type FanOutResult"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/orchestrator.ts",
       "target": "src/blackboard.ts",
       "imports": [
-        "writeSectionWithRetry",
-        "mergeImplementationSection"
+        "writeSectionWithRetry"
       ],
       "isTypeOnly": false
     },
@@ -3053,9 +3258,29 @@
     },
     {
       "source": "src/orchestrator.ts",
-      "target": "src/feature-flags.ts",
+      "target": "src/pipeline-selection.ts",
       "imports": [
-        "isFeatureEnabled"
+        "DEFAULT_PIPELINE",
+        "QUICK_PIPELINE",
+        "REVIEW_PIPELINE",
+        "SOLO_PIPELINE",
+        "LIGHT_PIPELINE",
+        "RESEARCH_PIPELINE",
+        "selectPipeline",
+        "selectAdaptivePipeline",
+        "classifyPipeline",
+        "classifyAdaptivePipeline",
+        "type PipelineType"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/orchestrator.ts",
+      "target": "src/deliberation.ts",
+      "imports": [
+        "shouldDeliberate",
+        "getDeliberationReviewer",
+        "runDeliberation"
       ],
       "isTypeOnly": false
     },
@@ -3113,7 +3338,8 @@
       "source": "src/commands/help.ts",
       "target": "src/trust-scores.ts",
       "imports": [
-        "formatRecentGateEvaluations"
+        "formatRecentGateEvaluations",
+        "formatTrustScores"
       ],
       "isTypeOnly": false
     },
@@ -3127,9 +3353,10 @@
     },
     {
       "source": "src/commands/help.ts",
-      "target": "src/feature-flags.ts",
+      "target": "src/feedback-loop.ts",
       "imports": [
-        "isFeatureEnabled"
+        "formatFeedbackRules",
+        "getFeedbackRules"
       ],
       "isTypeOnly": false
     },
@@ -3158,6 +3385,14 @@
       "imports": [
         "loadGraph",
         "formatGraphStatsForMonitor"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/help.ts",
+      "target": "src/conversation-session.ts",
+      "imports": [
+        "getActiveSessionCount"
       ],
       "isTypeOnly": false
     },
@@ -3217,10 +3452,9 @@
     },
     {
       "source": "src/commands/tasks.ts",
-      "target": "src/notifications.ts",
+      "target": "src/notification-queue.ts",
       "imports": [
-        "notifyTaskStarted",
-        "notifyTaskDone"
+        "enqueue"
       ],
       "isTypeOnly": false
     },
@@ -3303,19 +3537,10 @@
     },
     {
       "source": "src/commands/zz-messages.ts",
-      "target": "src/feature-flags.ts",
-      "imports": [
-        "isFeatureEnabled"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/commands/zz-messages.ts",
       "target": "src/intent-detection.ts",
       "imports": [
         "detectIntent",
-        "detectIntentWithLLM",
-        "formatIntentSuggestion"
+        "detectIntentWithLLM"
       ],
       "isTypeOnly": false
     },
@@ -3334,6 +3559,19 @@
       "target": "src/action-registry.ts",
       "imports": [
         "formatActionsForLLM"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/zz-messages.ts",
+      "target": "src/conversation-session.ts",
+      "imports": [
+        "getSession",
+        "addMessage",
+        "addIntent",
+        "extractConstraints",
+        "addConstraint",
+        "formatSessionForIntent"
       ],
       "isTypeOnly": false
     },
@@ -3438,7 +3676,6 @@
       "source": "src/commands/utilities.ts",
       "target": "src/feature-flags.ts",
       "imports": [
-        "isFeatureEnabled",
         "setFeature",
         "formatFeatures"
       ],
@@ -3565,10 +3802,9 @@
     },
     {
       "source": "src/commands/execution.ts",
-      "target": "src/notifications.ts",
+      "target": "src/notification-queue.ts",
       "imports": [
-        "notifyPRCreated",
-        "notifyTaskDone"
+        "enqueue"
       ],
       "isTypeOnly": false
     },
@@ -3577,6 +3813,16 @@
       "target": "src/pipeline-state.ts",
       "imports": [
         "findLatestPipelineRun"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/execution.ts",
+      "target": "src/conversation-session.ts",
+      "imports": [
+        "getSession",
+        "buildConversationContext",
+        "hasActiveSession"
       ],
       "isTypeOnly": false
     },
@@ -3599,7 +3845,9 @@
         "promoteIdea",
         "archiveIdea",
         "formatIdeasList",
-        "getLinkedMemoriesBatch"
+        "getLinkedMemoriesBatch",
+        "clusterMemories",
+        "formatClusters"
       ],
       "isTypeOnly": false
     },
@@ -3613,10 +3861,9 @@
     },
     {
       "source": "src/commands/memory-cmds.ts",
-      "target": "src/notifications.ts",
+      "target": "src/notification-queue.ts",
       "imports": [
-        "notifyIdeaCreated",
-        "notifyIdeaPromoted"
+        "enqueue"
       ],
       "isTypeOnly": false
     },
@@ -3717,19 +3964,135 @@
       "isTypeOnly": false
     },
     {
-      "source": "src/commands/quality.ts",
-      "target": "src/workflow-propagation.ts",
+      "source": "src/commands/exploration.ts",
+      "target": "src/bot-context.ts",
       "imports": [
-        "proposeWorkflowChange",
-        "extractProposalsFromRetro"
+        "BotContext"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/agent.ts",
+      "imports": [
+        "spawnClaude"
       ],
       "isTypeOnly": false
     },
     {
-      "source": "src/commands/quality.ts",
+      "source": "src/commands/exploration.ts",
+      "target": "src/bmad-agents.ts",
+      "imports": [
+        "getAgent"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/agent-context.ts",
+      "imports": [
+        "buildAgentContext"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/agent-schemas.ts",
+      "imports": [
+        "getJsonSchemaForRole",
+        "parseAgentOutput",
+        "formatStructuredOutput",
+        "buildStructuredOutputInstructions"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/bmad-prompts.ts",
+      "imports": [
+        "buildAgentSystemPromptPart",
+        "buildAgentTaskPromptPart"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
       "target": "src/projects.ts",
       "imports": [
         "resolveProjectContext"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/code-graph.ts",
+      "imports": [
+        "getGraph"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/commands/exploration.ts",
+      "target": "src/explore-graph.ts",
+      "imports": [
+        "tryGraphResponse"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/tasks.ts",
+      "imports": [
+        "Task"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/agent-schemas.ts",
+      "imports": [
+        "AgentMessage"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/agent-schemas.ts",
+      "imports": [
+        "parseAgentOutput"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/bmad-agents.ts",
+      "imports": [
+        "getAgent"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/agent.ts",
+      "imports": [
+        "spawnClaude"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/orchestrator.ts",
+      "imports": [
+        "AgentRole",
+        "AgentStepResult"
+      ],
+      "isTypeOnly": true
+    },
+    {
+      "source": "src/deliberation.ts",
+      "target": "src/orchestrator.ts",
+      "imports": [
+        "runAgentStep"
       ],
       "isTypeOnly": false
     },
@@ -3767,19 +4130,21 @@
     },
     {
       "source": "src/llm-router.ts",
-      "target": "src/feature-flags.ts",
+      "target": "src/code-graph.ts",
       "imports": [
-        "isFeatureEnabled"
+        "getGraph",
+        "estimateComplexity",
+        "findAffectedModules",
+        "type CodeGraph"
       ],
       "isTypeOnly": false
     },
     {
       "source": "src/llm-router.ts",
-      "target": "src/code-graph.ts",
+      "target": "src/memory.ts",
       "imports": [
-        "getGraph",
-        "estimateComplexity",
-        "findAffectedModules"
+        "findSimilarPastTasks",
+        "type SimilarTask"
       ],
       "isTypeOnly": false
     },
@@ -3809,19 +4174,37 @@
     },
     {
       "source": "src/agent-context.ts",
-      "target": "src/feature-flags.ts",
-      "imports": [
-        "isFeatureEnabled"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/agent-context.ts",
       "target": "src/code-graph.ts",
       "imports": [
         "getGraph",
         "formatGraphContext",
         "findAffectedModules"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/agent-context.ts",
+      "target": "src/trust-scores.ts",
+      "imports": [
+        "getCachedTrustScore",
+        "getCachedTrustScores"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/agent-context.ts",
+      "target": "src/document-sharding.ts",
+      "imports": [
+        "buildTaskContext"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/agent-context.ts",
+      "target": "src/memory.ts",
+      "imports": [
+        "buildMemoryChains",
+        "findSimilarPastTasks"
       ],
       "isTypeOnly": false
     },
@@ -3832,6 +4215,33 @@
         "Task"
       ],
       "isTypeOnly": true
+    },
+    {
+      "source": "src/proactive-planner.ts",
+      "target": "src/code-graph.ts",
+      "imports": [
+        "loadGraph",
+        "findAffectedModules",
+        "estimateComplexity"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/proactive-planner.ts",
+      "target": "src/memory.ts",
+      "imports": [
+        "findSimilarPastTasks"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/proactive-planner.ts",
+      "target": "src/trust-scores.ts",
+      "imports": [
+        "getCachedTrustScore",
+        "getAutonomyLevel"
+      ],
+      "isTypeOnly": false
     },
     {
       "source": "src/blackboard.ts",
@@ -3865,14 +4275,6 @@
       "target": "src/loader.ts",
       "imports": [
         "loadComposers"
-      ],
-      "isTypeOnly": false
-    },
-    {
-      "source": "src/relay.ts",
-      "target": "src/notifications.ts",
-      "imports": [
-        "initNotifications"
       ],
       "isTypeOnly": false
     },
@@ -4055,10 +4457,87 @@
       "isTypeOnly": false
     },
     {
-      "source": "src/notifications.ts",
+      "source": "src/heartbeat.ts",
+      "target": "src/agent.ts",
+      "imports": [
+        "spawnClaude"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/tasks.ts",
+      "imports": [
+        "addTask",
+        "getCurrentSprint"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/feature-flags.ts",
+      "imports": [
+        "isFeatureEnabled"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/heartbeat-prompt.ts",
+      "imports": [
+        "buildHeartbeatPrompt",
+        "createDefaultState",
+        "HEARTBEAT_SYSTEM_PROMPT",
+        "HEARTBEAT_DECISION_SCHEMA",
+        "type HeartbeatState",
+        "type HeartbeatDecision",
+        "type HeartbeatDelta",
+        "type HeartbeatAction"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/alerts.ts",
+      "imports": [
+        "runAllChecks"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/memory.ts",
+      "imports": [
+        "archiveOldMemories"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/notification-prefs.ts",
+      "imports": [
+        "loadPrefs",
+        "isQuietHours"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
       "target": "src/notification-queue.ts",
       "imports": [
+        "loadQueue",
+        "getQueue",
+        "flushMorningDigest",
         "enqueue"
+      ],
+      "isTypeOnly": false
+    },
+    {
+      "source": "src/heartbeat.ts",
+      "target": "src/autonomy-scanner.ts",
+      "imports": [
+        "runAllScanners",
+        "isDuplicate"
       ],
       "isTypeOnly": false
     },
@@ -4097,9 +4576,9 @@
     },
     {
       "source": "src/memory.ts",
-      "target": "src/notifications.ts",
+      "target": "src/notification-queue.ts",
       "imports": [
-        "notifyIdeaCreated"
+        "enqueue"
       ],
       "isTypeOnly": false
     },
@@ -4121,6 +4600,6 @@
       "isTypeOnly": false
     }
   ],
-  "indexedAt": "2026-03-17T08:02:10.232Z",
-  "commitHash": "4c4200b"
+  "indexedAt": "2026-03-17T18:22:51.348Z",
+  "commitHash": "d708ce9"
 }

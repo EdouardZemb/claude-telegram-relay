@@ -1,22 +1,4 @@
 {
-  "parallel_pipeline": true,
-  "blackboard_flow": true,
-  "json_schema_output": true,
-  "model_routing": true,
-  "cost_estimate": true,
-  "feature_monitoring": true,
-  "intent_detection": true,
-  "llm_router": true,
   "model_cascade": false,
-  "auto_gate_approval": true,
-  "inter_agent_messaging": true,
-  "code_graph": true,
-  "enhanced_agent_context": true,
-  "memory_chains": true,
-  "progressive_autonomy": true,
-  "conversation_sessions": true,
-  "deliberation": true,
-  "explore_mode": true,
-  "adaptive_pipeline": true,
-  "tavily_search": true
+  "heartbeat": true
 }

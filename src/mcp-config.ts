@@ -5,7 +5,6 @@
  */
 
 import type { AgentRole } from "./orchestrator.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
 
 // ── MCP Tool Registry ────────────────────────────────────────
 
@@ -69,7 +68,6 @@ const ROLE_TAVILY_TOOLS: Record<AgentRole, TavilyToolName[]> = {
  * Get Tavily tools allowed for a role.
  */
 export function getTavilyToolsForRole(role: AgentRole | string): TavilyToolName[] {
-  if (!isFeatureEnabled("tavily_search")) return [];
   return ROLE_TAVILY_TOOLS[role as AgentRole] ?? [];
 }
 

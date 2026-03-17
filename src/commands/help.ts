@@ -15,7 +15,6 @@ import { formatMonitoringStats } from "../alerts.ts";
 import { formatRecentGateEvaluations, formatTrustScores } from "../trust-scores.ts";
 import { formatDoubleLoopRules } from "../gate-persistence.ts";
 import { formatFeedbackRules, getFeedbackRules } from "../feedback-loop.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
 import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
 import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
 import { loadGraph, formatGraphStatsForMonitor } from "../code-graph.ts";
@@ -187,9 +186,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
     const parts = [formatMonitoringStats()];
 
     // S42: Trust scores with autonomy levels
-    if (isFeatureEnabled("progressive_autonomy")) {
-      parts.push("", formatTrustScores());
-    }
+    parts.push("", formatTrustScores());
 
     // S35: Recent gate evaluations and double-loop rules
     if (supabase) {
@@ -200,62 +197,54 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       parts.push("", recentEvals, "", dlRules);
 
       // S42: Active feedback rules summary
-      if (isFeatureEnabled("progressive_autonomy")) {
-        const activeRules = getFeedbackRules();
-        if (activeRules.length > 0) {
-          const promoted = activeRules.filter((r) => r.promoted).length;
-          parts.push("", `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`);
-        }
+      const activeRules = getFeedbackRules();
+      if (activeRules.length > 0) {
+        const promoted = activeRules.filter((r) => r.promoted).length;
+        parts.push("", `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`);
       }
 
       // S38: Inter-agent communication monitoring
-      if (isFeatureEnabled("inter_agent_messaging")) {
-        try {
-          // Find most recent pipeline run
-          const { data: latestRun } = await supabase
-            .from("pipeline_runs")
-            .select("session_id")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single();
+      try {
+        // Find most recent pipeline run
+        const { data: latestRun } = await supabase
+          .from("pipeline_runs")
+          .select("session_id")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
 
-          if (latestRun?.session_id) {
-            const [events, messagesSection] = await Promise.all([
-              getAgentEvents(supabase, latestRun.session_id),
-              getAgentMessages(supabase, latestRun.session_id, "*"),
-            ]);
+        if (latestRun?.session_id) {
+          const [events, messagesSection] = await Promise.all([
+            getAgentEvents(supabase, latestRun.session_id),
+            getAgentMessages(supabase, latestRun.session_id, "*"),
+          ]);
 
-            if (events.length > 0) {
-              parts.push("", formatAgentTimeline(events.slice(-10)));
-            }
-
-            if (messagesSection.length > 0) {
-              const summary = getMessageFlowSummary(messagesSection);
-              parts.push("", formatMessageFlow(summary));
-            }
+          if (events.length > 0) {
+            parts.push("", formatAgentTimeline(events.slice(-10)));
           }
-        } catch {
-          // Best-effort monitoring
+
+          if (messagesSection.length > 0) {
+            const summary = getMessageFlowSummary(messagesSection);
+            parts.push("", formatMessageFlow(summary));
+          }
         }
+      } catch {
+        // Best-effort monitoring
       }
     }
 
     // S43: Conversation session stats
-    if (isFeatureEnabled("conversation_sessions")) {
-      const sessionCount = getActiveSessionCount();
-      parts.push("", `Sessions actives: ${sessionCount}`);
-    }
+    const sessionCount = getActiveSessionCount();
+    parts.push("", `Sessions actives: ${sessionCount}`);
 
     // S39: Code graph stats
-    if (isFeatureEnabled("code_graph")) {
-      try {
-        const graph = loadGraph();
-        if (graph) {
-          parts.push("", formatGraphStatsForMonitor(graph));
-        }
-      } catch {
-        // Best-effort
+    try {
+      const graph = loadGraph();
+      if (graph) {
+        parts.push("", formatGraphStatsForMonitor(graph));
       }
+    } catch {
+      // Best-effort
     }
 
     await ctx.reply(parts.join("\n"), threadOpts(ctx));

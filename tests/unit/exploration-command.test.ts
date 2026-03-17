@@ -18,7 +18,6 @@ import {
   getSchemaForRole,
   buildStructuredOutputInstructions,
 } from "../../src/agent-schemas";
-import { isFeatureEnabled } from "../../src/feature-flags";
 
 // ── Action Registry Integration ─────────────────────────────────
 
@@ -160,10 +159,3 @@ describe("/explore Prompt Building", () => {
   });
 });
 
-// ── Feature Flag Gating ─────────────────────────────────────────
-
-describe("/explore Feature Flag", () => {
-  it("explore_mode flag is enabled", () => {
-    expect(isFeatureEnabled("explore_mode")).toBe(true);
-  });
-});

@@ -33,7 +33,6 @@ import {
   type BotContext,
 } from "./bot-context.ts";
 import { loadComposers } from "./loader.ts";
-import { initNotifications } from "./notifications.ts";
 import { startQueue } from "./notification-queue.ts";
 import { loadFeedbackRules } from "./feedback-loop.ts";
 import { loadPrefs } from "./notification-prefs.ts";
@@ -141,7 +140,6 @@ if (import.meta.main) {
 
   // Create and configure bot
   const mainBot = await createBot(BOT_TOKEN);
-  initNotifications(mainBot);
   await startQueue(mainBot);
   await loadPrefs();
 
