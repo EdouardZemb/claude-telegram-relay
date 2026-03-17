@@ -241,6 +241,8 @@ export interface LLMIntentOptions {
   callLLM: (prompt: string) => Promise<string>;
   recentMessages?: string;
   timeoutMs?: number;
+  /** S43: Session context for contextual intent detection */
+  sessionContext?: string;
 }
 
 /**
@@ -266,6 +268,7 @@ export async function detectIntentWithLLM(
       "COMMANDES DISPONIBLES:",
       actionList,
       "",
+      options.sessionContext ? `CONTEXTE SESSION:\n${options.sessionContext}\n` : "",
       options.recentMessages ? `CONVERSATION RECENTE:\n${options.recentMessages}\n` : "",
       `MESSAGE UTILISATEUR: ${text}`,
       "",

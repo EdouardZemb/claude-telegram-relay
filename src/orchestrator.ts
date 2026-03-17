@@ -370,6 +370,128 @@ function getOrchestrationInstructions(agentId: AgentRole): string {
   }
 }
 
+// ── S43: Deliberation Protocol ────────────────────────────────
+
+/**
+ * Deliberation pairs: after a strategic agent completes, the next agent
+ * reviews their output and can request a revision. Max 1 round-trip.
+ */
+const DELIBERATION_PAIRS: Record<string, string> = {
+  architect: "pm",    // PM validates architect's design feasibility
+  dev: "qa",          // QA pre-reviews dev's implementation plan
+};
+
+/**
+ * Run a deliberation round between two agents.
+ * The reviewer examines the proposer's output and flags issues.
+ * If issues found, the proposer revises (1 iteration max).
+ * Returns the (possibly revised) output.
+ *
+ * S43-04: Behind "deliberation" feature flag.
+ */
+export async function runDeliberation(
+  proposerRole: AgentRole,
+  reviewerRole: AgentRole,
+  proposerOutput: string,
+  task: Task,
+  messages: AgentMessage[],
+  shardedContext?: string,
+  agentContext?: string,
+  options?: { modelOverride?: string; cascade?: boolean; onProgress?: (msg: string) => Promise<void> },
+): Promise<{ output: string; revised: boolean; reviewerFeedback: string }> {
+  const proposerAgent = getAgent(proposerRole);
+  const reviewerAgent = getAgent(reviewerRole);
+  const proposerLabel = proposerAgent ? `${proposerAgent.icon} ${proposerAgent.name}` : proposerRole;
+  const reviewerLabel = reviewerAgent ? `${reviewerAgent.icon} ${reviewerAgent.name}` : reviewerRole;
+
+  // Step 1: Reviewer examines proposer's output
+  const reviewPrompt = [
+    `Tu es ${reviewerLabel} et tu revois le travail de ${proposerLabel}.`,
+    "",
+    "PROPOSITION A REVOIR:",
+    proposerOutput.substring(0, 5000),
+    "",
+    "INSTRUCTIONS:",
+    "- Identifie les problemes concrets (faisabilite, coherence, manques)",
+    "- Si tout est acceptable, reponds: APPROVE",
+    "- Si des corrections sont necessaires, reponds: REVISE suivi de tes feedbacks",
+    "- Sois concis et specifique",
+    "- Maximum 3 points de feedback",
+  ].join("\n");
+
+  if (options?.onProgress) {
+    await options.onProgress(`Deliberation: ${reviewerLabel} revoit ${proposerLabel}...`);
+  }
+
+  const reviewResult = await spawnClaude({
+    prompt: reviewPrompt,
+    effort: "low",
+    model: reviewerAgent?.model || "sonnet",
+    maxBudgetUsd: 0.05,
+  });
+
+  const reviewOutput = reviewResult.stdout.trim();
+
+  // Check if approved
+  if (reviewOutput.toUpperCase().includes("APPROVE") && !reviewOutput.toUpperCase().includes("REVISE")) {
+    if (options?.onProgress) {
+      await options.onProgress(`Deliberation: ${reviewerLabel} approuve ${proposerLabel}`);
+    }
+    return { output: proposerOutput, revised: false, reviewerFeedback: reviewOutput };
+  }
+
+  // Step 2: Proposer revises based on feedback
+  if (options?.onProgress) {
+    await options.onProgress(`Deliberation: ${proposerLabel} revise suite au feedback de ${reviewerLabel}...`);
+  }
+
+  const revisionMessages: AgentMessage[] = [
+    ...messages,
+    {
+      agentId: reviewerRole,
+      agentName: reviewerAgent?.name || reviewerRole,
+      success: true,
+      structured: null,
+      rawOutput: `FEEDBACK DE DELIBERATION (${reviewerLabel}):\n${reviewOutput}`,
+      durationMs: 0,
+    },
+  ];
+
+  const revisedResult = await runAgentStep(
+    proposerRole,
+    task,
+    revisionMessages,
+    shardedContext,
+    agentContext,
+    options?.modelOverride,
+    options?.cascade,
+  );
+
+  if (revisedResult.success) {
+    if (options?.onProgress) {
+      await options.onProgress(`Deliberation: ${proposerLabel} a revise sa proposition`);
+    }
+    return { output: revisedResult.output, revised: true, reviewerFeedback: reviewOutput };
+  }
+
+  // Revision failed — keep original
+  return { output: proposerOutput, revised: false, reviewerFeedback: reviewOutput };
+}
+
+/**
+ * Check if deliberation should happen after this agent.
+ */
+export function shouldDeliberate(agentId: AgentRole): boolean {
+  return agentId in DELIBERATION_PAIRS;
+}
+
+/**
+ * Get the reviewer role for a given proposer.
+ */
+export function getDeliberationReviewer(agentId: AgentRole): AgentRole | null {
+  return (DELIBERATION_PAIRS[agentId] as AgentRole) || null;
+}
+
 /**
  * Persist agent output as a structured artifact on the task.
  * PM → acceptance_criteria, Architect → architecture_ref, QA → dev_notes append
@@ -444,6 +566,8 @@ export interface OrchestrateOptions {
   modelOverrides?: Partial<Record<AgentRole, string>>;
   /** S34: Enable model cascade for agents (Haiku -> Sonnet -> Opus) */
   cascade?: boolean;
+  /** S43: Conversation context from the session that triggered this pipeline */
+  conversationContext?: string;
 }
 
 /**
@@ -518,6 +642,7 @@ export async function orchestrate(
           role,
           projectId: task.project_id || undefined,
           sprintId: task.sprint || undefined,
+          conversationContext: options.conversationContext,
         });
         return [role, ctx] as [string, string];
       })
@@ -917,6 +1042,31 @@ export async function orchestrate(
           }
         } catch {
           // Clarification check is best-effort
+        }
+      }
+
+      // S43: Deliberation protocol — reviewer challenges proposer
+      if (result!.success && isFeatureEnabled("deliberation") && shouldDeliberate(agentId)) {
+        const reviewerRole = getDeliberationReviewer(agentId);
+        if (reviewerRole && pipeline.includes(reviewerRole)) {
+          const deliberation = await runDeliberation(
+            agentId,
+            reviewerRole,
+            result!.output,
+            task,
+            messages,
+            shardedContext,
+            agentContextCache.get(agentId),
+            {
+              modelOverride: options.modelOverrides?.[agentId],
+              cascade: options.cascade,
+              onProgress: options.onProgress,
+            },
+          );
+          if (deliberation.revised) {
+            result!.output = deliberation.output;
+            result!.structured = parseAgentOutput(deliberation.output, agentId);
+          }
         }
       }
 

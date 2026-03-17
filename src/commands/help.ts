@@ -19,6 +19,7 @@ import { isFeatureEnabled } from "../feature-flags.ts";
 import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
 import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
 import { loadGraph, formatGraphStatsForMonitor } from "../code-graph.ts";
+import { getActiveSessionCount } from "../conversation-session.ts";
 
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -237,6 +238,12 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
           // Best-effort monitoring
         }
       }
+    }
+
+    // S43: Conversation session stats
+    if (isFeatureEnabled("conversation_sessions")) {
+      const sessionCount = getActiveSessionCount();
+      parts.push("", `Sessions actives: ${sessionCount}`);
     }
 
     // S39: Code graph stats

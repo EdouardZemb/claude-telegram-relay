@@ -46,6 +46,8 @@ export interface AgentContextOptions {
   projectId?: string;
   sprintId?: string;
   taskTitle?: string;
+  /** S43: Conversation context from the session that triggered this agent */
+  conversationContext?: string;
 }
 
 /**
@@ -128,6 +130,7 @@ export async function buildAgentContext(
     if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: 0.10 });
     if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.08 });
     if (similarCtx) sections.push({ label: "TACHES SIMILAIRES", content: similarCtx, share: 0.10 });
+    if (options.conversationContext) sections.push({ label: "CONTEXTE CONVERSATION", content: options.conversationContext, share: 0.08 });
 
     if (sections.length === 0) return "";
 

@@ -78,6 +78,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `gate-persistence.ts` | Gate evaluation persistence to Supabase, double-loop learning from recurring rubric weaknesses |
 | `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, in-memory fallback, timeline formatting |
 | `agent-messaging.ts` | Inter-agent messaging: structured messages via blackboard, clarification protocol, conflict detection, context enrichment |
+| `conversation-session.ts` | Conversation sessions: per-chat/thread session tracking, constraint extraction, phase detection, context formatting for intent detection and agents |
 
 ### Telegram Commands
 
@@ -193,6 +194,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Autonomie Progressive (S42):** Five features for progressive agent autonomy based on track record. (1) Per-role Trust Thresholds: each agent role has custom auto-approval thresholds defined in `bmad-agents.ts` (source of truth). Dev/architect lower spec thresholds (70-75) since output is verified by tests. QA highest impl threshold (92) as quality gate. SM lowest thresholds (60/80) as low-risk role. Global fallback (80/90) for unknown roles. (2) Accelerated Degradation: 3+ consecutive failures trigger -20 penalty instead of -10, rapidly demoting unreliable agents. Resets to normal after a pass. (3) Autonomy Levels: 4 tiers based on trust score — strict (<40), supervised (40-spec), autonomous (spec-impl), full (>=impl). `getAutonomyLevel()` returns level + label. `formatTrustScores()` shows autonomy level per role. (4) Feedback Effectiveness: `measureRuleEffectiveness()` compares gate scores before/after rule application per agent. `promoteOrArchiveRules()` promotes effective rules (trust delta >= +5) and archives ineffective ones (delta <= -5). FeedbackRule extended with `trustDeltaAfter`, `promoted`, `archived` fields. (5) Enriched Planner: `analyzeBacklog()` now includes pipeline recommendations per task based on code graph complexity (`recommendPipelines()`), auto-defer suggestions for P4/P5 tasks in overloaded sprints (`detectDeferrableTasks()`). PlannerRecommendation extended with `suggestedPipeline`, `estimatedCost`, `complexityScore`. (6) Dashboard Autonomy: `/api/autonomy-status` endpoint exposes trust scores, recent gate evaluations with rubric details, and feedback rule status (active/promoted/archived). (7) Monitor Extension: `/monitor` shows trust scores with autonomy levels and feedback rule summary when `progressive_autonomy` flag enabled. Behind `progressive_autonomy` feature flag (disabled by default). 28 new tests.
 
+**Orchestrateur Mature (S43):** Five features transforming the bot from stateless command handler into a contextual conversational orchestrator. (1) Conversation Sessions: `conversation-session.ts` tracks per-chat/thread state with 30min TTL. Sessions capture intent trail, user constraints (speed/quality/budget/scope/deadline), decisions, recent messages, active task, and conversation phase (discovery/planning/execution/closure). Auto-created on first interaction. (2) Contextual Intent Detection: `detectIntentWithLLM` receives session context (recent intents, constraints, phase) so LLM understands conversation evolution. "Je veux refactorer" then "montre-moi le design d'abord" = exploration, not exec. (3) Conversation Context for Agents: `buildConversationContext()` extracts session data (messages, constraints, decisions, intent trail) and injects as new "CONTEXTE CONVERSATION" section in agent context (8% budget). Agents know why the user asked and what they want. Passed via `conversationContext` option on `orchestrate()`. (4) Deliberation Protocol: after strategic agents (architect, dev), the paired reviewer (PM, QA) examines output and can request revision. Max 1 round-trip. `runDeliberation()` spawns a review call (low effort, Sonnet), proposer revises if REVISE feedback. APPROVE skips revision. Behind `deliberation` feature flag (disabled by default). (5) Monitoring: `/monitor` shows active session count when `conversation_sessions` flag enabled. Both flags disabled by default for backward compatibility. 57 new tests.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -224,7 +227,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1299 tests (unit + integration + E2E)
+tests/                  1356 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -232,7 +235,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1299 tests, all must pass before merge)
+- Tests: `bun test` (1356 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

@@ -24,6 +24,16 @@ import { isFeatureEnabled } from "../feature-flags.ts";
 import { detectIntent, detectIntentWithLLM, formatIntentSuggestion } from "../intent-detection.ts";
 import { routeIntent, checkPendingClarification, handleConfirmationCallback } from "../command-router.ts";
 import { formatActionsForLLM } from "../action-registry.ts";
+import {
+  getSession,
+  addMessage as addSessionMessage,
+  addIntent as addSessionIntent,
+  extractConstraints,
+  addConstraint,
+  formatSessionForIntent,
+  cleanupExpiredSessions,
+  hasActiveSession,
+} from "../conversation-session.ts";
 
 export default function messagesComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -74,6 +84,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       await bctx.saveMessage("user", text, meta);
 
+      // S43: Track conversation session
+      const chatId = ctx.chat?.id || 0;
+      let session: ReturnType<typeof getSession> | undefined;
+      if (isFeatureEnabled("conversation_sessions")) {
+        session = getSession(chatId, threadId);
+        addSessionMessage(session, text);
+
+        // Extract user constraints from the message
+        const constraints = extractConstraints(text);
+        for (const c of constraints) {
+          addConstraint(session, c.type, c.value, c.source);
+        }
+      }
+
       // S37: Check if this is a response to a pending clarification
       if (isFeatureEnabled("intent_detection")) {
         const clarificationCmd = checkPendingClarification(ctx, text);
@@ -108,6 +132,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
         if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
           // High-confidence regex match — route to command
+          if (session) addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
           const routeResult = await routeIntent(ctx, regexResult.detected, {
             supabase: bctx.supabase,
             getThreadId: bctx.getThreadId,
@@ -115,13 +140,16 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           });
           if (routeResult.handled) return;
         } else if (isFeatureEnabled("llm_router")) {
-          // LLM fallback for ambiguous messages
+          // LLM fallback for ambiguous messages — S43: with session context
+          const sessionCtx = session ? formatSessionForIntent(session) : undefined;
           const llmResult = await detectIntentWithLLM(text, {
             callLLM: (prompt) => bctx.callClaude(prompt),
             recentMessages,
             timeoutMs: 5000,
+            sessionContext: sessionCtx,
           });
           if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
+            if (session) addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
             const routeResult = await routeIntent(ctx, llmResult.detected, {
               supabase: bctx.supabase,
               getThreadId: bctx.getThreadId,

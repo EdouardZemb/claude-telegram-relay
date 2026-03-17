@@ -24,6 +24,8 @@ import { resolveProjectContext } from "../projects.ts";
 import { buildTaskContext } from "../document-sharding.ts";
 import { notifyPRCreated, notifyTaskDone } from "../notifications.ts";
 import { findLatestPipelineRun } from "../pipeline-state.ts";
+import { getSession, buildConversationContext, hasActiveSession } from "../conversation-session.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
 
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -293,12 +295,24 @@ export default function execution(bctx: BotContext): Composer<Context> {
       bctx.threadOpts(ctx)
     );
 
+    // S43: Inject conversation context if session is active
+    let convCtx: string | undefined;
+    if (isFeatureEnabled("conversation_sessions")) {
+      const chatId = ctx.chat?.id || 0;
+      const threadId = bctx.getThreadId(ctx);
+      if (hasActiveSession(chatId, threadId)) {
+        const session = getSession(chatId, threadId);
+        convCtx = buildConversationContext(session);
+      }
+    }
+
     const result = await orchestrate(bctx.supabase, task, {
       pipeline,
       stopOnFailure: true,
       useBlackboard,
       parallel: useParallel,
       resumeSessionId,
+      conversationContext: convCtx || undefined,
       onProgress: async (msg) => {
         await ctx.reply(msg, bctx.threadOpts(ctx));
       },
