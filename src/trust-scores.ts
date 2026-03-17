@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getAgent } from "./bmad-agents.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -30,10 +31,13 @@ const DEFAULT_SCORE = 50;
 const PASS_NO_REWORK_DELTA = 5;
 const PASS_WITH_REWORK_DELTA = 1;
 const FAIL_DELTA = -10;
+/** S42: Accelerated degradation when 3+ consecutive failures */
+const CONSECUTIVE_FAIL_THRESHOLD = 3;
+const ACCELERATED_FAIL_DELTA = -20;
 const MIN_SCORE = 0;
 const MAX_SCORE = 100;
 
-/** Auto-approval thresholds */
+/** Auto-approval thresholds (fallback when no per-role config) */
 export const AUTO_APPROVE_SPEC_THRESHOLD = 80;
 export const AUTO_APPROVE_IMPL_THRESHOLD = 90;
 export const AUTO_APPROVE_MAX_PRIORITY = 3; // P3+ only (P3, P4, P5)
@@ -109,13 +113,16 @@ export async function updateTrustScore(
   const current = trustScoreCache[agentRole] || makeDefaultTrustScore(agentRole);
 
   // Calculate delta
+  // S42: Accelerated degradation when 3+ consecutive failures
   let delta: number;
   if (update.passed && !update.hadRework) {
     delta = PASS_NO_REWORK_DELTA;
   } else if (update.passed && update.hadRework) {
     delta = PASS_WITH_REWORK_DELTA;
   } else {
-    delta = FAIL_DELTA;
+    delta = current.consecutiveFailures >= CONSECUTIVE_FAIL_THRESHOLD - 1
+      ? ACCELERATED_FAIL_DELTA
+      : FAIL_DELTA;
   }
 
   // Apply
@@ -161,12 +168,27 @@ export async function updateTrustScore(
 // ── Auto-Approval Check ──────────────────────────────────────
 
 /**
+ * Get the auto-approval thresholds for a given agent role.
+ * S42: Per-role thresholds from bmad-agents.ts, with global fallback.
+ */
+export function getAutoApproveThresholds(agentRole: string): { spec: number; impl: number } {
+  const agent = getAgent(agentRole);
+  if (agent?.trustThresholds) {
+    return {
+      spec: agent.trustThresholds.specAutoApprove,
+      impl: agent.trustThresholds.implAutoApprove,
+    };
+  }
+  return { spec: AUTO_APPROVE_SPEC_THRESHOLD, impl: AUTO_APPROVE_IMPL_THRESHOLD };
+}
+
+/**
  * Check if a gate can be auto-approved based on trust score.
  * Returns true if auto-approval is warranted.
  *
- * Rules:
- * - Trust >= 80 + P3+: spec/plan/tasks gates auto-approved
- * - Trust >= 90 + P3+: implementation gate auto-approved (deterministic checks still run)
+ * Rules (S42: per-role thresholds):
+ * - Trust >= role.specAutoApprove + P3+: spec/plan/tasks gates auto-approved
+ * - Trust >= role.implAutoApprove + P3+: implementation gate auto-approved (deterministic checks still run)
  * - P1/P2: never auto-approved
  */
 export function shouldAutoApprove(
@@ -178,13 +200,37 @@ export function shouldAutoApprove(
   if (taskPriority < AUTO_APPROVE_MAX_PRIORITY) return false;
 
   const trust = getCachedTrustScore(agentRole);
+  const thresholds = getAutoApproveThresholds(agentRole);
 
   if (gateName === "implementation") {
-    return trust.score >= AUTO_APPROVE_IMPL_THRESHOLD;
+    return trust.score >= thresholds.impl;
   }
 
   // spec, plan, tasks gates
-  return trust.score >= AUTO_APPROVE_SPEC_THRESHOLD;
+  return trust.score >= thresholds.spec;
+}
+
+/**
+ * Get the autonomy level label for a given trust score and role.
+ * S42: Used for display in /monitor and dashboard.
+ */
+export function getAutonomyLevel(agentRole: string): {
+  level: "strict" | "supervised" | "autonomous" | "full";
+  label: string;
+} {
+  const trust = getCachedTrustScore(agentRole);
+  const thresholds = getAutoApproveThresholds(agentRole);
+
+  if (trust.score >= thresholds.impl) {
+    return { level: "full", label: "Autonomie totale" };
+  }
+  if (trust.score >= thresholds.spec) {
+    return { level: "autonomous", label: "Autonomie spec/plan" };
+  }
+  if (trust.score >= 40) {
+    return { level: "supervised", label: "Supervise" };
+  }
+  return { level: "strict", label: "Strict" };
 }
 
 // ── Formatting ───────────────────────────────────────────────
@@ -199,7 +245,8 @@ export function formatTrustScores(): string {
     const passRate = ts.totalEvaluations > 0
       ? Math.round((ts.totalPasses / ts.totalEvaluations) * 100)
       : 0;
-    lines.push(`  ${role}: ${ts.score}/100 (${ts.consecutivePasses} passes consecutives, ${passRate}% succes, ${ts.totalEvaluations} evals)`);
+    const autonomy = getAutonomyLevel(role);
+    lines.push(`  ${role}: ${ts.score}/100 [${autonomy.label}] (${ts.consecutivePasses} passes consecutives, ${passRate}% succes, ${ts.totalEvaluations} evals)`);
   }
   return lines.join("\n");
 }

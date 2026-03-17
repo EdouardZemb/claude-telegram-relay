@@ -124,42 +124,44 @@ describe("evaluateAndRework with trust scores", () => {
 // ── Auto-approval flow ───────────────────────────────────────
 
 describe("auto-approval trust score progression", () => {
-  it("builds trust from 50 to 80 over consecutive passes", async () => {
-    // 6 consecutive passes: 50 + 6*5 = 80
-    for (let i = 0; i < 6; i++) {
+  it("builds trust from 50 to 70 for dev spec auto-approval (S42 per-role)", async () => {
+    // S42: dev specAutoApprove = 70 (lower than global 80 because dev output is verified by tests)
+    // 4 consecutive passes: 50 + 4*5 = 70
+    for (let i = 0; i < 4; i++) {
       await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     }
     const trust = getCachedTrustScore("dev");
-    expect(trust.score).toBe(80);
-    expect(trust.consecutivePasses).toBe(6);
+    expect(trust.score).toBe(70);
+    expect(trust.consecutivePasses).toBe(4);
 
-    // Spec gate should be auto-approvable for P3
+    // Spec gate should be auto-approvable for P3 (dev threshold is 70)
     expect(shouldAutoApprove("dev", "spec", 3)).toBe(true);
-    // But not implementation (needs 90)
+    // But not implementation (dev needs 85)
     expect(shouldAutoApprove("dev", "implementation", 3)).toBe(false);
   });
 
-  it("builds trust from 50 to 90 over consecutive passes", async () => {
-    // 8 consecutive passes: 50 + 8*5 = 90
-    for (let i = 0; i < 8; i++) {
+  it("builds trust from 50 to 85 for dev impl auto-approval (S42 per-role)", async () => {
+    // S42: dev implAutoApprove = 85
+    // 7 consecutive passes: 50 + 7*5 = 85
+    for (let i = 0; i < 7; i++) {
       await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     }
-    expect(getCachedTrustScore("dev").score).toBe(90);
+    expect(getCachedTrustScore("dev").score).toBe(85);
 
     // Implementation gate should now be auto-approvable for P3
     expect(shouldAutoApprove("dev", "implementation", 3)).toBe(true);
   });
 
   it("drops trust on failure, disabling auto-approval", async () => {
-    // Build to 80
-    for (let i = 0; i < 6; i++) {
+    // Build to 70 (dev specAutoApprove threshold)
+    for (let i = 0; i < 4; i++) {
       await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     }
     expect(shouldAutoApprove("dev", "spec", 3)).toBe(true);
 
-    // One failure: 80 - 10 = 70
+    // One failure: 70 - 10 = 60
     await updateTrustScore(null, "dev", { passed: false, hadRework: true });
-    expect(getCachedTrustScore("dev").score).toBe(70);
+    expect(getCachedTrustScore("dev").score).toBe(60);
     expect(shouldAutoApprove("dev", "spec", 3)).toBe(false);
   });
 });

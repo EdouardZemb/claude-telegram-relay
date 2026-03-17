@@ -141,9 +141,9 @@ describe("shouldAutoApprove", () => {
     expect(shouldAutoApprove("dev", "plan", 2)).toBe(false);
   });
 
-  it("returns true for spec gate with trust >= 80 and P3+", async () => {
-    // Push trust to 80: 50 + 6*5 = 80
-    for (let i = 0; i < 6; i++) {
+  it("returns true for spec gate with trust >= per-role threshold (S42)", async () => {
+    // PM specAutoApprove = 75, so 50 + 5*5 = 75
+    for (let i = 0; i < 5; i++) {
       await updateTrustScore(null, "pm", { passed: true, hadRework: false });
     }
     expect(shouldAutoApprove("pm", "spec", 3)).toBe(true);
@@ -151,22 +151,22 @@ describe("shouldAutoApprove", () => {
     expect(shouldAutoApprove("pm", "tasks", 5)).toBe(true);
   });
 
-  it("returns false for spec gate with trust < 80", async () => {
-    // Score = 55
+  it("returns false for spec gate with trust < per-role threshold", async () => {
+    // PM specAutoApprove = 75, score = 55 < 75
     await updateTrustScore(null, "pm", { passed: true, hadRework: false });
     expect(shouldAutoApprove("pm", "spec", 3)).toBe(false);
   });
 
-  it("returns true for implementation gate with trust >= 90 and P3+ (AC-018)", async () => {
-    // Push trust to 90: 50 + 8*5 = 90
-    for (let i = 0; i < 8; i++) {
+  it("returns true for implementation gate with trust >= per-role impl threshold (S42)", async () => {
+    // Dev implAutoApprove = 85, so 50 + 7*5 = 85
+    for (let i = 0; i < 7; i++) {
       await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     }
     expect(shouldAutoApprove("dev", "implementation", 3)).toBe(true);
   });
 
-  it("returns false for implementation gate with trust 80 (needs 90)", async () => {
-    // Push trust to 80
+  it("returns false for implementation gate with trust below per-role impl threshold", async () => {
+    // Dev implAutoApprove = 85, 50 + 6*5 = 80 < 85
     for (let i = 0; i < 6; i++) {
       await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     }
@@ -185,7 +185,7 @@ describe("formatTrustScores", () => {
     expect(formatTrustScores()).toBe("Pas de donnees de confiance");
   });
 
-  it("formats trust scores with stats", async () => {
+  it("formats trust scores with stats and autonomy level", async () => {
     await updateTrustScore(null, "dev", { passed: true, hadRework: false });
     await updateTrustScore(null, "pm", { passed: false, hadRework: true });
 
@@ -193,6 +193,8 @@ describe("formatTrustScores", () => {
     expect(formatted).toContain("Trust scores par role:");
     expect(formatted).toContain("dev: 55/100");
     expect(formatted).toContain("pm: 40/100");
+    // S42: Autonomy labels
+    expect(formatted).toContain("[Supervise]");
   });
 });
 

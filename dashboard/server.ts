@@ -102,6 +102,10 @@ const server = Bun.serve({
       return handleCodeReviews();
     }
 
+    if (url.pathname === "/api/autonomy-status") {
+      return handleAutonomyStatus();
+    }
+
     return new Response("Not found", { status: 404 });
   },
 });
@@ -526,6 +530,88 @@ async function handleCodeReviews(): Promise<Response> {
   }));
 
   return new Response(JSON.stringify(reviews, null, 2), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function handleAutonomyStatus(): Promise<Response> {
+  if (!supabase) {
+    return new Response(JSON.stringify({ error: "Supabase not configured" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Trust scores
+  const { data: trustData } = await supabase
+    .from("trust_scores")
+    .select("*")
+    .order("agent_role");
+
+  const trustScores = (trustData || []).map((row: any) => {
+    const passRate = row.total_evaluations > 0
+      ? Math.round((row.total_passes / row.total_evaluations) * 100)
+      : 0;
+    return {
+      role: row.agent_role,
+      score: row.score,
+      consecutivePasses: row.consecutive_passes,
+      consecutiveFailures: row.consecutive_failures,
+      totalEvaluations: row.total_evaluations,
+      passRate,
+      lastEvaluationAt: row.last_evaluation_at,
+    };
+  });
+
+  // Recent gate evaluations (last 10)
+  const { data: gateData } = await supabase
+    .from("gate_evaluations")
+    .select("agent_role, gate_name, score, passed, auto_approved, rework_iteration, rubric_dimensions, created_at")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  const recentGates = (gateData || []).map((row: any) => ({
+    agentRole: row.agent_role,
+    gateName: row.gate_name,
+    score: row.score,
+    passed: row.passed,
+    autoApproved: row.auto_approved,
+    reworkIteration: row.rework_iteration,
+    rubricDimensions: row.rubric_dimensions,
+    createdAt: row.created_at,
+  }));
+
+  // Active feedback rules
+  const { data: rulesData } = await supabase
+    .from("feedback_rules")
+    .select("agent_id, pattern, instruction, occurrences, active, promoted, archived")
+    .order("occurrences", { ascending: false })
+    .limit(20);
+
+  const feedbackRules = (rulesData || []).map((row: any) => ({
+    agentId: row.agent_id,
+    pattern: row.pattern,
+    instruction: row.instruction?.substring(0, 100),
+    occurrences: row.occurrences,
+    active: row.active,
+    promoted: row.promoted || false,
+    archived: row.archived || false,
+  }));
+
+  const response = {
+    timestamp: new Date().toISOString(),
+    trustScores,
+    recentGates,
+    feedbackRules: {
+      total: feedbackRules.length,
+      active: feedbackRules.filter((r: any) => r.active).length,
+      promoted: feedbackRules.filter((r: any) => r.promoted).length,
+      archived: feedbackRules.filter((r: any) => r.archived).length,
+      rules: feedbackRules,
+    },
+  };
+
+  return new Response(JSON.stringify(response, null, 2), {
     headers: { "Content-Type": "application/json" },
   });
 }

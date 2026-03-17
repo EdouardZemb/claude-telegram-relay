@@ -38,6 +38,11 @@ export interface BmadAgent {
   model?: string;
   fallbackModel?: string;
   maxBudgetUsd?: number;
+  /** S42: Per-role trust thresholds for progressive autonomy */
+  trustThresholds?: {
+    specAutoApprove: number;   // Trust score to auto-approve spec/plan/tasks gates
+    implAutoApprove: number;   // Trust score to auto-approve implementation gates
+  };
 }
 
 export interface BmadCommand {
@@ -73,6 +78,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
     maxBudgetUsd: 0.50,
+    trustThresholds: { specAutoApprove: 75, implAutoApprove: 90 },
   },
   {
     id: "pm",
@@ -99,6 +105,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
     maxBudgetUsd: 0.50,
+    trustThresholds: { specAutoApprove: 75, implAutoApprove: 88 },
   },
   {
     id: "architect",
@@ -121,6 +128,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-opus-4-6",
     fallbackModel: "claude-sonnet-4-6",
     maxBudgetUsd: 1.00,
+    trustThresholds: { specAutoApprove: 75, implAutoApprove: 88 },
   },
   {
     id: "sm",
@@ -145,6 +153,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-haiku-4-5",
     fallbackModel: "claude-haiku-4-5",
     maxBudgetUsd: 0.25,
+    trustThresholds: { specAutoApprove: 60, implAutoApprove: 80 },
   },
   {
     id: "dev",
@@ -175,6 +184,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-opus-4-6",
     fallbackModel: "claude-sonnet-4-6",
     maxBudgetUsd: 2.00,
+    trustThresholds: { specAutoApprove: 70, implAutoApprove: 85 },
   },
   {
     id: "qa",
@@ -201,6 +211,7 @@ const AGENTS: BmadAgent[] = [
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
     maxBudgetUsd: 1.00,
+    trustThresholds: { specAutoApprove: 80, implAutoApprove: 92 },
   },
 ];
 

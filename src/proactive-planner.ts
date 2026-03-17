@@ -18,15 +18,25 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Task } from "./tasks.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { loadGraph, findAffectedModules, estimateComplexity } from "./code-graph.ts";
+import { findSimilarPastTasks } from "./memory.ts";
+import { getCachedTrustScore, getAutonomyLevel } from "./trust-scores.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
 export interface PlannerRecommendation {
-  type: "reorder" | "group" | "pace" | "blocker" | "split" | "deprioritize";
+  type: "reorder" | "group" | "pace" | "blocker" | "split" | "deprioritize" | "pipeline" | "defer";
   title: string;
   description: string;
   taskIds: string[];
   confidence: number; // 0-1
+  /** S42: Suggested pipeline for the task */
+  suggestedPipeline?: string;
+  /** S42: Estimated cost based on historical data */
+  estimatedCost?: number;
+  /** S42: Complexity score from code graph (0-10) */
+  complexityScore?: number;
 }
 
 export interface PlannerResult {
@@ -93,6 +103,14 @@ export async function analyzeBacklog(
   // Analyze large tasks that could be split
   const splitRecs = detectSplittableTasks(tasks);
   recommendations.push(...splitRecs);
+
+  // S42: Pipeline recommendations based on code graph complexity
+  const pipelineRecs = recommendPipelines(tasks, supabase);
+  recommendations.push(...pipelineRecs);
+
+  // S42: Auto-defer low priority tasks if sprint is overloaded
+  const deferRecs = detectDeferrableTasks(tasks);
+  recommendations.push(...deferRecs);
 
   // Sprint health
   const total = tasks.length;
@@ -255,6 +273,80 @@ function detectSplittableTasks(tasks: any[]): PlannerRecommendation[] {
   return recs;
 }
 
+/**
+ * S42: Recommend pipeline per task based on code graph complexity and history.
+ */
+function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerRecommendation[] {
+  if (!isFeatureEnabled("progressive_autonomy") || !isFeatureEnabled("code_graph")) return [];
+
+  const recs: PlannerRecommendation[] = [];
+  const graph = loadGraph();
+  if (!graph) return recs;
+
+  const backlogTasks = tasks.filter((t: any) => t.status === "backlog");
+
+  for (const task of backlogTasks) {
+    const affected = findAffectedModules(graph, task.title);
+    if (affected.length === 0) continue;
+
+    const maxComplexity = Math.max(...affected.map((m) => estimateComplexity(graph, m)));
+    const avgComplexity = affected.reduce((s, m) => s + estimateComplexity(graph, m), 0) / affected.length;
+
+    let pipeline: string;
+    let confidence = 0.6;
+
+    if (maxComplexity <= 3 && task.priority >= 3) {
+      pipeline = "QUICK";
+      confidence = 0.8;
+    } else if (maxComplexity >= 7 || affected.length >= 5) {
+      pipeline = "DEFAULT";
+      confidence = 0.7;
+    } else {
+      pipeline = affected.length <= 2 ? "QUICK" : "DEFAULT";
+      confidence = 0.5;
+    }
+
+    recs.push({
+      type: "pipeline",
+      title: `Pipeline recommande: ${pipeline}`,
+      description: `"${task.title}" touche ${affected.length} module(s), complexite max ${maxComplexity.toFixed(1)}/10. Pipeline ${pipeline} recommande.`,
+      taskIds: [task.id],
+      confidence,
+      suggestedPipeline: pipeline,
+      complexityScore: Math.round(avgComplexity * 10) / 10,
+    });
+  }
+
+  return recs;
+}
+
+/**
+ * S42: Auto-defer P4/P5 tasks if sprint is overloaded.
+ */
+function detectDeferrableTasks(tasks: any[]): PlannerRecommendation[] {
+  if (!isFeatureEnabled("progressive_autonomy")) return [];
+
+  const recs: PlannerRecommendation[] = [];
+  const remaining = tasks.filter((t: any) => t.status !== "done" && t.status !== "cancelled");
+  const inProgress = tasks.filter((t: any) => t.status === "in_progress");
+
+  // If sprint is overloaded (>10 remaining, >2 in_progress), defer P4/P5
+  if (remaining.length > 10 || inProgress.length > 3) {
+    const lowPrio = remaining.filter((t: any) => t.priority >= 4 && t.status === "backlog");
+    if (lowPrio.length > 0) {
+      recs.push({
+        type: "defer",
+        title: `Differer ${lowPrio.length} tache(s) P4/P5`,
+        description: `Sprint charge (${remaining.length} restantes, ${inProgress.length} en cours). Recommande: differer ${lowPrio.length} tache(s) P4+ au prochain sprint.`,
+        taskIds: lowPrio.map((t: any) => t.id),
+        confidence: remaining.length > 12 ? 0.85 : 0.6,
+      });
+    }
+  }
+
+  return recs;
+}
+
 function deduplicateGroups(recs: PlannerRecommendation[]): PlannerRecommendation[] {
   const seen = new Set<string>();
   return recs.filter((rec) => {
@@ -310,6 +402,12 @@ export function formatPlannerResult(result: PlannerResult): string {
     const confidence = Math.round(rec.confidence * 100);
     lines.push(`[${rec.type.toUpperCase()}] ${rec.title} (${confidence}%)`);
     lines.push(`  ${rec.description}`);
+    if (rec.suggestedPipeline) {
+      lines.push(`  Pipeline: ${rec.suggestedPipeline}${rec.complexityScore !== undefined ? ` | Complexite: ${rec.complexityScore}/10` : ""}`);
+    }
+    if (rec.estimatedCost !== undefined) {
+      lines.push(`  Cout estime: $${rec.estimatedCost.toFixed(2)}`);
+    }
     lines.push("");
   }
 

@@ -43,7 +43,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `llm-router.ts` | LLM-based router for dynamic pipeline selection: Haiku analyzes task, returns pipeline + model overrides + budget |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context, JSON Schema for --json-schema flag |
-| `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates, CLI flags (effort, model, budget) |
+| `bmad-agents.ts` | 6 agent definitions (analyst, pm, architect, dev, qa, sm) with YAML templates, CLI flags (effort, model, budget), per-role trust thresholds |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent, system/task prompt split for --append-system-prompt |
 | `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto pipeline selection and retries |
 | `cost-tracking.ts` | Token usage tracking, multi-model cost estimation (Opus/Sonnet/Haiku), sprint cost aggregation, /cost command |
@@ -52,12 +52,12 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
 | `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
-| `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment |
+| `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment, effectiveness tracking, rule promotion/archival |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
 | `workflow-propagation.ts` | Cross-project improvement voting |
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
-| `proactive-planner.ts` | Daily backlog analysis + recommendations |
+| `proactive-planner.ts` | Daily backlog analysis + recommendations, code graph complexity-based pipeline suggestions, auto-defer for overloaded sprints |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
 | `notifications.ts` | Proactive Telegram notifications routed through notification queue (tasks, ideas, PRs) |
 | `notification-queue.ts` | Notification batching queue: enqueue, flush, digest formatting, inline buttons, quiet hours, morning digest, JSON persistence |
@@ -74,7 +74,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `action-registry.ts` | Structured registry of all 33 bot commands: metadata, params, risk levels, aliases for intent detection |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback (Haiku), maps natural language to commands |
 | `command-router.ts` | Routes detected intents to command execution: risk-based confirmation, contextual parameter extraction, multi-turn clarification |
-| `trust-scores.ts` | Trust scores per agent role: confidence tracking, auto-approval logic, progressive autonomy |
+| `trust-scores.ts` | Trust scores per agent role: confidence tracking, per-role auto-approval thresholds, autonomy levels, accelerated degradation, progressive autonomy |
 | `gate-persistence.ts` | Gate evaluation persistence to Supabase, double-loop learning from recurring rubric weaknesses |
 | `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, in-memory fallback, timeline formatting |
 | `agent-messaging.ts` | Inter-agent messaging: structured messages via blackboard, clarification protocol, conflict detection, context enrichment |
@@ -191,6 +191,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Memoire Relationnelle Active (S41):** Six features for structured memory reasoning. (1) Multi-hop Chains: `getMemoryChain()` BFS traversal of memory links up to depth 3. Returns connected memory tree with enriched link types and similarity scores. Max 50 nodes per traversal. (2) Link Classification: `classifyLinkContent()` heuristic classifies link relationships — "extends" (one elaborates), "supports" (similar conclusions), "contradicts" (negation/opposition), "related" (default). Uses entity overlap + negation patterns + length ratio. Stop word filtering for French/English. `contradicts` added to `memory_links.link_type` CHECK constraint. (3) Memory Clustering: `clusterMemories()` finds connected components in the memory graph via BFS. Returns clusters with 2+ members, sorted by size. `formatClusters()` for display. `/brain` uses proper clustering instead of manual link listing. (4) Reasoning Chains for Agents: `buildMemoryChains()` replaces flat fact injection. Strategic roles (analyst, pm, architect, qa) receive structured chains: fact → [link_type] linked_content. Tactical roles (dev, sm) receive flat facts for efficiency. Link types enriched via `classifyLinkContent()` at display time. (5) Similar Past Tasks: `findSimilarPastTasks()` searches completed tasks by keyword matching. Returns estimated vs actual hours, sprint, tags. `fetchSimilarTasksContext()` in agent-context injects historical data for estimation calibration. New "TACHES SIMILAIRES" section (10% budget). (6) Section Rebalancing: 9 sections with adjusted weights — memory 23%, tasks 13%, similar tasks 10%, graph 10%, docs 10%, sprint 10%, metrics 9%, profile 8%, trust 7%. Behind `memory_chains` feature flag (disabled by default). 43 new tests.
 
+**Autonomie Progressive (S42):** Five features for progressive agent autonomy based on track record. (1) Per-role Trust Thresholds: each agent role has custom auto-approval thresholds defined in `bmad-agents.ts` (source of truth). Dev/architect lower spec thresholds (70-75) since output is verified by tests. QA highest impl threshold (92) as quality gate. SM lowest thresholds (60/80) as low-risk role. Global fallback (80/90) for unknown roles. (2) Accelerated Degradation: 3+ consecutive failures trigger -20 penalty instead of -10, rapidly demoting unreliable agents. Resets to normal after a pass. (3) Autonomy Levels: 4 tiers based on trust score — strict (<40), supervised (40-spec), autonomous (spec-impl), full (>=impl). `getAutonomyLevel()` returns level + label. `formatTrustScores()` shows autonomy level per role. (4) Feedback Effectiveness: `measureRuleEffectiveness()` compares gate scores before/after rule application per agent. `promoteOrArchiveRules()` promotes effective rules (trust delta >= +5) and archives ineffective ones (delta <= -5). FeedbackRule extended with `trustDeltaAfter`, `promoted`, `archived` fields. (5) Enriched Planner: `analyzeBacklog()` now includes pipeline recommendations per task based on code graph complexity (`recommendPipelines()`), auto-defer suggestions for P4/P5 tasks in overloaded sprints (`detectDeferrableTasks()`). PlannerRecommendation extended with `suggestedPipeline`, `estimatedCost`, `complexityScore`. (6) Dashboard Autonomy: `/api/autonomy-status` endpoint exposes trust scores, recent gate evaluations with rubric details, and feedback rule status (active/promoted/archived). (7) Monitor Extension: `/monitor` shows trust scores with autonomy levels and feedback rule summary when `progressive_autonomy` flag enabled. Behind `progressive_autonomy` feature flag (disabled by default). 28 new tests.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -207,7 +209,7 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 - `deploy.yml` — Production deploy on push to master: git pull, pm2 restart, smoke test, auto-rollback
 - E2E job runs after unit tests, uses `handleUpdate` injection (no Telegram API dependency)
 
-**Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health
+**Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health, /api/autonomy-status
 
 ### Project Structure
 
@@ -222,7 +224,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1271 tests (unit + integration + E2E)
+tests/                  1299 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -230,7 +232,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1271 tests, all must pass before merge)
+- Tests: `bun test` (1299 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

@@ -28,6 +28,12 @@ export interface FeedbackRule {
   sprints: string[];
   active: boolean;
   createdAt: string;
+  /** S42: Trust delta measured after rule application */
+  trustDeltaAfter?: number;
+  /** S42: Whether this rule has been promoted to permanent */
+  promoted?: boolean;
+  /** S42: Whether this rule has been archived as ineffective */
+  archived?: boolean;
 }
 
 // ── In-Memory Cache ──────────────────────────────────────────
@@ -299,6 +305,100 @@ export function buildFeedbackContext(agentId: AgentRole): string {
   }
 
   return lines.join("\n");
+}
+
+// ── S42: Effectiveness Tracking ──────────────────────────────
+
+/**
+ * Measure effectiveness of feedback rules by comparing trust score
+ * before and after the rule was applied. Rules with positive trust delta
+ * are considered effective.
+ */
+export async function measureRuleEffectiveness(
+  supabase: SupabaseClient,
+  agentRole: AgentRole
+): Promise<Array<{ ruleId: string; pattern: string; trustDelta: number; effective: boolean }>> {
+  const rules = getFeedbackRulesForAgent(agentRole);
+  if (rules.length === 0) return [];
+
+  // Get gate evaluations for this agent since each rule was created
+  const results: Array<{ ruleId: string; pattern: string; trustDelta: number; effective: boolean }> = [];
+
+  for (const rule of rules) {
+    const { data: evals } = await supabase
+      .from("gate_evaluations")
+      .select("score, passed, created_at")
+      .eq("agent_role", agentRole)
+      .gte("created_at", rule.createdAt)
+      .order("created_at", { ascending: true })
+      .limit(20);
+
+    if (!evals || evals.length < 2) continue;
+
+    // Compare average score of first half vs second half
+    const mid = Math.floor(evals.length / 2);
+    const firstHalf = evals.slice(0, mid);
+    const secondHalf = evals.slice(mid);
+
+    const avgFirst = firstHalf.reduce((s, e) => s + e.score, 0) / firstHalf.length;
+    const avgSecond = secondHalf.reduce((s, e) => s + e.score, 0) / secondHalf.length;
+    const trustDelta = Math.round(avgSecond - avgFirst);
+
+    results.push({
+      ruleId: rule.id,
+      pattern: rule.pattern,
+      trustDelta,
+      effective: trustDelta > 0,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Promote effective rules (positive trust delta) and archive ineffective ones.
+ * S42: Returns summary of actions taken.
+ */
+export async function promoteOrArchiveRules(
+  supabase: SupabaseClient
+): Promise<{ promoted: string[]; archived: string[] }> {
+  const promoted: string[] = [];
+  const archived: string[] = [];
+
+  const allRoles: AgentRole[] = ["analyst", "pm", "architect", "dev", "qa", "sm"];
+
+  for (const role of allRoles) {
+    const effectiveness = await measureRuleEffectiveness(supabase, role);
+
+    for (const result of effectiveness) {
+      if (result.effective && result.trustDelta >= 5) {
+        // Promote: mark as promoted in DB
+        await supabase
+          .from("feedback_rules")
+          .update({ promoted: true })
+          .eq("id", result.ruleId);
+
+        const rule = feedbackRules.find((r) => r.id === result.ruleId);
+        if (rule) rule.promoted = true;
+        promoted.push(`${role}/${result.pattern} (delta +${result.trustDelta})`);
+      } else if (!result.effective && result.trustDelta < -5) {
+        // Archive: deactivate
+        await supabase
+          .from("feedback_rules")
+          .update({ active: false, archived: true })
+          .eq("id", result.ruleId);
+
+        const rule = feedbackRules.find((r) => r.id === result.ruleId);
+        if (rule) {
+          rule.active = false;
+          rule.archived = true;
+        }
+        archived.push(`${role}/${result.pattern} (delta ${result.trustDelta})`);
+      }
+    }
+  }
+
+  return { promoted, archived };
 }
 
 // ── Formatting ───────────────────────────────────────────────

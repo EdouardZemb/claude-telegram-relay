@@ -12,8 +12,9 @@ import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
 import { formatAgentList } from "../bmad-agents.ts";
 import { formatMonitoringStats } from "../alerts.ts";
-import { formatRecentGateEvaluations } from "../trust-scores.ts";
+import { formatRecentGateEvaluations, formatTrustScores } from "../trust-scores.ts";
 import { formatDoubleLoopRules } from "../gate-persistence.ts";
+import { formatFeedbackRules, getFeedbackRules } from "../feedback-loop.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
 import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
@@ -184,6 +185,11 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
 
     const parts = [formatMonitoringStats()];
 
+    // S42: Trust scores with autonomy levels
+    if (isFeatureEnabled("progressive_autonomy")) {
+      parts.push("", formatTrustScores());
+    }
+
     // S35: Recent gate evaluations and double-loop rules
     if (supabase) {
       const [recentEvals, dlRules] = await Promise.all([
@@ -191,6 +197,15 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         formatDoubleLoopRules(supabase),
       ]);
       parts.push("", recentEvals, "", dlRules);
+
+      // S42: Active feedback rules summary
+      if (isFeatureEnabled("progressive_autonomy")) {
+        const activeRules = getFeedbackRules();
+        if (activeRules.length > 0) {
+          const promoted = activeRules.filter((r) => r.promoted).length;
+          parts.push("", `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`);
+        }
+      }
 
       // S38: Inter-agent communication monitoring
       if (isFeatureEnabled("inter_agent_messaging")) {
