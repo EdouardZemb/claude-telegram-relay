@@ -261,7 +261,7 @@ const AGENTS: BmadAgent[] = [
     ],
     effort: "low",
     model: "claude-haiku-4-5",
-    fallbackModel: "claude-haiku-4-5",
+    fallbackModel: "claude-sonnet-4-6",
     maxBudgetUsd: 0.10,
     trustThresholds: { specAutoApprove: 60, implAutoApprove: 80 },
   },

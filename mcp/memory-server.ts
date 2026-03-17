@@ -402,6 +402,15 @@ import { estimateSprintCost } from "../src/cost-estimate.ts";
 import { runAllChecks } from "../src/alerts.ts";
 import { listFeatures, setFeature } from "../src/feature-flags.ts";
 import { analyzeBacklog, formatPlannerResult } from "../src/proactive-planner.ts";
+import { orchestrate, formatOrchestrationResult } from "../src/orchestrator.ts";
+import {
+  DEFAULT_PIPELINE,
+  QUICK_PIPELINE,
+  REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+  LIGHT_PIPELINE,
+  RESEARCH_PIPELINE,
+} from "../src/pipeline-selection.ts";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -911,6 +920,132 @@ server.tool(
         }],
       };
     } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+// ── Orchestrate Tool ─────────────────────────────────────────
+
+const PIPELINE_MAP: Record<string, typeof DEFAULT_PIPELINE> = {
+  DEFAULT: DEFAULT_PIPELINE,
+  QUICK: QUICK_PIPELINE,
+  REVIEW: REVIEW_PIPELINE,
+  SOLO: SOLO_PIPELINE,
+  LIGHT: LIGHT_PIPELINE,
+  RESEARCH: RESEARCH_PIPELINE,
+};
+
+server.tool(
+  "orchestrate_task",
+  "Run the multi-agent BMad pipeline on a task. Chains specialized agents (analyst, pm, architect, dev, qa) to implement a task end-to-end. " +
+    "Same effect as /orchestrate on Telegram. Progress updates and final result are sent as Telegram notifications. " +
+    "Preconditions: task must exist (use task_create first). " +
+    "Suggested next: get_tasks (check result), get_cost_summary (see cost).",
+  {
+    task_id: z.string().describe("Task ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
+    pipeline: z.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"]).optional()
+      .describe("Pipeline type. DEFAULT=full (analyst->pm->architect->dev->qa), QUICK=dev->qa, REVIEW=qa->architect, SOLO=dev, LIGHT=planner->dev->qa, RESEARCH=explorer->planner->dev->qa. Omit for auto-selection."),
+    use_blackboard: z.boolean().optional().describe("Enable blackboard for structured context passing and gate evaluation (default: false)"),
+    auto_pipeline: z.boolean().optional().describe("Let the system choose the pipeline based on task analysis (default: true when pipeline is omitted)"),
+    resume_session_id: z.string().optional().describe("Resume a failed pipeline from its last successful step"),
+  },
+  async ({ task_id, pipeline, use_blackboard, auto_pipeline, resume_session_id }) => {
+    try {
+      // Resolve task by ID or prefix
+      let resolvedTask: any = null;
+      if (task_id.length < 36) {
+        const tasks = await getBacklog(supabase);
+        const allTasks = await callSupabaseRest(
+          `tasks?id=like.${task_id}*&select=*&limit=1`
+        ) as any[];
+        resolvedTask = allTasks?.[0] || tasks.find(t => t.id.startsWith(task_id));
+      } else {
+        const result = await callSupabaseRest(
+          `tasks?id=eq.${task_id}&select=*&limit=1`
+        ) as any[];
+        resolvedTask = result?.[0];
+      }
+
+      if (!resolvedTask) {
+        return { content: [{ type: "text" as const, text: `Error: no task found with ID '${task_id}'` }] };
+      }
+
+      // Notify start
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
+        data: { taskId: resolvedTask.id },
+      });
+
+      // Build options
+      const selectedPipeline = pipeline ? PIPELINE_MAP[pipeline] : undefined;
+      const useAuto = auto_pipeline ?? (!pipeline);
+
+      const result = await orchestrate(supabase, resolvedTask, {
+        pipeline: selectedPipeline,
+        autoPipeline: useAuto,
+        stopOnFailure: true,
+        useBlackboard: use_blackboard ?? false,
+        resumeSessionId: resume_session_id,
+        onProgress: async (msg) => {
+          await enqueueMcpNotification({
+            type: "task",
+            severity: "normal",
+            message: msg,
+            data: { taskId: resolvedTask.id },
+          });
+        },
+      });
+
+      // Send formatted result to Telegram
+      const formatted = formatOrchestrationResult(result);
+      await enqueueMcpNotification({
+        type: "task",
+        severity: result.success ? "normal" : "critical",
+        message: formatted,
+        data: { taskId: resolvedTask.id },
+      });
+
+      // Return structured result to MCP client
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            success: result.success,
+            taskId: resolvedTask.id,
+            taskTitle: resolvedTask.title,
+            pipeline: result.steps.map(s => s.agentId),
+            totalDurationMs: result.totalDurationMs,
+            totalCostUsd: result.steps.reduce((sum, s) => sum + (s.costUsd || 0), 0),
+            steps: result.steps.map(s => ({
+              agent: s.agentId,
+              name: s.agentName,
+              success: s.success,
+              durationMs: s.durationMs,
+              costUsd: s.costUsd,
+              error: s.error,
+            })),
+            summary: result.summary,
+            blackboard: result.blackboard ? {
+              sessionId: result.blackboard.sessionId,
+              gateCount: result.blackboard.gateEvaluations.length,
+              gates: result.blackboard.gateEvaluations.map(g => ({
+                gate: g.gate_name,
+                pass: g.pass,
+                score: g.score,
+              })),
+            } : undefined,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      await enqueueMcpNotification({
+        type: "alert",
+        severity: "critical",
+        message: `Pipeline echoue via MCP: ${error instanceof Error ? error.message : String(error)}`,
+      });
       return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
     }
   }

@@ -377,12 +377,92 @@ describe("MCP Orchestration Tools — Imports", () => {
   });
 });
 
+describe("MCP Orchestration Tools — orchestrate_task", () => {
+  it("registers orchestrate_task tool", () => {
+    expect(serverCode).toContain('"orchestrate_task"');
+    expect(serverCode).toContain("Run the multi-agent BMad pipeline on a task");
+  });
+
+  it("accepts task_id parameter", () => {
+    expect(serverCode).toContain('task_id: z.string().describe("Task ID');
+  });
+
+  it("accepts optional pipeline parameter with valid types", () => {
+    expect(serverCode).toContain('z.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])');
+  });
+
+  it("accepts optional use_blackboard parameter", () => {
+    expect(serverCode).toContain("use_blackboard: z.boolean().optional()");
+  });
+
+  it("accepts optional auto_pipeline parameter", () => {
+    expect(serverCode).toContain("auto_pipeline: z.boolean().optional()");
+  });
+
+  it("accepts optional resume_session_id parameter", () => {
+    expect(serverCode).toContain("resume_session_id: z.string().optional()");
+  });
+
+  it("imports orchestrate and formatOrchestrationResult", () => {
+    expect(serverCode).toContain('import { orchestrate, formatOrchestrationResult } from "../src/orchestrator.ts"');
+  });
+
+  it("imports pipeline constants", () => {
+    expect(serverCode).toContain('import {');
+    expect(serverCode).toContain("DEFAULT_PIPELINE");
+    expect(serverCode).toContain("QUICK_PIPELINE");
+    expect(serverCode).toContain("SOLO_PIPELINE");
+    expect(serverCode).toContain("LIGHT_PIPELINE");
+    expect(serverCode).toContain("RESEARCH_PIPELINE");
+    expect(serverCode).toContain('from "../src/pipeline-selection.ts"');
+  });
+
+  it("defines PIPELINE_MAP for name-to-array resolution", () => {
+    expect(serverCode).toContain("PIPELINE_MAP");
+    expect(serverCode).toContain("DEFAULT: DEFAULT_PIPELINE");
+    expect(serverCode).toContain("QUICK: QUICK_PIPELINE");
+  });
+
+  it("resolves task by ID prefix", () => {
+    expect(serverCode).toContain("task_id.length < 36");
+  });
+
+  it("sends start notification via MCP pending", () => {
+    expect(serverCode).toContain("Pipeline demarre via MCP");
+  });
+
+  it("sends formatted result to Telegram", () => {
+    expect(serverCode).toContain("formatOrchestrationResult(result)");
+  });
+
+  it("uses onProgress callback for real-time updates", () => {
+    expect(serverCode).toContain("onProgress: async (msg)");
+  });
+
+  it("defaults to auto pipeline when no pipeline specified", () => {
+    expect(serverCode).toContain("const useAuto = auto_pipeline ?? (!pipeline)");
+  });
+
+  it("returns structured result with step details", () => {
+    expect(serverCode).toContain("totalDurationMs: result.totalDurationMs");
+    expect(serverCode).toContain("steps: result.steps.map");
+  });
+
+  it("handles errors with critical notification", () => {
+    expect(serverCode).toContain("Pipeline echoue via MCP");
+    expect(serverCode).toContain('severity: "critical"');
+  });
+
+  it("includes dependency metadata in tool description", () => {
+    expect(serverCode).toContain("Preconditions: task must exist");
+    expect(serverCode).toContain("Suggested next:");
+  });
+});
+
 describe("MCP Orchestration Tools — Total Tool Count", () => {
-  it("has 21 total tools registered (4 memory + 3 project + 2 blackboard + 3 graph + 2 task + 5 prd + 7 new orchestration - 5 prd already counted)", () => {
+  it("has 27 total tools registered (4 memory + 3 project + 2 blackboard + 3 graph + 2 task + 5 prd + 7 orchestration + 1 orchestrate_task)", () => {
     const toolMatches = serverCode.match(/server\.tool\(\s*"/g);
-    // 4 memory + 3 project + 2 blackboard + 3 graph + 2 task + 5 prd + 7 orchestration = 26
-    // But get_tasks + get_sprint_summary + get_project_context are the 3 project tools
     expect(toolMatches).not.toBeNull();
-    expect(toolMatches!.length).toBe(26);
+    expect(toolMatches!.length).toBe(27);
   });
 });

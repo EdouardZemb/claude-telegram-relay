@@ -1,4 +1,5 @@
 {
   "model_cascade": false,
-  "heartbeat": true
+  "heartbeat": true,
+  "explore_mode": true
 }
