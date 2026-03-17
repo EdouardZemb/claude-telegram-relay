@@ -978,3 +978,20 @@ BEGIN
   RETURN archived_count;
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
+
+-- ============================================================
+-- AGENT EVENTS TABLE (S38: Agent lifecycle event sourcing)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  agent_role TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_events_role ON agent_events(session_id, agent_role);
+
+COMMENT ON TABLE agent_events IS 'Agent lifecycle events for inter-agent communication (S38).';

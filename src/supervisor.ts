@@ -54,6 +54,10 @@ export interface SupervisorReport {
     endMs: number;
     durationMs: number;
   }>;
+  /** S38: Inter-agent communication metrics */
+  message_count: number;
+  clarification_count: number;
+  conflict_count: number;
 }
 
 /** Non-critical agents that can be skipped on failure */
@@ -69,6 +73,10 @@ export class Supervisor {
   private pipelineStartTime: number = 0;
   private maxAttempts: number;
   private timeoutMs: number;
+  /** S38: Inter-agent communication counters */
+  private _messageCount: number = 0;
+  private _clarificationCount: number = 0;
+  private _conflictCount: number = 0;
 
   constructor(options: { maxAttempts?: number; timeoutMs?: number } = {}) {
     this.maxAttempts = options.maxAttempts ?? 3;
@@ -184,6 +192,38 @@ export class Supervisor {
   }
 
   /**
+   * S38: Record a message event.
+   */
+  recordMessage(): void {
+    this._messageCount++;
+  }
+
+  /**
+   * S38: Record a clarification event.
+   */
+  recordClarification(): void {
+    this._clarificationCount++;
+  }
+
+  /**
+   * S38: Record a conflict event.
+   */
+  recordConflict(): void {
+    this._conflictCount++;
+  }
+
+  /**
+   * S38: Get inter-agent communication counters.
+   */
+  getInterAgentMetrics(): { messageCount: number; clarificationCount: number; conflictCount: number } {
+    return {
+      messageCount: this._messageCount,
+      clarificationCount: this._clarificationCount,
+      conflictCount: this._conflictCount,
+    };
+  }
+
+  /**
    * Generate the final supervisor report.
    */
   generateReport(): SupervisorReport {
@@ -211,6 +251,9 @@ export class Supervisor {
       sequential_equivalent_ms: sequentialMs,
       speedup_ratio: wallTime > 0 ? sequentialMs / wallTime : 1,
       per_agent_timing: perAgentTiming,
+      message_count: this._messageCount,
+      clarification_count: this._clarificationCount,
+      conflict_count: this._conflictCount,
     };
   }
 }

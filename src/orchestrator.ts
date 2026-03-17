@@ -51,6 +51,7 @@ import {
   InMemoryBlackboard,
   type BlackboardRow,
   type SectionName,
+  type WorkingMemory,
 } from "./blackboard.ts";
 import {
   evaluateAndRework,
@@ -91,6 +92,20 @@ import {
   findLatestPipelineRun,
   type StepSnapshot,
 } from "./pipeline-state.ts";
+import { emitAgentEvent, clearInMemoryEvents } from "./agent-events.ts";
+import {
+  getAgentMessages,
+  checkPendingClarifications,
+  detectConflicts,
+  getMediatingAgent,
+  sendAgentMessage,
+  buildInterAgentContext,
+  clearClarificationTracker,
+  canRequestClarification,
+  markClarificationUsed,
+  type AgentInterMessage,
+} from "./agent-messaging.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
@@ -637,6 +652,8 @@ export async function orchestrate(
       await options.onProgress(`Execution parallele (DAG, max concurrency: ${options.maxConcurrency ?? 3})`);
     }
 
+    const s38ParallelEnabled = isFeatureEnabled("inter_agent_messaging");
+
     const dagResult = await executeDag(dag, async (agentId, previousResults) => {
       // Build messages from previous results
       const prevMessages: AgentMessage[] = [];
@@ -652,9 +669,36 @@ export async function orchestrate(
         });
       }
 
+      // S38: Emit spawned event
+      if (s38ParallelEnabled && pipelineSessionId) {
+        const agentDef = getAgent(agentId);
+        emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
+          model: agentDef?.model, effort: agentDef?.effort,
+        }).catch(() => {});
+      }
+
+      // S38: Inject inter-agent messages into context
+      if (s38ParallelEnabled && options.useBlackboard && bbSessionId) {
+        const interMessages = await getAgentMessages(supabase, bbSessionId, agentId);
+        if (interMessages.length > 0) {
+          const interCtx = buildInterAgentContext(interMessages, agentId);
+          const existingCtx = agentContextCache.get(agentId) || "";
+          agentContextCache.set(agentId, existingCtx + "\n\n" + interCtx);
+        }
+      }
+
       supervisor.markStarted(agentId);
       const result = await runAgentStep(agentId, task, prevMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
       supervisor.markCompleted(agentId, result);
+
+      // S38: Emit completed/failed event
+      if (s38ParallelEnabled && pipelineSessionId) {
+        emitAgentEvent(supabase, pipelineSessionId, agentId,
+          result.success ? "completed" : "failed",
+          { duration_ms: result.durationMs, tokens_input: result.tokensInput, cost_usd: result.costUsd }
+        ).catch(() => {});
+      }
+
       return result;
     }, {
       maxConcurrency: options.maxConcurrency ?? 3,
@@ -764,12 +808,32 @@ export async function orchestrate(
         });
       }
 
+      // S38: Emit spawned event
+      const s38Enabled = isFeatureEnabled("inter_agent_messaging");
+      if (s38Enabled && pipelineSessionId) {
+        emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
+          model: agent?.model, effort: agent?.effort, budget: agent?.maxBudgetUsd,
+        }).catch(() => {});
+      }
+
       // S22-04: Retry loop with exponential backoff
       let result: AgentStepResult | null = null;
       let retryCount = 0;
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        result = await runAgentStep(agentId, task, messages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
+        // S38: Inject inter-agent messages into context
+        let augmentedMessages = messages;
+        if (s38Enabled && options.useBlackboard && bbSessionId) {
+          const interMessages = await getAgentMessages(supabase, bbSessionId, agentId);
+          if (interMessages.length > 0) {
+            const interCtx = buildInterAgentContext(interMessages, agentId);
+            // Append inter-agent context to agent context
+            const existingCtx = agentContextCache.get(agentId) || "";
+            agentContextCache.set(agentId, existingCtx + "\n\n" + interCtx);
+          }
+        }
+
+        result = await runAgentStep(agentId, task, augmentedMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
 
         if (result.success) break;
 
@@ -788,6 +852,73 @@ export async function orchestrate(
       // result is never null here because maxRetries >= 0 guarantees at least one iteration
       result!.retryCount = retryCount;
       steps.push(result!);
+
+      // S38: Emit completed/failed event
+      if (s38Enabled && pipelineSessionId) {
+        const eventType = result!.success ? "completed" : "failed";
+        emitAgentEvent(supabase, pipelineSessionId, agentId, eventType, {
+          duration_ms: result!.durationMs,
+          tokens_input: result!.tokensInput,
+          tokens_output: result!.tokensOutput,
+          cost_usd: result!.costUsd,
+          ...(result!.error ? { error: result!.error } : {}),
+        }).catch(() => {});
+      }
+
+      // S38: Detect conflicts in working memory after agent completes
+      if (s38Enabled && options.useBlackboard && bbSessionId && result!.success) {
+        try {
+          const wm = supabase && !bbFallback
+            ? await readSection(supabase, bbSessionId, "working_memory") as WorkingMemory | null
+            : bbFallback?.read(bbSessionId, "working_memory") as WorkingMemory | null;
+          const conflicts = detectConflicts(wm);
+          for (const conflict of conflicts) {
+            if (options.onProgress) {
+              await options.onProgress(
+                `Conflit detecte: ${conflict.agent1} vs ${conflict.agent2} sur "${conflict.subject.substring(0, 50)}"`
+              );
+            }
+            // Write escalation message to blackboard
+            if (supabase && !bbFallback) {
+              const msg: AgentInterMessage = {
+                id: crypto.randomUUID(),
+                from: "system",
+                to: getMediatingAgent(conflict.agent1, conflict.agent2),
+                type: "escalation",
+                content: `Conflit entre ${conflict.agent1} et ${conflict.agent2}: ${conflict.agent1Position} vs ${conflict.agent2Position}`,
+                timestamp: new Date().toISOString(),
+              };
+              const res = await sendAgentMessage(supabase, bbSessionId, msg, bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            }
+          }
+        } catch {
+          // Conflict detection is best-effort
+        }
+      }
+
+      // S38: Check for pending clarifications after agent completes
+      if (s38Enabled && options.useBlackboard && bbSessionId && result!.success && supabase) {
+        try {
+          const pending = await checkPendingClarifications(supabase, bbSessionId);
+          for (const q of pending) {
+            // Check if we can do a round-trip
+            if (canRequestClarification(pipelineSessionId!, q.from, q.to as string)) {
+              markClarificationUsed(pipelineSessionId!, q.from, q.to as string);
+              if (options.onProgress) {
+                await options.onProgress(
+                  `Clarification: ${q.from} demande a ${q.to}: ${q.content.substring(0, 60)}...`
+                );
+              }
+              emitAgentEvent(supabase, pipelineSessionId!, q.from, "clarification_requested", {
+                target_agent: q.to, question: q.content.substring(0, 200),
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // Clarification check is best-effort
+        }
+      }
 
       // Build AgentMessage for downstream agents
       const message: AgentMessage = {
@@ -1028,6 +1159,12 @@ export async function orchestrate(
     if (supabase && !bbFallback) {
       await updateBlackboardStatus(supabase, bbSessionId, steps.every(s => s.success) ? "completed" : "failed");
     }
+  }
+
+  // S38: Cleanup session trackers
+  if (pipelineSessionId) {
+    clearClarificationTracker(pipelineSessionId);
+    clearInMemoryEvents(pipelineSessionId);
   }
 
   // Build summary

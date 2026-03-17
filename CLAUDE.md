@@ -75,6 +75,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `command-router.ts` | Routes detected intents to command execution: risk-based confirmation, contextual parameter extraction, multi-turn clarification |
 | `trust-scores.ts` | Trust scores per agent role: confidence tracking, auto-approval logic, progressive autonomy |
 | `gate-persistence.ts` | Gate evaluation persistence to Supabase, double-loop learning from recurring rubric weaknesses |
+| `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, in-memory fallback, timeline formatting |
+| `agent-messaging.ts` | Inter-agent messaging: structured messages via blackboard, clarification protocol, conflict detection, context enrichment |
 
 ### Telegram Commands
 
@@ -116,7 +118,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`, `bump_memory_access`
 
@@ -180,6 +182,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Conversational Orchestrator (S37):** Transforms the bot from a command-menu interface into a conversational orchestrator. Users speak naturally, the bot detects intent and routes to commands. (1) Action Registry: `action-registry.ts` defines all 33 commands with structured metadata (description, params, risk level, aliases). Source of truth for intent detection and routing. (2) Two-tier Intent Detection: `intent-detection.ts` uses regex fast-path (confidence >= 0.9 skips LLM) then Haiku LLM fallback for ambiguous messages. 5s timeout, falls back to regex on error. (3) Command Router: `command-router.ts` receives detected intent and executes commands directly. Risk-based confirmation for high-risk actions (exec, orchestrate, autopipeline, rollback) via inline keyboard. Medium/low risk executes immediately. (4) Contextual Parameter Extraction: resolves "la tache" from in_progress tasks, "la derniere tache" from most recent. Queries Supabase for context when params are missing. (5) Multi-turn Clarification: when required params cannot be resolved, asks a targeted question. Next user message auto-resolves to the pending command. 60s TTL. (6) Conversation Fallback: when no intent is detected, conversation prompt is enriched with available actions so the LLM can naturally guide users. Behind `intent_detection` feature flag (disabled by default). Slash commands always work in parallel.
 
+**Inter-Agent Communication (S38):** Agents in a pipeline can communicate during execution via structured messages on the blackboard. (1) Agent Event Log: `agent-events.ts` provides event sourcing with `agent_events` table — tracks spawned, started, completed, failed, clarification_requested, clarification_resolved events per agent per pipeline. In-memory fallback when Supabase unavailable. (2) Inter-Agent Messaging: `agent-messaging.ts` adds a `messages` section to the blackboard. Message types: directive, question, observation, warning, escalation. All roles can write. Truncation at 20 messages (keep 15 most recent). (3) Clarification Protocol: downstream agents can ask questions to upstream agents. Max 1 round-trip per agent pair per pipeline to prevent loops. Supervisor detects unresolved questions after each agent step. (4) Conflict Detection: lexical overlap (Jaccard > 0.5) on working_memory decisions detects contradictions between agents. Higher-ranked agent mediates (architect > pm > analyst). Escalation to user if unresolved. (5) Enriched Context: inter-agent messages injected into agent prompts, prioritized by type (escalation > warning > question). Token budget: 2000 max for messages. (6) Monitoring: /monitor shows agent timeline and message flow summary for latest pipeline. Behind `inter_agent_messaging` feature flag (disabled by default). Backward compatible: pipelines without the flag behave identically.
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -211,7 +215,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  948 tests (unit + integration + E2E)
+tests/                  1165 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```

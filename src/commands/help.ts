@@ -14,6 +14,9 @@ import { formatAgentList } from "../bmad-agents.ts";
 import { formatMonitoringStats } from "../alerts.ts";
 import { formatRecentGateEvaluations } from "../trust-scores.ts";
 import { formatDoubleLoopRules } from "../gate-persistence.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
+import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
+import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
 
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -187,6 +190,37 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         formatDoubleLoopRules(supabase),
       ]);
       parts.push("", recentEvals, "", dlRules);
+
+      // S38: Inter-agent communication monitoring
+      if (isFeatureEnabled("inter_agent_messaging")) {
+        try {
+          // Find most recent pipeline run
+          const { data: latestRun } = await supabase
+            .from("pipeline_runs")
+            .select("session_id")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+          if (latestRun?.session_id) {
+            const [events, messagesSection] = await Promise.all([
+              getAgentEvents(supabase, latestRun.session_id),
+              getAgentMessages(supabase, latestRun.session_id, "*"),
+            ]);
+
+            if (events.length > 0) {
+              parts.push("", formatAgentTimeline(events.slice(-10)));
+            }
+
+            if (messagesSection.length > 0) {
+              const summary = getMessageFlowSummary(messagesSection);
+              parts.push("", formatMessageFlow(summary));
+            }
+          }
+        } catch {
+          // Best-effort monitoring
+        }
+      }
     }
 
     await ctx.reply(parts.join("\n"), threadOpts(ctx));

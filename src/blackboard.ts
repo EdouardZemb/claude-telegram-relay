@@ -17,7 +17,7 @@ import type { AgentRole } from "./orchestrator.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
-export type SectionName = "spec" | "plan" | "tasks" | "implementation" | "verification" | "working_memory";
+export type SectionName = "spec" | "plan" | "tasks" | "implementation" | "verification" | "working_memory" | "messages";
 
 /** Working memory structure for transient pipeline discoveries (S36-07) */
 export interface WorkingMemory {
@@ -34,6 +34,7 @@ export interface BlackboardSections {
   implementation: any | null;
   verification: any | null;
   working_memory: WorkingMemory | null;
+  messages: any | null;
 }
 
 export interface BlackboardRow {
@@ -52,16 +53,16 @@ export interface BlackboardRow {
 
 /** Which roles can write to which sections */
 const ROLE_WRITE_MAP: Record<string, SectionName[]> = {
-  analyst: ["spec", "working_memory"],
-  pm: ["tasks", "working_memory"],
-  architect: ["plan", "working_memory"],
-  dev: ["implementation", "working_memory"],
-  qa: ["verification", "working_memory"],
-  sm: ["verification", "working_memory"],
-  verifier: ["verification", "working_memory"],
-  evaluator: ["verification", "working_memory"],
+  analyst: ["spec", "working_memory", "messages"],
+  pm: ["tasks", "working_memory", "messages"],
+  architect: ["plan", "working_memory", "messages"],
+  dev: ["implementation", "working_memory", "messages"],
+  qa: ["verification", "working_memory", "messages"],
+  sm: ["verification", "working_memory", "messages"],
+  verifier: ["verification", "working_memory", "messages"],
+  evaluator: ["verification", "working_memory", "messages"],
   // system can write anywhere (used for initialization)
-  system: ["spec", "plan", "tasks", "implementation", "verification", "working_memory"],
+  system: ["spec", "plan", "tasks", "implementation", "verification", "working_memory", "messages"],
 };
 
 /**
@@ -100,6 +101,7 @@ export async function createBlackboard(
     implementation: null,
     verification: null,
     working_memory: null,
+    messages: null,
   };
 
   const { data, error } = await supabase
@@ -495,7 +497,7 @@ export class InMemoryBlackboard {
       task_id: taskId,
       session_id: sessionId,
       version: 1,
-      sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null },
+      sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null, messages: null },
       history: [],
       status: "active",
       pipeline_type: pipelineType || null,
