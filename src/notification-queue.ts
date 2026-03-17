@@ -27,6 +27,7 @@ import {
 
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const QUEUE_FILE = join(RELAY_DIR, "notification-queue.json");
+const MCP_PENDING_FILE = join(RELAY_DIR, "mcp-pending-notifications.json");
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -304,6 +305,35 @@ export async function flushMorningDigest(): Promise<void> {
   }
 }
 
+// ── MCP Notification Bridge ──────────────────────────────────
+
+export async function consumeMcpPending(): Promise<void> {
+  try {
+    const content = await readFile(MCP_PENDING_FILE, "utf-8");
+    const pending = JSON.parse(content);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    for (const item of pending) {
+      if (!isTypeEnabled(item.type)) continue;
+      const fullItem: NotificationItem = {
+        id: crypto.randomUUID(),
+        type: item.type,
+        severity: item.severity || "normal",
+        message: item.message,
+        data: item.data,
+        createdAt: item.createdAt || Date.now(),
+      };
+      queue.push(fullItem);
+    }
+
+    // Clear the pending file
+    await writeFile(MCP_PENDING_FILE, "[]");
+    await saveQueue();
+  } catch {
+    // File doesn't exist or parse error — normal when no MCP pending
+  }
+}
+
 // ── Lifecycle ──────────────────────────────────────────────────
 
 export async function startQueue(bot: Bot): Promise<void> {
@@ -317,6 +347,8 @@ export async function startQueue(bot: Bot): Promise<void> {
 
   const prefs = getPrefs();
   timer = setInterval(async () => {
+    // Consume any pending MCP notifications
+    await consumeMcpPending();
     // Don't auto-flush during quiet hours (wait for morning digest)
     if (!isQuietHours() && queue.length > 0) {
       await flush();

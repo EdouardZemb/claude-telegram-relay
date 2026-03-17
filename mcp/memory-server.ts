@@ -378,5 +378,284 @@ server.tool(
   }
 );
 
+// ── S44: Business Logic Server (Task Tools) ─────────────────
+
+import { createClient } from "@supabase/supabase-js";
+import {
+  addTask,
+  updateTaskStatus,
+  getBacklog,
+} from "../src/tasks.ts";
+import {
+  generatePRD,
+  savePRD,
+  getPRD,
+  getPRDs,
+  updatePRDStatus,
+} from "../src/prd.ts";
+import { readFile, writeFile, mkdir, rename as fsRename } from "fs/promises";
+import { join } from "path";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
+const MCP_PENDING_FILE = join(RELAY_DIR, "mcp-pending-notifications.json");
+
+interface McpNotification {
+  type: "task" | "pr" | "idea" | "alert";
+  severity: "critical" | "normal";
+  message: string;
+  data?: Record<string, unknown>;
+  createdAt: number;
+}
+
+async function enqueueMcpNotification(notif: Omit<McpNotification, "createdAt">): Promise<void> {
+  try {
+    let pending: McpNotification[] = [];
+    try {
+      const content = await readFile(MCP_PENDING_FILE, "utf-8");
+      pending = JSON.parse(content);
+    } catch {
+      // File doesn't exist yet — start fresh
+    }
+    pending.push({ ...notif, createdAt: Date.now() });
+    await mkdir(RELAY_DIR, { recursive: true });
+    const tmp = MCP_PENDING_FILE + ".tmp";
+    await writeFile(tmp, JSON.stringify(pending, null, 2));
+    await fsRename(tmp, MCP_PENDING_FILE);
+  } catch (error) {
+    console.error("MCP notification enqueue error:", error);
+  }
+}
+
+server.tool(
+  "task_create",
+  "Create a new task in the project backlog. Same effect as /task on Telegram. Sends a notification to Telegram.",
+  {
+    title: z.string().describe("Task title (required)"),
+    description: z.string().optional().describe("Task description"),
+    priority: z.number().min(1).max(5).optional().describe("Priority 1-5 (1=highest, default 3)"),
+    sprint: z.string().optional().describe("Sprint ID (e.g., 'S44')"),
+    project: z.string().optional().describe("Project name (default: telegram-relay)"),
+    tags: z.array(z.string()).optional().describe("Tags array"),
+  },
+  async ({ title, description, priority, sprint, project, tags }) => {
+    try {
+      const task = await addTask(supabase, title, {
+        description,
+        priority,
+        sprint,
+        project,
+        tags,
+      });
+
+      if (!task) {
+        return { content: [{ type: "text" as const, text: "Error: failed to create task in Supabase" }] };
+      }
+
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `Tache creee: ${task.title} (P${task.priority})${task.sprint ? ` [${task.sprint}]` : ""}`,
+        data: { taskId: task.id, taskStatus: task.status },
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "task_update",
+  "Update a task's status. Same effect as /start or /done on Telegram. Sends a notification to Telegram.",
+  {
+    task_id: z.string().describe("Task ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
+    status: z.enum(["backlog", "in_progress", "review", "done", "cancelled"]).describe("New status"),
+  },
+  async ({ task_id, status }) => {
+    try {
+      // Support ID prefix matching (same as the bot)
+      let resolvedId = task_id;
+      if (task_id.length < 36) {
+        const tasks = await getBacklog(supabase);
+        const match = tasks.find(t => t.id.startsWith(task_id));
+        if (!match) {
+          return { content: [{ type: "text" as const, text: `Error: no task found with ID prefix '${task_id}'` }] };
+        }
+        resolvedId = match.id;
+      }
+
+      const task = await updateTaskStatus(supabase, resolvedId, status);
+      if (!task) {
+        return { content: [{ type: "text" as const, text: `Error: failed to update task '${task_id}'` }] };
+      }
+
+      const statusLabels: Record<string, string> = {
+        backlog: "remise au backlog",
+        in_progress: "demarree",
+        review: "en review",
+        done: "terminee",
+        cancelled: "annulee",
+      };
+
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `Tache ${statusLabels[status] || status}: ${task.title}`,
+        data: { taskId: task.id, taskStatus: task.status },
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+// ── S44: Business Logic Server (PRD Tools) ──────────────────
+
+server.tool(
+  "prd_create",
+  "Generate and save a PRD (Product Requirements Document) via Claude. Same effect as /prd create on Telegram. Sends a notification to Telegram.",
+  {
+    description: z.string().describe("Description of the feature/change to generate a PRD for"),
+    project: z.string().optional().describe("Project name (default: telegram-relay)"),
+    tags: z.array(z.string()).optional().describe("Tags array"),
+    requested_by: z.string().optional().describe("Who requested this PRD"),
+  },
+  async ({ description, project, tags, requested_by }) => {
+    try {
+      const projectName = project ?? "telegram-relay";
+      const generated = await generatePRD(description, projectName);
+
+      if (!generated) {
+        return { content: [{ type: "text" as const, text: "Error: PRD generation failed (Claude CLI may be unavailable)" }] };
+      }
+
+      const prd = await savePRD(supabase, generated, {
+        project: projectName,
+        tags,
+        requested_by,
+      });
+
+      if (!prd) {
+        return { content: [{ type: "text" as const, text: "Error: failed to save PRD in Supabase" }] };
+      }
+
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`,
+        data: { taskId: prd.id },
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "prd_list",
+  "List PRDs, optionally filtered by project and/or status. Same as /prd list on Telegram.",
+  {
+    project: z.string().optional().describe("Filter by project name"),
+    status: z.string().optional().describe("Filter by status: draft, approved, rejected, superseded"),
+  },
+  async ({ project, status }) => {
+    try {
+      const prds = await getPRDs(supabase, { project, status });
+      return { content: [{ type: "text" as const, text: JSON.stringify(prds, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "prd_get",
+  "Get a specific PRD by ID or ID prefix. Same as /prd view on Telegram.",
+  {
+    prd_id: z.string().describe("PRD ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
+  },
+  async ({ prd_id }) => {
+    try {
+      const prd = await getPRD(supabase, prd_id);
+      if (!prd) {
+        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "prd_approve",
+  "Approve a PRD (change status to approved). Same as /prd approve on Telegram. Sends a notification to Telegram.",
+  {
+    prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
+  },
+  async ({ prd_id }) => {
+    try {
+      const existing = await getPRD(supabase, prd_id);
+      if (!existing) {
+        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+      }
+
+      const prd = await updatePRDStatus(supabase, existing.id, "approved");
+      if (!prd) {
+        return { content: [{ type: "text" as const, text: `Error: failed to approve PRD '${prd_id}'` }] };
+      }
+
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `PRD approuve: ${prd.title} [${prd.id.substring(0, 8)}]`,
+        data: { taskId: prd.id },
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "prd_reject",
+  "Reject a PRD (change status to rejected). Same as /prd reject on Telegram. Sends a notification to Telegram.",
+  {
+    prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
+  },
+  async ({ prd_id }) => {
+    try {
+      const existing = await getPRD(supabase, prd_id);
+      if (!existing) {
+        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+      }
+
+      const prd = await updatePRDStatus(supabase, existing.id, "rejected");
+      if (!prd) {
+        return { content: [{ type: "text" as const, text: `Error: failed to reject PRD '${prd_id}'` }] };
+      }
+
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `PRD rejete: ${prd.title} [${prd.id.substring(0, 8)}]`,
+        data: { taskId: prd.id },
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

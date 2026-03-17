@@ -13,7 +13,7 @@
   "code_graph": true,
   "enhanced_agent_context": true,
   "memory_chains": true,
-  "progressive_autonomy": false,
-  "conversation_sessions": false,
-  "deliberation": false
+  "progressive_autonomy": true,
+  "conversation_sessions": true,
+  "deliberation": true
 }
