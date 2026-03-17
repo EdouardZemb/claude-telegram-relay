@@ -15,5 +15,8 @@
   "memory_chains": true,
   "progressive_autonomy": true,
   "conversation_sessions": true,
-  "deliberation": true
+  "deliberation": true,
+  "explore_mode": true,
+  "adaptive_pipeline": true,
+  "tavily_search": true
 }

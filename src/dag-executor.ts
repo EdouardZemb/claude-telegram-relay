@@ -64,6 +64,26 @@ export const REVIEW_DAG: DAGDefinition = new Map([
   ["architect", ["qa"]],
 ]);
 
+/** S44 T8: Solo pipeline — dev only */
+export const SOLO_DAG: DAGDefinition = new Map([
+  ["dev", []],
+]);
+
+/** S44 T8: Light pipeline — planner (analyst+pm fusion) -> dev -> qa */
+export const LIGHT_DAG: DAGDefinition = new Map([
+  ["planner", []],
+  ["dev", ["planner"]],
+  ["qa", ["dev"]],
+]);
+
+/** S44 T9: Research pipeline — explorer -> planner -> dev -> qa */
+export const RESEARCH_DAG: DAGDefinition = new Map([
+  ["explorer", []],
+  ["planner", ["explorer"]],
+  ["dev", ["planner"]],
+  ["qa", ["dev"]],
+]);
+
 /**
  * Get the pre-defined DAG for a pipeline type.
  * Falls back to building a sequential DAG from a role list.
@@ -76,6 +96,12 @@ export function getDAG(pipelineType: string, roles?: AgentRole[]): DAGDefinition
       return new Map(QUICK_DAG);
     case "REVIEW":
       return new Map(REVIEW_DAG);
+    case "SOLO":
+      return new Map(SOLO_DAG);
+    case "LIGHT":
+      return new Map(LIGHT_DAG);
+    case "RESEARCH":
+      return new Map(RESEARCH_DAG);
     default:
       // Build sequential DAG from role list
       if (roles && roles.length > 0) {

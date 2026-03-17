@@ -111,7 +111,7 @@ const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
 // ── Types ────────────────────────────────────────────────────
 
-export type AgentRole = "analyst" | "pm" | "architect" | "dev" | "qa" | "sm";
+export type AgentRole = "analyst" | "pm" | "architect" | "dev" | "qa" | "sm" | "explorer" | "planner";
 
 export interface AgentStepResult {
   agentId: AgentRole;
@@ -166,6 +166,8 @@ const AGENT_COMMAND_MAP: Record<AgentRole, string> = {
   dev: "exec",
   qa: "alerts",
   sm: "sprint",
+  explorer: "explore",
+  planner: "plan",
 };
 
 /** Default pipeline: full BMad flow */
@@ -182,6 +184,15 @@ export const QUICK_PIPELINE: AgentRole[] = ["dev", "qa"];
 
 /** Review-only pipeline */
 export const REVIEW_PIPELINE: AgentRole[] = ["qa", "architect"];
+
+/** Solo pipeline: dev only, for trivial tasks (S44 T8) */
+export const SOLO_PIPELINE: AgentRole[] = ["dev"];
+
+/** Light pipeline: planner + dev + qa, for medium tasks (S44 T8) */
+export const LIGHT_PIPELINE: AgentRole[] = ["planner", "dev", "qa"];
+
+/** Research pipeline: explorer researches, then planner + dev + qa (S44 T9) */
+export const RESEARCH_PIPELINE: AgentRole[] = ["explorer", "planner", "dev", "qa"];
 
 // ── Core Orchestrator ────────────────────────────────────────
 
@@ -1461,7 +1472,15 @@ const DOC_KEYWORDS = [
   "doc", "documentation", "readme", "changelog", "guide", "tutoriel",
 ];
 
-export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC";
+/** Keywords that indicate a research task (S44 T9) */
+const RESEARCH_KEYWORDS = [
+  "research", "recherche", "investigate", "investiguer", "compare",
+  "comparer", "evaluate", "evaluer", "benchmark", "etude", "study",
+  "state of the art", "etat de l'art", "alternative", "comparatif",
+  "explore options", "explorer les options",
+];
+
+export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC" | "SOLO" | "LIGHT" | "RESEARCH";
 
 /**
  * Analyze a task and select the most appropriate pipeline.
@@ -1481,6 +1500,11 @@ export function selectPipeline(
   if (explicitPipeline) return explicitPipeline;
 
   const text = `${task.title} ${task.description || ""}`.toLowerCase();
+
+  // S44 T9: Research tasks get explorer-led pipeline
+  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) {
+    return RESEARCH_PIPELINE;
+  }
 
   if (BUG_KEYWORDS.some((kw) => text.includes(kw))) {
     return QUICK_PIPELINE;
@@ -1507,11 +1531,46 @@ export function selectPipeline(
 }
 
 /**
+ * Select pipeline based on difficulty score (S44 T8).
+ * Uses computeDifficultyScore for adaptive selection.
+ * Returns SOLO/LIGHT/DEFAULT based on difficulty analysis.
+ */
+export async function selectAdaptivePipeline(
+  task: Task,
+  explicitPipeline?: AgentRole[],
+  supabase?: any,
+): Promise<AgentRole[]> {
+  if (explicitPipeline) return explicitPipeline;
+
+  // Keyword-based rules still take priority for research/review patterns
+  const text = `${task.title} ${task.description || ""}`.toLowerCase();
+  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) {
+    return RESEARCH_PIPELINE;
+  }
+  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) {
+    return REVIEW_PIPELINE;
+  }
+
+  const { computeDifficultyScore } = await import("./llm-router.ts");
+  const difficulty = await computeDifficultyScore(task, supabase);
+
+  switch (difficulty.pipeline) {
+    case "SOLO":
+      return SOLO_PIPELINE;
+    case "LIGHT":
+      return LIGHT_PIPELINE;
+    default:
+      return DEFAULT_PIPELINE;
+  }
+}
+
+/**
  * Classify a task into a pipeline type (for logging/display).
  */
 export function classifyPipeline(task: Task): PipelineType {
   const text = `${task.title} ${task.description || ""}`.toLowerCase();
 
+  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) return "RESEARCH";
   if (BUG_KEYWORDS.some((kw) => text.includes(kw))) return "QUICK";
   if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) return "REVIEW";
   if (DOC_KEYWORDS.some((kw) => text.includes(kw))) return "DOC";
@@ -1523,6 +1582,25 @@ export function classifyPipeline(task: Task): PipelineType {
     return "QUICK";
   }
   return "DEFAULT";
+}
+
+/**
+ * Classify a task using difficulty scoring (S44 T8).
+ * Returns SOLO/LIGHT/DEFAULT based on computed difficulty.
+ */
+export async function classifyAdaptivePipeline(
+  task: Task,
+  supabase?: any,
+): Promise<PipelineType> {
+  const text = `${task.title} ${task.description || ""}`.toLowerCase();
+
+  // Keyword rules still apply for research/review
+  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) return "RESEARCH";
+  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) return "REVIEW";
+
+  const { computeDifficultyScore } = await import("./llm-router.ts");
+  const difficulty = await computeDifficultyScore(task, supabase);
+  return difficulty.pipeline;
 }
 
 // ── Format for Telegram ──────────────────────────────────────

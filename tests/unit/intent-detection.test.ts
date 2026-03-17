@@ -83,6 +83,51 @@ describe("intent-detection", () => {
       expect(result.detected!.command).toBe("rollback");
     });
 
+    it("detects explore intent from natural question", () => {
+      const result = detectIntent("comment fonctionne le pipeline");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+    });
+
+    it("detects explore intent with 'explore' verb", () => {
+      const result = detectIntent("explore le module orchestrator");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+      expect(result.detected!.args).toContain("orchestrator");
+    });
+
+    it("detects explore intent for impact queries", () => {
+      const result = detectIntent("impact de modifier memory");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+      expect(result.detected!.args).toContain("memory");
+    });
+
+    it("detects explore intent for dependency queries", () => {
+      const result = detectIntent("qui utilise le module tasks");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+    });
+
+    it("detects explore intent for complexity queries", () => {
+      const result = detectIntent("complexite du module orchestrator");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+      expect(result.detected!.args).toContain("orchestrator");
+    });
+
+    it("detects explore intent for 'c'est quoi' queries", () => {
+      const result = detectIntent("c'est quoi le blackboard");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+    });
+
+    it("extracts topic from explore intent", () => {
+      const result = detectIntent("explore comment fonctionne le relay");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("explore");
+    });
+
     it("resolves action from registry", () => {
       const result = detectIntent("montre le backlog");
       expect(result.detected).not.toBeNull();

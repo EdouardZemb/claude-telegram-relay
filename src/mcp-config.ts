@@ -5,6 +5,7 @@
  */
 
 import type { AgentRole } from "./orchestrator.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 
 // ── MCP Tool Registry ────────────────────────────────────────
 
@@ -35,6 +36,49 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   read_blackboard: "Lire une section du blackboard (spec, plan, tasks, implementation, verification)",
   write_blackboard: "Ecrire dans une section du blackboard (avec locking optimiste)",
 };
+
+// ── Tavily Tool Registry ──────────────────────────────────────
+
+/** Available Tavily MCP tools */
+export const TAVILY_TOOLS = [
+  "tavily_search",
+  "tavily_extract",
+] as const;
+
+export type TavilyToolName = (typeof TAVILY_TOOLS)[number];
+
+/** Descriptions for Tavily tools */
+const TAVILY_TOOL_DESCRIPTIONS: Record<TavilyToolName, string> = {
+  tavily_search: "Recherche web (APIs, librairies, best practices, alternatives, documentation externe)",
+  tavily_extract: "Extraire le contenu d'une URL specifique (documentation, articles, specs)",
+};
+
+/** Per-role Tavily tool allowlists — only explorer gets web search */
+const ROLE_TAVILY_TOOLS: Record<AgentRole, TavilyToolName[]> = {
+  analyst: [],
+  pm: [],
+  architect: [],
+  dev: [],
+  qa: [],
+  sm: [],
+  explorer: ["tavily_search", "tavily_extract"],
+  planner: [],
+};
+
+/**
+ * Get Tavily tools allowed for a role.
+ */
+export function getTavilyToolsForRole(role: AgentRole | string): TavilyToolName[] {
+  if (!isFeatureEnabled("tavily_search")) return [];
+  return ROLE_TAVILY_TOOLS[role as AgentRole] ?? [];
+}
+
+/**
+ * Get Tavily tool names in Claude Code format: mcp__tavily__<tool>
+ */
+export function getTavilyAllowedToolNames(role: AgentRole | string): string[] {
+  return getTavilyToolsForRole(role).map((t) => `mcp__tavily__${t}`);
+}
 
 // ── Per-Role Tool Allowlists ────────────────────────────────
 
@@ -103,6 +147,24 @@ const ROLE_TOOLS: Record<AgentRole, McpToolName[]> = {
     "thought_stats",
     "capture_thought",
   ],
+  explorer: [
+    "search_thoughts",
+    "list_thoughts",
+    "thought_stats",
+    "get_tasks",
+    "get_sprint_summary",
+    "get_project_context",
+    "read_blackboard",
+  ],
+  planner: [
+    "search_thoughts",
+    "list_thoughts",
+    "thought_stats",
+    "capture_thought",
+    "get_tasks",
+    "get_sprint_summary",
+    "get_project_context",
+  ],
 };
 
 // ── Public API ───────────────────────────────────────────────
@@ -119,7 +181,9 @@ export function getMcpToolsForRole(role: AgentRole | string): McpToolName[] {
  * Suitable for --allowedTools flag.
  */
 export function getMcpAllowedToolNames(role: AgentRole | string): string[] {
-  return getMcpToolsForRole(role).map((t) => `mcp__memory__${t}`);
+  const memoryTools = getMcpToolsForRole(role).map((t) => `mcp__memory__${t}`);
+  const tavilyTools = getTavilyAllowedToolNames(role);
+  return [...memoryTools, ...tavilyTools];
 }
 
 /**
@@ -149,6 +213,20 @@ export function buildMcpToolInstructions(role: AgentRole | string): string {
     lines.push(guidance);
   }
 
+  // Tavily tools section (if role has access and flag enabled)
+  const tavilyTools = getTavilyToolsForRole(role);
+  if (tavilyTools.length > 0) {
+    lines.push("");
+    lines.push("--- OUTILS TAVILY (RECHERCHE WEB) ---");
+    lines.push("Tu as acces aux outils de recherche web suivants via le serveur MCP Tavily.");
+    lines.push("");
+    for (const tool of tavilyTools) {
+      lines.push(`- ${tool}: ${TAVILY_TOOL_DESCRIPTIONS[tool]}`);
+    }
+    lines.push("");
+    lines.push("GUIDE TAVILY: Utilise tavily_search pour chercher des informations sur le web (APIs, librairies, best practices, alternatives). Utilise tavily_extract pour extraire le contenu d'une URL specifique. Combine les resultats web avec ton analyse du codebase.");
+  }
+
   return lines.join("\n");
 }
 
@@ -175,6 +253,10 @@ function getRoleGuidance(role: AgentRole): string | null {
       return "GUIDE: Utilise read_blackboard pour comparer l'implementation avec les specs et le plan. Ne modifie pas le blackboard.";
     case "sm":
       return "GUIDE: Utilise search_thoughts pour retrouver le contexte des decisions passees. Utilise capture_thought pour enregistrer les conclusions de retros et sprint reviews.";
+    case "explorer":
+      return "GUIDE: Utilise get_project_context pour un apercu global, search_thoughts pour le contexte historique, et read_blackboard pour les specs/plans existants. Exploration read-only — ne modifie rien.";
+    case "planner":
+      return "GUIDE: Utilise get_tasks et get_sprint_summary pour comprendre l'etat actuel. Utilise capture_thought pour enregistrer les decisions de planification.";
     default:
       return null;
   }

@@ -88,7 +88,7 @@ function loadAgentYaml(agentId: string): AgentYaml | null {
  * Load all agent YAMLs and return their raw data.
  */
 export function loadAllAgents(): Map<string, AgentYaml> {
-  const agents = ["analyst", "pm", "architect", "sm", "dev", "qa"];
+  const agents = ["analyst", "pm", "architect", "sm", "dev", "qa", "planner", "explorer"];
   for (const id of agents) {
     loadAgentYaml(id);
   }
@@ -259,6 +259,10 @@ function getCommandInstructions(
       return getAnalystInstructions(command);
     case "qa":
       return getQaInstructions(command);
+    case "explorer":
+      return getExplorerInstructions(command);
+    case "planner":
+      return getPlannerInstructions(command);
     default:
       return "";
   }
@@ -402,6 +406,32 @@ function getQaInstructions(command: string): string {
   ].join("\n");
 }
 
+function getPlannerInstructions(command: string): string {
+  return [
+    "INSTRUCTIONS PLANIFICATION:",
+    "- Commence par une evaluation de faisabilite (risques, dependances, complexite)",
+    "- Decompose en sous-taches techniques atomiques executables par un agent autonome",
+    "- Ordonne par dependances logiques (upstream first)",
+    "- Inclus des criteres d'acceptation Given/When/Then pour chaque sous-tache",
+    "- Identifie les fichiers et modules impactes",
+    "- Estime la priorite (P1=critique, P2=important, P3=normal)",
+    "- Produis ton analyse ET ta decomposition en un seul output structure",
+  ].join("\n");
+}
+
+function getExplorerInstructions(command: string): string {
+  return [
+    "INSTRUCTIONS EXPLORATION:",
+    "- Explore le codebase en lisant les fichiers pertinents",
+    "- Cite toujours les chemins de fichiers et numeros de ligne",
+    "- Decris l'etat actuel de facon factuelle avant de recommander",
+    "- Propose des options avec pros/cons pour chaque",
+    "- Estime l'effort et l'impact de chaque recommandation",
+    "- Ne modifie RIEN — exploration en lecture seule uniquement",
+    "- Produis un rapport structure avec etat_des_lieux, options, recommandations",
+  ].join("\n");
+}
+
 // ── Agent Capabilities & Limits (S15-05) ─────────────────────
 
 export interface AgentCapability {
@@ -415,6 +445,15 @@ export interface AgentCapability {
 }
 
 const AGENT_CAPABILITIES: Record<string, AgentCapability> = {
+  planner: {
+    canModifyCode: false,
+    canModifyArchitecture: false,
+    canModifyPRD: true,
+    canCreateTasks: true,
+    canReviewCode: false,
+    canDeployToProduction: false,
+    allowedFilePatterns: ["docs/**", "config/**"],
+  },
   dev: {
     canModifyCode: true,
     canModifyArchitecture: false,

@@ -18,7 +18,7 @@ export const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Focus on technical discussions: code, architecture, bugs, deployments, CI/CD. " +
       "Be precise and technical. Refer to files, functions, and line numbers when relevant. " +
       "You can suggest code changes and execute tasks.",
-    allowedCommands: ["exec", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
+    allowedCommands: ["exec", "explore", "plan", "prd", "task", "backlog", "sprint", "done", "start", "status", "export", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
   },
   "idees": {
     label: "Brainstorm",
@@ -27,7 +27,7 @@ export const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "Help explore ideas freely. Be creative, propose alternatives, play devil's advocate. " +
       "No need to be overly technical here — focus on concepts, possibilities, and strategy. " +
       "Ask follow-up questions to refine ideas.",
-    allowedCommands: ["task", "plan", "prd", "remind", "speak"],
+    allowedCommands: ["task", "explore", "plan", "prd", "remind", "speak"],
   },
   "sprint": {
     label: "Sprint",
@@ -35,7 +35,7 @@ export const TOPIC_CONFIGS: Record<string, TopicConfig> = {
       "This is the sprint management topic. " +
       "Focus on task tracking, progress updates, priorities, and planning. " +
       "Keep messages short and actionable. Use task IDs when referencing work.",
-    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "status", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
+    allowedCommands: ["task", "backlog", "sprint", "done", "start", "plan", "prd", "exec", "explore", "status", "remind", "speak", "metrics", "retro", "patterns", "alerts", "profile"],
   },
   "serveur": {
     label: "Ops",

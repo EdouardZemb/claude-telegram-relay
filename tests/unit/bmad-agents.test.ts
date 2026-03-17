@@ -16,8 +16,8 @@ import {
 } from "../../src/bmad-agents";
 
 describe("Agent Registry", () => {
-  it("has 6 agents defined", () => {
-    expect(getAgents().length).toBe(6);
+  it("has 8 agents defined", () => {
+    expect(getAgents().length).toBe(8);
   });
 
   it("each agent has required fields", () => {
