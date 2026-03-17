@@ -7,6 +7,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AgentRole } from "./orchestrator.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { getGraph, formatGraphContext, findAffectedModules } from "./code-graph.ts";
 
 const PROJECT_ROOT = process.env.PROJECT_DIR || process.cwd();
 
@@ -38,6 +40,7 @@ export interface AgentContextOptions {
   role: AgentRole | string;
   projectId?: string;
   sprintId?: string;
+  taskTitle?: string;
 }
 
 /**
@@ -68,12 +71,31 @@ export async function buildAgentContext(
       loadProfile(),
     ]);
 
-    // Priority-based truncation: memory > tasks > sprint > profile
+    // S39: Code graph context
+    let graphCtx = "";
+    if (isFeatureEnabled("code_graph") && options.taskTitle) {
+      try {
+        const graph = getGraph();
+        const affected = findAffectedModules(graph, options.taskTitle);
+        if (affected.length > 0) {
+          graphCtx = affected
+            .slice(0, 3)
+            .map((m) => formatGraphContext(graph, m, role))
+            .filter(Boolean)
+            .join("\n---\n");
+        }
+      } catch {
+        // Best-effort
+      }
+    }
+
+    // Priority-based truncation: memory > tasks > sprint > graph > profile
     const sections: Array<{ label: string; content: string; share: number }> = [];
 
-    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.40 });
-    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.20 });
-    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.25 });
+    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.35 });
+    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.15 });
+    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.20 });
+    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: 0.15 });
     if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.15 });
 
     if (sections.length === 0) return "";

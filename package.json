@@ -20,7 +20,8 @@
     "doc:check": "bun run scripts/doc-check.ts",
     "doc:freshness": "bun run scripts/doc-freshness.ts",
     "smoke": "bun run scripts/smoke-test.ts",
-    "cost:estimate": "bun run scripts/cost-estimate.ts"
+    "cost:estimate": "bun run scripts/cost-estimate.ts",
+    "graph:index": "bun run scripts/index-graph.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

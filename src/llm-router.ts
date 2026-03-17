@@ -8,6 +8,8 @@
 import type { Task } from "./tasks.ts";
 import { spawnClaude } from "./agent.ts";
 import type { AgentRole } from "./orchestrator.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { getGraph, estimateComplexity, findAffectedModules } from "./code-graph.ts";
 
 const ROUTER_TIMEOUT = 5_000; // 5s (AC-018)
 
@@ -39,7 +41,7 @@ TASK:
 Title: {title}
 Description: {description}
 Priority: P{priority}
-
+{complexity_hint}
 Return ONLY a JSON object:
 {
   "pipeline": "DEFAULT" | "QUICK" | "REVIEW",
@@ -66,10 +68,28 @@ No other text. Only valid JSON.`;
  * AC-020: Logs reasoning and cost.
  */
 export async function routeTask(task: Task): Promise<RouterDecision | null> {
+  // S39: Add complexity hint from code graph
+  let complexityHint = "";
+  if (isFeatureEnabled("code_graph")) {
+    try {
+      const graph = getGraph();
+      const taskText = `${task.title} ${task.description || ""}`;
+      const affected = findAffectedModules(graph, taskText);
+      if (affected.length > 0) {
+        const scores = affected.map((m) => estimateComplexity(graph, m));
+        const maxScore = Math.max(...scores);
+        complexityHint = `Code complexity: ${maxScore.toFixed(1)}/10 (${affected.length} module(s) affected: ${affected.map((a) => a.replace("src/", "")).join(", ")})`;
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
   const prompt = ROUTER_PROMPT_TEMPLATE
     .replace("{title}", task.title)
     .replace("{description}", task.description || "No description")
-    .replace("{priority}", String(task.priority || 3));
+    .replace("{priority}", String(task.priority || 3))
+    .replace("{complexity_hint}", complexityHint ? `Complexity: ${complexityHint}` : "");
 
   try {
     const resultPromise = spawnClaude({

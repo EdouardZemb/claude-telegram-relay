@@ -17,6 +17,7 @@ import { formatDoubleLoopRules } from "../gate-persistence.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
 import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
+import { loadGraph, formatGraphStatsForMonitor } from "../code-graph.ts";
 
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -220,6 +221,18 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         } catch {
           // Best-effort monitoring
         }
+      }
+    }
+
+    // S39: Code graph stats
+    if (isFeatureEnabled("code_graph")) {
+      try {
+        const graph = loadGraph();
+        if (graph) {
+          parts.push("", formatGraphStatsForMonitor(graph));
+        }
+      } catch {
+        // Best-effort
       }
     }
 

@@ -287,5 +287,96 @@ server.tool(
   }
 );
 
+// ── S39: Code Graph Tools ────────────────────────────────────
+
+import {
+  loadGraph,
+  indexCodebase,
+  saveGraph,
+  getModuleDependencies,
+  getDependents,
+  getImpactRadius,
+  getGraphStats,
+  findNode,
+  formatGraphContext,
+  estimateComplexity,
+} from "../src/code-graph.ts";
+
+server.tool(
+  "query_dependencies",
+  "Get direct dependencies of a module (what it imports).",
+  {
+    module: z.string().describe("Module path (e.g., 'src/orchestrator.ts' or 'orchestrator')"),
+  },
+  async ({ module }) => {
+    const graph = loadGraph() || indexCodebase();
+    const node = findNode(graph, module);
+    if (!node) {
+      return { content: [{ type: "text" as const, text: `Module not found: ${module}` }] };
+    }
+    const deps = getModuleDependencies(graph, node.id);
+    const result = {
+      module: node.id,
+      exports: node.exports,
+      lineCount: node.lineCount,
+      dependencies: deps.map((d) => ({
+        target: d.target,
+        imports: d.imports,
+        typeOnly: d.isTypeOnly,
+      })),
+    };
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "query_dependents",
+  "Get modules that depend on a given module (what imports it).",
+  {
+    module: z.string().describe("Module path (e.g., 'src/orchestrator.ts' or 'orchestrator')"),
+  },
+  async ({ module }) => {
+    const graph = loadGraph() || indexCodebase();
+    const node = findNode(graph, module);
+    if (!node) {
+      return { content: [{ type: "text" as const, text: `Module not found: ${module}` }] };
+    }
+    const deps = getDependents(graph, node.id);
+    const result = {
+      module: node.id,
+      dependents: deps.map((d) => ({
+        source: d.source,
+        imports: d.imports,
+      })),
+    };
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "query_impact_radius",
+  "Get transitive impact radius of changing a module (BFS of dependents).",
+  {
+    module: z.string().describe("Module path"),
+    depth: z.number().optional().describe("Max traversal depth (default 3)"),
+  },
+  async ({ module, depth }) => {
+    const graph = loadGraph() || indexCodebase();
+    const node = findNode(graph, module);
+    if (!node) {
+      return { content: [{ type: "text" as const, text: `Module not found: ${module}` }] };
+    }
+    const impact = getImpactRadius(graph, node.id, depth || 3);
+    const complexity = estimateComplexity(graph, node.id);
+    const result = {
+      module: node.id,
+      complexity: `${complexity}/10`,
+      impactedModules: impact,
+      stats: getGraphStats(graph),
+    };
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
