@@ -2,6 +2,7 @@
  * @module commands/zz-messages
  * @description Composer for generic message handlers: text, voice, photo, document.
  * Prefixed with "zz-" to ensure it loads after all command handlers.
+ * S37: Integrates intent detection -> command routing -> confirmation -> fallback conversation.
  */
 
 import { Composer, type Context, InputFile } from "grammy";
@@ -20,12 +21,39 @@ import {
 } from "../memory.ts";
 import { recordResponseTime } from "../alerts.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
-import { detectIntent, formatIntentSuggestion } from "../intent-detection.ts";
+import { detectIntent, detectIntentWithLLM, formatIntentSuggestion } from "../intent-detection.ts";
+import { routeIntent, checkPendingClarification, handleConfirmationCallback } from "../command-router.ts";
+import { formatActionsForLLM } from "../action-registry.ts";
 
 export default function messagesComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
-  // Text messages
+  // ── Intent confirmation callbacks (S37-04) ─────────────────
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+    if (!data.startsWith("intent_")) { await next(); return; }
+
+    const command = handleConfirmationCallback(ctx, data);
+    if (command) {
+      await ctx.answerCallbackQuery({ text: "Execution..." });
+      await ctx.editMessageText(`Execution : ${command}`);
+      // Send the resolved command as a message for Grammy to route
+      const chatId = ctx.callbackQuery.message?.chat?.id;
+      const threadId = (ctx.callbackQuery.message as any)?.message_thread_id;
+      if (chatId) {
+        const opts: Record<string, unknown> = {};
+        if (threadId) opts.message_thread_id = threadId;
+        await bctx.bot.api.sendMessage(chatId, command, opts);
+      }
+    } else if (data === "intent_cancel") {
+      await ctx.answerCallbackQuery({ text: "Annule." });
+      await ctx.editMessageText("Action annulee.");
+    } else {
+      await ctx.answerCallbackQuery({ text: "Action expiree." });
+    }
+  });
+
+  // ── Text messages ──────────────────────────────────────────
   composer.on("message:text", async (ctx) => {
     const text = ctx.message.text;
     const messageId = ctx.message.message_id;
@@ -46,6 +74,21 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       await bctx.saveMessage("user", text, meta);
 
+      // S37: Check if this is a response to a pending clarification
+      if (isFeatureEnabled("intent_detection")) {
+        const clarificationCmd = checkPendingClarification(ctx, text);
+        if (clarificationCmd) {
+          // Send the resolved command for Grammy to route
+          const chatId = ctx.chat?.id;
+          if (chatId) {
+            const opts: Record<string, unknown> = {};
+            if (threadId) opts.message_thread_id = threadId;
+            await bctx.bot.api.sendMessage(chatId, clarificationCmd, opts);
+          }
+          return;
+        }
+      }
+
       const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
         getRelevantContext(bctx.supabase, text),
         getMemoryContext(bctx.supabase),
@@ -58,16 +101,49 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         autoRemember(bctx.supabase, text, classification).catch(() => {});
       }
 
-      // S33: Intent detection (behind feature flag)
+      // S37: Intent detection + routing (behind feature flag)
       if (isFeatureEnabled("intent_detection")) {
-        const intentResult = detectIntent(text);
-        const suggestion = formatIntentSuggestion(intentResult);
-        if (suggestion) {
-          await ctx.reply(suggestion, bctx.threadOpts(ctx));
+        // Two-tier: regex fast path, then LLM fallback for ambiguous
+        const regexResult = detectIntent(text);
+
+        if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
+          // High-confidence regex match — route to command
+          const routeResult = await routeIntent(ctx, regexResult.detected, {
+            supabase: bctx.supabase,
+            getThreadId: bctx.getThreadId,
+            threadOpts: bctx.threadOpts,
+          });
+          if (routeResult.handled) return;
+        } else if (isFeatureEnabled("llm_router")) {
+          // LLM fallback for ambiguous messages
+          const llmResult = await detectIntentWithLLM(text, {
+            callLLM: (prompt) => bctx.callClaude(prompt),
+            recentMessages,
+            timeoutMs: 5000,
+          });
+          if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
+            const routeResult = await routeIntent(ctx, llmResult.detected, {
+              supabase: bctx.supabase,
+              getThreadId: bctx.getThreadId,
+              threadOpts: bctx.threadOpts,
+            });
+            if (routeResult.handled) return;
+          }
+        } else if (regexResult.detected) {
+          // Medium-confidence regex — just suggest (original behavior)
+          const suggestion = formatIntentSuggestion(regexResult);
+          if (suggestion) {
+            await ctx.reply(suggestion, bctx.threadOpts(ctx));
+          }
         }
       }
 
-      const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext, recentMessages, topicName, dynProfile);
+      // S37-07: Conversation fallback with action awareness
+      const actionContext = isFeatureEnabled("intent_detection")
+        ? `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`
+        : "";
+
+      const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext + actionContext, recentMessages, topicName, dynProfile);
       const rawResponse = await bctx.callClaude(enrichedPrompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
 
       const response = await processMemoryIntents(bctx.supabase, rawResponse);
