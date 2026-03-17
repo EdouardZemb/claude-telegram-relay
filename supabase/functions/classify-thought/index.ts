@@ -39,6 +39,10 @@ Rules:
 - action_items: array of actionable items detected (empty if none)
 - is_memorable: true if this message contains a fact, decision, preference, or important information worth remembering long-term. false for greetings, small talk, simple questions, or transient messages.
 - is_idea: true if the message expresses a new idea, suggestion, proposal, improvement, feature request, or "what if" scenario. Be AGGRESSIVE with idea detection — when in doubt, flag it as an idea.
+- actionability_score: integer 0-10 indicating how actionable/important this information is for long-term memory storage.
+  0-3: Not actionable (greetings, small talk, simple confirmations, meta-conversation, "ok", "merci")
+  4-6: Moderately actionable (general observations, context without decisions, status updates)
+  7-10: Highly actionable (decisions, key facts, preferences, goals, technical choices, architecture decisions)
 - summary: one sentence summary of the message content (in the same language as the message)
 
 Idea detection guidelines (be aggressive):
@@ -47,7 +51,7 @@ Idea detection guidelines (be aggressive):
 - Any suggestion for improvement, new feature, or change → idea
 - Brainstorming, proposals, hypothetical scenarios → idea
 - "il faudrait..." / "we should..." when proposing something new → idea
-- When type is "idea", ALWAYS set is_idea: true AND is_memorable: true
+- When type is "idea", ALWAYS set is_idea: true AND is_memorable: true AND actionability_score: 8+
 - Prefer classifying as "idea" over "observation" when the message contains a forward-looking suggestion
 
 Be conservative with is_memorable — only flag truly important information. Exception: ideas are always memorable.`;

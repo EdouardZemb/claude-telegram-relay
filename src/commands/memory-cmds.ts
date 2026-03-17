@@ -31,8 +31,9 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
     await ctx.replyWithChatAction("typing");
 
     try {
-      // Gather recent facts, goals, ideas, and all memory stats
-      const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas] = await Promise.all([
+      // Gather recent facts, goals, ideas, memory stats, and signal/noise data (S36-06)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas, recentMessages, recentMemories] = await Promise.all([
         bctx.supabase.rpc("get_facts"),
         bctx.supabase.rpc("get_active_goals"),
         bctx.supabase.from("memory")
@@ -41,6 +42,12 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
           .limit(50),
         listIdeas(bctx.supabase, ["new", "reviewed"]),
         listIdeas(bctx.supabase, ["new", "reviewed", "promoted", "archived"]),
+        bctx.supabase.from("messages")
+          .select("id")
+          .gte("created_at", sevenDaysAgo),
+        bctx.supabase.from("memory")
+          .select("id")
+          .gte("created_at", sevenDaysAgo),
       ]);
 
       const facts = factsResult.data || [];
@@ -99,11 +106,19 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         }
       }
 
+      // Signal/noise ratio (S36-06)
+      const msgCount = recentMessages.data?.length || 0;
+      const memCount = recentMemories.data?.length || 0;
+      const signalNoiseRatio = msgCount > 0
+        ? `${memCount}/${msgCount} (${Math.round((memCount / msgCount) * 100)}%)`
+        : "N/A";
+
       // Build the synthesis prompt
       const contextParts = [
         `STATISTIQUES MEMOIRE`,
         `Total facts: ${facts.length}`,
         `Goals actifs: ${goals.length}`,
+        `Signal/bruit (7j): ${signalNoiseRatio} messages memorises`,
         `Entrees recentes (50 dernieres): ${JSON.stringify(typeCounts)}`,
         topTopics ? `Topics frequents: ${topTopics}` : "",
         "",
