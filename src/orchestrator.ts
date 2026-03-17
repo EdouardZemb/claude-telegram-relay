@@ -66,22 +66,7 @@ import {
 } from "./adversarial-verifier.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
-import {
-  executeDag,
-  getDAG,
-  buildSequentialDAG,
-  type DAGNode,
-  type DAGExecutionResult,
-} from "./dag-executor.ts";
-import { Supervisor, type SupervisorReport } from "./supervisor.ts";
-import {
-  fanOut,
-  fanIn,
-  parseSubtasks,
-  shouldFanOut,
-  type FanOutResult,
-} from "./fan-out.ts";
-import { writeSectionWithRetry, mergeImplementationSection } from "./blackboard.ts";
+import { writeSectionWithRetry } from "./blackboard.ts";
 import { buildAgentContext } from "./agent-context.ts";
 import {
   createPipelineRun,
@@ -105,7 +90,42 @@ import {
   markClarificationUsed,
   type AgentInterMessage,
 } from "./agent-messaging.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
+import {
+  DEFAULT_PIPELINE,
+  QUICK_PIPELINE,
+  REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+  LIGHT_PIPELINE,
+  RESEARCH_PIPELINE,
+  selectPipeline,
+  selectAdaptivePipeline,
+  classifyPipeline,
+  classifyAdaptivePipeline,
+  type PipelineType,
+} from "./pipeline-selection.ts";
+import {
+  shouldDeliberate,
+  getDeliberationReviewer,
+  runDeliberation,
+} from "./deliberation.ts";
+
+// Re-export pipeline selection for backward compatibility
+export {
+  DEFAULT_PIPELINE,
+  QUICK_PIPELINE,
+  REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+  LIGHT_PIPELINE,
+  RESEARCH_PIPELINE,
+  selectPipeline,
+  selectAdaptivePipeline,
+  classifyPipeline,
+  classifyAdaptivePipeline,
+  type PipelineType,
+};
+
+// Re-export deliberation protocol for backward compatibility
+export { runDeliberation, shouldDeliberate, getDeliberationReviewer } from "./deliberation.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
@@ -127,21 +147,6 @@ export interface AgentStepResult {
   costUsd?: number;
 }
 
-/** S25: Parallel execution metrics */
-export interface ParallelMetrics {
-  total_wall_time_ms: number;
-  sequential_equivalent_ms: number;
-  speedup_ratio: number;
-  per_agent_timing: Array<{
-    agent: AgentRole;
-    startMs: number;
-    endMs: number;
-    durationMs: number;
-  }>;
-  fan_out_count: number;
-  concurrent_peak: number;
-}
-
 export interface OrchestratedResult {
   success: boolean;
   steps: AgentStepResult[];
@@ -154,8 +159,6 @@ export interface OrchestratedResult {
     driftReport: DriftReport | null;
     traceabilityReport: ReturnType<typeof generateTraceabilityReport> | null;
   };
-  /** S25: Parallel metrics (only present when parallel=true) */
-  parallelMetrics?: ParallelMetrics;
 }
 
 /** Maps agent roles to the workflow command they execute */
@@ -170,37 +173,13 @@ const AGENT_COMMAND_MAP: Record<AgentRole, string> = {
   planner: "plan",
 };
 
-/** Default pipeline: full BMad flow */
-export const DEFAULT_PIPELINE: AgentRole[] = [
-  "analyst",
-  "pm",
-  "architect",
-  "dev",
-  "qa",
-];
-
-/** Quick pipeline: skip analysis, go straight to dev */
-export const QUICK_PIPELINE: AgentRole[] = ["dev", "qa"];
-
-/** Review-only pipeline */
-export const REVIEW_PIPELINE: AgentRole[] = ["qa", "architect"];
-
-/** Solo pipeline: dev only, for trivial tasks (S44 T8) */
-export const SOLO_PIPELINE: AgentRole[] = ["dev"];
-
-/** Light pipeline: planner + dev + qa, for medium tasks (S44 T8) */
-export const LIGHT_PIPELINE: AgentRole[] = ["planner", "dev", "qa"];
-
-/** Research pipeline: explorer researches, then planner + dev + qa (S44 T9) */
-export const RESEARCH_PIPELINE: AgentRole[] = ["explorer", "planner", "dev", "qa"];
-
 // ── Core Orchestrator ────────────────────────────────────────
 
 /**
  * Run a single agent step: build prompt, call Claude, return result.
  * S22: Uses structured output instructions and parses JSON from output.
  */
-async function runAgentStep(
+export async function runAgentStep(
   agentId: AgentRole,
   task: Task,
   previousMessages: AgentMessage[],
@@ -381,127 +360,7 @@ function getOrchestrationInstructions(agentId: AgentRole): string {
   }
 }
 
-// ── S43: Deliberation Protocol ────────────────────────────────
-
-/**
- * Deliberation pairs: after a strategic agent completes, the next agent
- * reviews their output and can request a revision. Max 1 round-trip.
- */
-const DELIBERATION_PAIRS: Record<string, string> = {
-  architect: "pm",    // PM validates architect's design feasibility
-  dev: "qa",          // QA pre-reviews dev's implementation plan
-};
-
-/**
- * Run a deliberation round between two agents.
- * The reviewer examines the proposer's output and flags issues.
- * If issues found, the proposer revises (1 iteration max).
- * Returns the (possibly revised) output.
- *
- * S43-04: Behind "deliberation" feature flag.
- */
-export async function runDeliberation(
-  proposerRole: AgentRole,
-  reviewerRole: AgentRole,
-  proposerOutput: string,
-  task: Task,
-  messages: AgentMessage[],
-  shardedContext?: string,
-  agentContext?: string,
-  options?: { modelOverride?: string; cascade?: boolean; onProgress?: (msg: string) => Promise<void> },
-): Promise<{ output: string; revised: boolean; reviewerFeedback: string }> {
-  const proposerAgent = getAgent(proposerRole);
-  const reviewerAgent = getAgent(reviewerRole);
-  const proposerLabel = proposerAgent ? `${proposerAgent.icon} ${proposerAgent.name}` : proposerRole;
-  const reviewerLabel = reviewerAgent ? `${reviewerAgent.icon} ${reviewerAgent.name}` : reviewerRole;
-
-  // Step 1: Reviewer examines proposer's output
-  const reviewPrompt = [
-    `Tu es ${reviewerLabel} et tu revois le travail de ${proposerLabel}.`,
-    "",
-    "PROPOSITION A REVOIR:",
-    proposerOutput.substring(0, 5000),
-    "",
-    "INSTRUCTIONS:",
-    "- Identifie les problemes concrets (faisabilite, coherence, manques)",
-    "- Si tout est acceptable, reponds: APPROVE",
-    "- Si des corrections sont necessaires, reponds: REVISE suivi de tes feedbacks",
-    "- Sois concis et specifique",
-    "- Maximum 3 points de feedback",
-  ].join("\n");
-
-  if (options?.onProgress) {
-    await options.onProgress(`Deliberation: ${reviewerLabel} revoit ${proposerLabel}...`);
-  }
-
-  const reviewResult = await spawnClaude({
-    prompt: reviewPrompt,
-    effort: "low",
-    model: reviewerAgent?.model || "sonnet",
-    maxBudgetUsd: 0.05,
-  });
-
-  const reviewOutput = reviewResult.stdout.trim();
-
-  // Check if approved
-  if (reviewOutput.toUpperCase().includes("APPROVE") && !reviewOutput.toUpperCase().includes("REVISE")) {
-    if (options?.onProgress) {
-      await options.onProgress(`Deliberation: ${reviewerLabel} approuve ${proposerLabel}`);
-    }
-    return { output: proposerOutput, revised: false, reviewerFeedback: reviewOutput };
-  }
-
-  // Step 2: Proposer revises based on feedback
-  if (options?.onProgress) {
-    await options.onProgress(`Deliberation: ${proposerLabel} revise suite au feedback de ${reviewerLabel}...`);
-  }
-
-  const revisionMessages: AgentMessage[] = [
-    ...messages,
-    {
-      agentId: reviewerRole,
-      agentName: reviewerAgent?.name || reviewerRole,
-      success: true,
-      structured: null,
-      rawOutput: `FEEDBACK DE DELIBERATION (${reviewerLabel}):\n${reviewOutput}`,
-      durationMs: 0,
-    },
-  ];
-
-  const revisedResult = await runAgentStep(
-    proposerRole,
-    task,
-    revisionMessages,
-    shardedContext,
-    agentContext,
-    options?.modelOverride,
-    options?.cascade,
-  );
-
-  if (revisedResult.success) {
-    if (options?.onProgress) {
-      await options.onProgress(`Deliberation: ${proposerLabel} a revise sa proposition`);
-    }
-    return { output: revisedResult.output, revised: true, reviewerFeedback: reviewOutput };
-  }
-
-  // Revision failed — keep original
-  return { output: proposerOutput, revised: false, reviewerFeedback: reviewOutput };
-}
-
-/**
- * Check if deliberation should happen after this agent.
- */
-export function shouldDeliberate(agentId: AgentRole): boolean {
-  return agentId in DELIBERATION_PAIRS;
-}
-
-/**
- * Get the reviewer role for a given proposer.
- */
-export function getDeliberationReviewer(agentId: AgentRole): AgentRole | null {
-  return (DELIBERATION_PAIRS[agentId] as AgentRole) || null;
-}
+// ── S43: Deliberation Protocol (extracted to src/deliberation.ts) ──
 
 /**
  * Persist agent output as a structured artifact on the task.
@@ -567,10 +426,6 @@ export interface OrchestrateOptions {
   autoPipeline?: boolean;
   /** Use blackboard for structured context passing (S24) */
   useBlackboard?: boolean;
-  /** S25: Enable parallel DAG-based execution */
-  parallel?: boolean;
-  /** S25: Max concurrent agents (default: 3) */
-  maxConcurrency?: number;
   /** S33: Resume from a previous pipeline run session ID */
   resumeSessionId?: string;
   /** S34: Per-role model overrides from LLM router (AC-019) */
@@ -766,158 +621,8 @@ export async function orchestrate(
     }
   }
 
-  // S25: Parallel or sequential execution
-  let supervisorReport: SupervisorReport | null = null;
-  let fanOutCount = 0;
-
-  if (options.parallel) {
-    // ── S25: DAG-based parallel execution ────────────────────
-    const pipelineTypeForDag = classifyPipeline(task);
-    const dag = getDAG(pipelineTypeForDag, pipeline);
-    const supervisor = new Supervisor({
-      maxAttempts: maxRetries + 1,
-    });
-
-    // Register all agents with supervisor
-    for (const agentId of dag.keys()) {
-      supervisor.register(agentId, agentId);
-    }
-    supervisor.startPipeline();
-
-    if (options.onProgress) {
-      await options.onProgress(`Execution parallele (DAG, max concurrency: ${options.maxConcurrency ?? 3})`);
-    }
-
-    const s38ParallelEnabled = isFeatureEnabled("inter_agent_messaging");
-
-    const dagResult = await executeDag(dag, async (agentId, previousResults) => {
-      // Build messages from previous results
-      const prevMessages: AgentMessage[] = [];
-      for (const [prevId, prevResult] of previousResults) {
-        prevMessages.push({
-          agentId: prevId,
-          agentName: prevResult.agentName,
-          success: prevResult.success,
-          structured: prevResult.structured,
-          rawOutput: prevResult.output,
-          durationMs: prevResult.durationMs,
-          error: prevResult.error,
-        });
-      }
-
-      // S38: Emit spawned event
-      if (s38ParallelEnabled && pipelineSessionId) {
-        const agentDef = getAgent(agentId);
-        emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
-          model: agentDef?.model, effort: agentDef?.effort,
-        }).catch(() => {});
-      }
-
-      // S38: Inject inter-agent messages into context
-      if (s38ParallelEnabled && options.useBlackboard && bbSessionId) {
-        const interMessages = await getAgentMessages(supabase, bbSessionId, agentId);
-        if (interMessages.length > 0) {
-          const interCtx = buildInterAgentContext(interMessages, agentId);
-          const existingCtx = agentContextCache.get(agentId) || "";
-          agentContextCache.set(agentId, existingCtx + "\n\n" + interCtx);
-        }
-      }
-
-      supervisor.markStarted(agentId);
-      const result = await runAgentStep(agentId, task, prevMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
-      supervisor.markCompleted(agentId, result);
-
-      // S38: Emit completed/failed event
-      if (s38ParallelEnabled && pipelineSessionId) {
-        emitAgentEvent(supabase, pipelineSessionId, agentId,
-          result.success ? "completed" : "failed",
-          { duration_ms: result.durationMs, tokens_input: result.tokensInput, cost_usd: result.costUsd }
-        ).catch(() => {});
-      }
-
-      return result;
-    }, {
-      maxConcurrency: options.maxConcurrency ?? 3,
-      onNodeStarted: (agentId) => {
-        const agent = getAgent(agentId);
-        const label = agent ? `${agent.icon} ${agent.name}` : agentId;
-        options.onProgress?.(`${label} demarre (parallele)...`);
-      },
-      onNodeCompleted: (agentId, result) => {
-        const agent = getAgent(agentId);
-        const label = agent ? `${agent.icon} ${agent.name}` : agentId;
-        const status = result.success ? "OK" : "ECHEC";
-        const duration = Math.round(result.durationMs / 1000);
-        options.onProgress?.(`${label} : ${status} (${duration}s)`);
-      },
-      onNodeFailed: async (node) => {
-        return supervisor.decide(node.agent);
-      },
-    });
-
-    // Collect results from DAG
-    for (const node of dagResult.nodes) {
-      if (node.result) {
-        steps.push(node.result);
-
-        // Build message for context
-        messages.push({
-          agentId: node.agent,
-          agentName: node.result.agentName,
-          success: node.result.success,
-          structured: node.result.structured,
-          rawOutput: node.result.output,
-          durationMs: node.result.durationMs,
-          error: node.result.error,
-        });
-
-        // Persist artifacts
-        if (node.result.success && supabase) {
-          await persistAgentArtifact(supabase, task.id, node.agent, node.result.output);
-        }
-
-        // S24: Write to blackboard
-        if (options.useBlackboard && bbSessionId && node.result.success) {
-          const sectionMap: Record<string, SectionName> = {
-            analyst: "spec", pm: "tasks", architect: "plan",
-            dev: "implementation", qa: "verification",
-          };
-          const section = sectionMap[node.agent];
-          if (section) {
-            const sectionData = node.result.structured || { raw: node.result.output.substring(0, 30000) };
-            if (supabase && !bbFallback) {
-              const res = await writeSectionWithRetry(supabase, bbSessionId, section, sectionData, node.agent, bbVersion);
-              if (res.success) bbVersion = res.newVersion;
-            } else if (bbFallback) {
-              const res = bbFallback.write(bbSessionId, section, sectionData, node.agent, bbVersion);
-              if (res.success) bbVersion = res.newVersion;
-            }
-          }
-        }
-
-        // Log cost (S28: include model)
-        if (supabase && node.result.tokensInput) {
-          const nodeAgent = getAgent(node.agent);
-          logCost(supabase, {
-            taskId: task.id,
-            sprintId: task.sprint || undefined,
-            agentRole: node.agent,
-            agentName: node.result.agentName,
-            tokensInput: node.result.tokensInput || 0,
-            tokensOutput: node.result.tokensOutput || 0,
-            costUsd: node.result.costUsd || 0,
-            durationMs: node.result.durationMs,
-            retryAttempt: node.result.retryCount || 0,
-            context: "orchestration_parallel",
-            model: nodeAgent?.model,
-          }).catch(() => {});
-        }
-      }
-    }
-
-    supervisorReport = supervisor.generateReport();
-  } else {
-    // ── Sequential execution (existing behavior) ─────────────
+  // ── Sequential execution ─────────────────────────────────
+  {
     let stepIndex = 0;
     for (const agentId of pipeline) {
       // S33: Skip already completed steps on resume
@@ -945,8 +650,7 @@ export async function orchestrate(
       }
 
       // S38: Emit spawned event
-      const s38Enabled = isFeatureEnabled("inter_agent_messaging");
-      if (s38Enabled && pipelineSessionId) {
+      if (pipelineSessionId) {
         emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
           model: agent?.model, effort: agent?.effort, budget: agent?.maxBudgetUsd,
         }).catch(() => {});
@@ -959,7 +663,7 @@ export async function orchestrate(
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         // S38: Inject inter-agent messages into context
         let augmentedMessages = messages;
-        if (s38Enabled && options.useBlackboard && bbSessionId) {
+        if (options.useBlackboard && bbSessionId) {
           const interMessages = await getAgentMessages(supabase, bbSessionId, agentId);
           if (interMessages.length > 0) {
             const interCtx = buildInterAgentContext(interMessages, agentId);
@@ -990,7 +694,7 @@ export async function orchestrate(
       steps.push(result!);
 
       // S38: Emit completed/failed event
-      if (s38Enabled && pipelineSessionId) {
+      if (pipelineSessionId) {
         const eventType = result!.success ? "completed" : "failed";
         emitAgentEvent(supabase, pipelineSessionId, agentId, eventType, {
           duration_ms: result!.durationMs,
@@ -1002,7 +706,7 @@ export async function orchestrate(
       }
 
       // S38: Detect conflicts in working memory after agent completes
-      if (s38Enabled && options.useBlackboard && bbSessionId && result!.success) {
+      if (options.useBlackboard && bbSessionId && result!.success) {
         try {
           const wm = supabase && !bbFallback
             ? await readSection(supabase, bbSessionId, "working_memory") as WorkingMemory | null
@@ -1034,7 +738,7 @@ export async function orchestrate(
       }
 
       // S38: Check for pending clarifications after agent completes
-      if (s38Enabled && options.useBlackboard && bbSessionId && result!.success && supabase) {
+      if (options.useBlackboard && bbSessionId && result!.success && supabase) {
         try {
           const pending = await checkPendingClarifications(supabase, bbSessionId);
           for (const q of pending) {
@@ -1057,7 +761,7 @@ export async function orchestrate(
       }
 
       // S43: Deliberation protocol — reviewer challenges proposer
-      if (result!.success && isFeatureEnabled("deliberation") && shouldDeliberate(agentId)) {
+      if (result!.success && shouldDeliberate(agentId)) {
         const reviewerRole = getDeliberationReviewer(agentId);
         if (reviewerRole && pipeline.includes(reviewerRole)) {
           const deliberation = await runDeliberation(
@@ -1353,18 +1057,6 @@ export async function orchestrate(
     };
   }
 
-  // S25: Attach parallel metrics
-  if (options.parallel && supervisorReport) {
-    orchestratedResult.parallelMetrics = {
-      total_wall_time_ms: supervisorReport.total_wall_time_ms,
-      sequential_equivalent_ms: supervisorReport.sequential_equivalent_ms,
-      speedup_ratio: supervisorReport.speedup_ratio,
-      per_agent_timing: supervisorReport.per_agent_timing,
-      fan_out_count: fanOutCount,
-      concurrent_peak: steps.length, // approximation
-    };
-  }
-
   return orchestratedResult;
 }
 
@@ -1453,156 +1145,6 @@ async function logOrchestrationResult(
   if (error) console.error("logOrchestrationResult error:", error);
 }
 
-// ── Dynamic Pipeline Selection (S22-06) ──────────────────────
-
-/** Keywords that indicate a bug fix task */
-const BUG_KEYWORDS = [
-  "fix", "bug", "crash", "erreur", "error", "broken", "casse",
-  "regression", "hotfix", "patch", "reparer", "corriger",
-];
-
-/** Keywords that indicate a review/QA task */
-const REVIEW_KEYWORDS = [
-  "review", "audit", "revue", "test", "qa", "qualite", "refactor",
-  "nettoyage", "cleanup", "lint", "dette", "debt",
-];
-
-/** Keywords that indicate a documentation task */
-const DOC_KEYWORDS = [
-  "doc", "documentation", "readme", "changelog", "guide", "tutoriel",
-];
-
-/** Keywords that indicate a research task (S44 T9) */
-const RESEARCH_KEYWORDS = [
-  "research", "recherche", "investigate", "investiguer", "compare",
-  "comparer", "evaluate", "evaluer", "benchmark", "etude", "study",
-  "state of the art", "etat de l'art", "alternative", "comparatif",
-  "explore options", "explorer les options",
-];
-
-export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC" | "SOLO" | "LIGHT" | "RESEARCH";
-
-/**
- * Analyze a task and select the most appropriate pipeline.
- *
- * Rules:
- *   - Bug/fix/patch/hotfix → QUICK (dev + qa)
- *   - Review/audit/refactor → REVIEW (qa + architect)
- *   - Documentation → QUICK (dev + qa)
- *   - Simple priority P3 with short title → QUICK
- *   - Everything else → DEFAULT (analyst + pm + architect + dev + qa)
- *   - Explicit override via options.pipeline always wins
- */
-export function selectPipeline(
-  task: Task,
-  explicitPipeline?: AgentRole[]
-): AgentRole[] {
-  if (explicitPipeline) return explicitPipeline;
-
-  const text = `${task.title} ${task.description || ""}`.toLowerCase();
-
-  // S44 T9: Research tasks get explorer-led pipeline
-  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) {
-    return RESEARCH_PIPELINE;
-  }
-
-  if (BUG_KEYWORDS.some((kw) => text.includes(kw))) {
-    return QUICK_PIPELINE;
-  }
-
-  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) {
-    return REVIEW_PIPELINE;
-  }
-
-  if (DOC_KEYWORDS.some((kw) => text.includes(kw))) {
-    return QUICK_PIPELINE;
-  }
-
-  // Simple tasks: short title, low priority, no subtasks
-  if (
-    task.priority >= 3 &&
-    task.title.length < 40 &&
-    (!task.subtasks || task.subtasks.length === 0)
-  ) {
-    return QUICK_PIPELINE;
-  }
-
-  return DEFAULT_PIPELINE;
-}
-
-/**
- * Select pipeline based on difficulty score (S44 T8).
- * Uses computeDifficultyScore for adaptive selection.
- * Returns SOLO/LIGHT/DEFAULT based on difficulty analysis.
- */
-export async function selectAdaptivePipeline(
-  task: Task,
-  explicitPipeline?: AgentRole[],
-  supabase?: any,
-): Promise<AgentRole[]> {
-  if (explicitPipeline) return explicitPipeline;
-
-  // Keyword-based rules still take priority for research/review patterns
-  const text = `${task.title} ${task.description || ""}`.toLowerCase();
-  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) {
-    return RESEARCH_PIPELINE;
-  }
-  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) {
-    return REVIEW_PIPELINE;
-  }
-
-  const { computeDifficultyScore } = await import("./llm-router.ts");
-  const difficulty = await computeDifficultyScore(task, supabase);
-
-  switch (difficulty.pipeline) {
-    case "SOLO":
-      return SOLO_PIPELINE;
-    case "LIGHT":
-      return LIGHT_PIPELINE;
-    default:
-      return DEFAULT_PIPELINE;
-  }
-}
-
-/**
- * Classify a task into a pipeline type (for logging/display).
- */
-export function classifyPipeline(task: Task): PipelineType {
-  const text = `${task.title} ${task.description || ""}`.toLowerCase();
-
-  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) return "RESEARCH";
-  if (BUG_KEYWORDS.some((kw) => text.includes(kw))) return "QUICK";
-  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) return "REVIEW";
-  if (DOC_KEYWORDS.some((kw) => text.includes(kw))) return "DOC";
-  if (
-    task.priority >= 3 &&
-    task.title.length < 40 &&
-    (!task.subtasks || task.subtasks.length === 0)
-  ) {
-    return "QUICK";
-  }
-  return "DEFAULT";
-}
-
-/**
- * Classify a task using difficulty scoring (S44 T8).
- * Returns SOLO/LIGHT/DEFAULT based on computed difficulty.
- */
-export async function classifyAdaptivePipeline(
-  task: Task,
-  supabase?: any,
-): Promise<PipelineType> {
-  const text = `${task.title} ${task.description || ""}`.toLowerCase();
-
-  // Keyword rules still apply for research/review
-  if (RESEARCH_KEYWORDS.some((kw) => text.includes(kw))) return "RESEARCH";
-  if (REVIEW_KEYWORDS.some((kw) => text.includes(kw))) return "REVIEW";
-
-  const { computeDifficultyScore } = await import("./llm-router.ts");
-  const difficulty = await computeDifficultyScore(task, supabase);
-  return difficulty.pipeline;
-}
-
 // ── Format for Telegram ──────────────────────────────────────
 
 export function formatOrchestrationResult(result: OrchestratedResult): string {
@@ -1661,19 +1203,6 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     if (bb.traceabilityReport) {
       lines.push("");
       lines.push(formatTraceabilityReport(bb.traceabilityReport));
-    }
-  }
-
-  // S25: Parallel metrics
-  if (result.parallelMetrics) {
-    const pm = result.parallelMetrics;
-    lines.push("");
-    lines.push("--- Parallel Metrics ---");
-    lines.push(`Wall time: ${Math.round(pm.total_wall_time_ms / 1000)}s`);
-    lines.push(`Sequential equivalent: ${Math.round(pm.sequential_equivalent_ms / 1000)}s`);
-    lines.push(`Speedup: ${pm.speedup_ratio.toFixed(2)}x`);
-    if (pm.fan_out_count > 0) {
-      lines.push(`Fan-out: ${pm.fan_out_count} agents`);
     }
   }
 

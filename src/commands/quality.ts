@@ -26,11 +26,6 @@ import { getSprintCostSummary, getTotalCost, formatCostSummary } from "../cost-t
 import { getCurrentSprint } from "../tasks.ts";
 import { getAgentForCommand } from "../bmad-agents.ts";
 import { loadFeedbackRules, processRetroFeedback } from "../feedback-loop.ts";
-import {
-  proposeWorkflowChange,
-  extractProposalsFromRetro,
-} from "../workflow-propagation.ts";
-import { resolveProjectContext } from "../projects.ts";
 
 export default function qualityComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -248,32 +243,6 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
         await loadFeedbackRules(bctx.supabase);
 
         const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
-
-        const currentProject = await resolveProjectContext(bctx.supabase, ctx.callbackQuery?.message?.message_thread_id);
-        if (currentProject?.id) {
-          const proposals = extractProposalsFromRetro(
-            { sprint: sprintId, actions: retro.actions_proposed },
-            currentProject.id,
-          );
-          const propagationResults: string[] = [];
-          for (const p of proposals) {
-            const result = await proposeWorkflowChange(bctx.supabase, {
-              ...p,
-              projectId: currentProject.id,
-              sprint: sprintId,
-            });
-            if (result.promoted) {
-              propagationResults.push(`PROMU: ${p.target} — ${p.description} (${result.votes} votes)`);
-            } else if (!result.isNew) {
-              propagationResults.push(`Vote ajoute: ${p.target} (${result.votes} votes)`);
-            } else {
-              propagationResults.push(`Propose: ${p.target}`);
-            }
-          }
-          if (propagationResults.length > 0) {
-            workflowChanges.push(...propagationResults.map((r) => `[CROSS-PROJET] ${r}`));
-          }
-        }
 
         let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
         if (workflowChanges.length > 0) {

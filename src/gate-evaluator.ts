@@ -21,8 +21,6 @@ import { spawnClaude } from "./agent.ts";
 import { spawnSync } from "bun";
 import { updateTrustScore, shouldAutoApprove } from "./trust-scores.ts";
 import { persistGateEvaluation, runDoubleLoopAnalysis } from "./gate-persistence.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
-
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
 const DETERMINISTIC_CHECK_TIMEOUT = 30_000; // 30s per check (S34 EC-001)
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -312,7 +310,6 @@ export async function evaluateGate(
   if (
     opts.agentRole &&
     opts.taskPriority !== undefined &&
-    isFeatureEnabled("auto_gate_approval") &&
     shouldAutoApprove(opts.agentRole, gateName, opts.taskPriority)
   ) {
     // For implementation gates, still run deterministic checks

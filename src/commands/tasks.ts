@@ -17,7 +17,7 @@ import {
   formatSprintSummary,
 } from "../tasks.ts";
 import { resolveProjectContext } from "../projects.ts";
-import { notifyTaskStarted, notifyTaskDone } from "../notifications.ts";
+import { enqueue } from "../notification-queue.ts";
 
 export default function tasksCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -143,7 +143,16 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       const currentThread = bctx.getThreadId(ctx);
       const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
       if (currentThread !== sprintThread) {
-        await notifyTaskDone(updated.title, updated.id);
+        const ts = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "task",
+          severity: "normal",
+          message: `[${ts}] Tache terminee: ${updated.title} [${updated.id.substring(0, 8)}]`,
+          data: { taskId: updated.id, taskStatus: "done" },
+        });
       }
     } else {
       await ctx.reply("Erreur lors de la mise a jour.", bctx.threadOpts(ctx));
@@ -182,7 +191,16 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       const currentThread = bctx.getThreadId(ctx);
       const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
       if (currentThread !== sprintThread) {
-        await notifyTaskStarted(updated.title, updated.id);
+        const ts = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "task",
+          severity: "normal",
+          message: `[${ts}] Tache demarree: ${updated.title} [${updated.id.substring(0, 8)}]`,
+          data: { taskId: updated.id, taskStatus: "in_progress" },
+        });
       }
     } else {
       await ctx.reply("Erreur lors de la mise a jour.", bctx.threadOpts(ctx));

@@ -8,7 +8,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AgentRole } from "./orchestrator.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { isFeatureEnabled } from "./feature-flags.ts";
 import { getGraph, formatGraphContext, findAffectedModules } from "./code-graph.ts";
 import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
 import { buildTaskContext } from "./document-sharding.ts";
@@ -70,13 +69,9 @@ export async function buildAgentContext(
   const { role, projectId, sprintId } = options;
   const budget = getTokenBudget(role);
   const charBudget = budget * CHARS_PER_TOKEN;
-  const enhanced = isFeatureEnabled("enhanced_agent_context");
-
   try {
-    // Base fetches (always) — S41: use memory chains when flag enabled
-    const memoryFetch = isFeatureEnabled("memory_chains")
-      ? buildMemoryChains(supabase, role)
-      : fetchMemoryContext(supabase);
+    // Base fetches — S41: use memory chains
+    const memoryFetch = buildMemoryChains(supabase, role);
 
     const baseFetches: Promise<string>[] = [
       memoryFetch,
@@ -87,21 +82,19 @@ export async function buildAgentContext(
 
     // S40: Enhanced fetches (parallel)
     // S41: Add similar past tasks fetch
-    const enhancedFetches: Promise<string>[] = enhanced
-      ? [
-          fetchTrustContext(role),
-          fetchSprintMetrics(supabase, sprintId),
-          fetchDocumentContext(supabase, projectId, options.taskTitle),
-          fetchSimilarTasksContext(supabase, options.taskTitle),
-        ]
-      : [Promise.resolve(""), Promise.resolve(""), Promise.resolve(""), Promise.resolve("")];
+    const enhancedFetches: Promise<string>[] = [
+      fetchTrustContext(role),
+      fetchSprintMetrics(supabase, sprintId),
+      fetchDocumentContext(supabase, projectId, options.taskTitle),
+      fetchSimilarTasksContext(supabase, options.taskTitle),
+    ];
 
     const [memoryCtx, sprintCtx, tasksCtx, profileCtx, trustCtx, metricsCtx, docCtx, similarCtx] =
       await Promise.all([...baseFetches, ...enhancedFetches]);
 
     // S39: Code graph context
     let graphCtx = "";
-    if (isFeatureEnabled("code_graph") && options.taskTitle) {
+    if (options.taskTitle) {
       try {
         const graph = getGraph();
         const affected = findAffectedModules(graph, options.taskTitle);

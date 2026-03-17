@@ -9,7 +9,7 @@ import { Composer, Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
 import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch, clusterMemories, formatClusters } from "../memory.ts";
 import type { LinkedMemory } from "../memory.ts";
-import { notifyIdeaCreated, notifyIdeaPromoted } from "../notifications.ts";
+import { enqueue } from "../notification-queue.ts";
 import { addTask } from "../tasks.ts";
 import { resolveProjectContext } from "../projects.ts";
 
@@ -199,7 +199,16 @@ Reponds en texte brut, sans markdown.`;
         await ctx.reply("Erreur lors de l'ajout de l'idee.", bctx.threadOpts(ctx));
       } else {
         await ctx.reply(`Idee ajoutee : ${arg}`, bctx.threadOpts(ctx));
-        await notifyIdeaCreated(arg, "manual");
+        const preview = arg.length > 80 ? arg.slice(0, 80) + "..." : arg;
+        const ts = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "idea",
+          severity: "normal",
+          message: `[${ts}] Nouvelle idee (manual): ${preview}`,
+        });
       }
       return;
     }
@@ -250,7 +259,16 @@ Reponds en texte brut, sans markdown.`;
           `Idee promue en tache !\nTache: ${task.title}\nID: ${task.id.slice(0, 8)}`,
           bctx.threadOpts(ctx)
         );
-        await notifyIdeaPromoted(content, task.title);
+        const promotePreview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+        const promoteTs = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "idea",
+          severity: "normal",
+          message: `[${promoteTs}] Idee promue en tache: ${promotePreview}\nTache: ${task.title}`,
+        });
       } else {
         await ctx.reply(`Idee promue mais erreur creation tache. Contenu : ${content}`, bctx.threadOpts(ctx));
       }
@@ -309,7 +327,16 @@ Reponds en texte brut, sans markdown.`;
       await ctx.reply("Erreur lors de l'ajout de l'idee.", bctx.threadOpts(ctx));
     } else {
       await ctx.reply(`Idee ajoutee : ${input}`, bctx.threadOpts(ctx));
-      await notifyIdeaCreated(input, "manual");
+      const fallbackPreview = input.length > 80 ? input.slice(0, 80) + "..." : input;
+      const fallbackTs = new Date().toLocaleTimeString("fr-FR", {
+        hour: "2-digit", minute: "2-digit",
+        timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+      });
+      await enqueue({
+        type: "idea",
+        severity: "normal",
+        message: `[${fallbackTs}] Nouvelle idee (manual): ${fallbackPreview}`,
+      });
     }
   });
 

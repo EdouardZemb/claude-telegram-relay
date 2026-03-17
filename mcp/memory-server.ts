@@ -385,6 +385,8 @@ import {
   addTask,
   updateTaskStatus,
   getBacklog,
+  getCurrentSprint,
+  getSprintSummary,
 } from "../src/tasks.ts";
 import {
   generatePRD,
@@ -395,6 +397,11 @@ import {
 } from "../src/prd.ts";
 import { readFile, writeFile, mkdir, rename as fsRename } from "fs/promises";
 import { join } from "path";
+import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
+import { estimateSprintCost } from "../src/cost-estimate.ts";
+import { runAllChecks } from "../src/alerts.ts";
+import { listFeatures, setFeature } from "../src/feature-flags.ts";
+import { analyzeBacklog, formatPlannerResult } from "../src/proactive-planner.ts";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -651,6 +658,258 @@ server.tool(
       });
 
       return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+// ── MCP Business Tools: Sprint, Metrics, Cost, Alerts, Features, Estimate, Planner ──
+
+server.tool(
+  "get_sprint_detail",
+  "Get full sprint status: progress counts + task list with priorities. " +
+    "Preconditions: none (root query). " +
+    "Suggested next: get_metrics (performance), get_cost_summary (budget), get_alerts (anomalies), analyze_backlog (recommendations).",
+  {
+    sprint: z.string().optional().describe("Sprint ID (e.g., 'S44'). Omit for current sprint."),
+  },
+  async ({ sprint }) => {
+    try {
+      const sprintId = sprint || await getCurrentSprint(supabase) || "unknown";
+      const [summary, tasks] = await Promise.all([
+        getSprintSummary(supabase, sprintId),
+        callSupabaseRest(
+          `tasks?sprint=eq.${sprintId}&status=neq.cancelled` +
+            `&select=id,title,status,priority,description,estimated_hours,actual_hours,tags` +
+            `&order=priority.asc,status.asc`
+        ) as Promise<any[]>,
+      ]);
+      const completionRate = summary.total > 0
+        ? Math.round((summary.done / summary.total) * 100)
+        : 0;
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            sprint: sprintId,
+            summary: { ...summary, completionRate: `${completionRate}%` },
+            tasks,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "get_metrics",
+  "Get sprint performance metrics: velocity, rework rate, cycle time, task completion. " +
+    "Preconditions: better after get_sprint_detail (to know which sprint). " +
+    "Suggested next: get_cost_summary (budget impact), get_alerts (anomalies), analyze_backlog (improvement suggestions).",
+  {
+    sprint: z.string().optional().describe("Sprint ID (e.g., 'S44'). Omit for current sprint."),
+  },
+  async ({ sprint }) => {
+    try {
+      const sprintId = sprint || await getCurrentSprint(supabase) || "unknown";
+      const metricsUrl = `sprint_metrics?sprint_id=eq.${sprintId}&select=*&limit=1`;
+      const metricsData = await callSupabaseRest(metricsUrl) as any[];
+
+      // Also fetch task stats for the sprint
+      const summary = await getSprintSummary(supabase, sprintId);
+
+      // Fetch last 3 sprints for comparison
+      const recentUrl = `sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours,total_tasks,completed_tasks`
+        + `&order=created_at.desc&limit=3`;
+      const recent = await callSupabaseRest(recentUrl) as any[];
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            sprint: sprintId,
+            metrics: metricsData?.[0] ?? null,
+            taskSummary: summary,
+            recentSprints: recent,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "get_cost_summary",
+  "Get token usage and cost breakdown by agent and task. " +
+    "Preconditions: none (root query, but more useful after get_sprint_detail to know sprint scope). " +
+    "Suggested next: get_estimate (pre-execution budgeting), analyze_backlog (cost-aware planning).",
+  {
+    sprint: z.string().optional().describe("Sprint ID for sprint-scoped costs. Omit for total across all sprints."),
+  },
+  async ({ sprint }) => {
+    try {
+      if (sprint) {
+        const summary = await getSprintCostSummary(supabase, sprint);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ sprint, ...summary }, null, 2),
+          }],
+        };
+      } else {
+        const total = await getTotalCost(supabase);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(total, null, 2),
+          }],
+        };
+      }
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "get_alerts",
+  "Run anomaly detection: stuck tasks, high rework rate, schedule slips, stale tasks, review score drops, agent failure patterns. " +
+    "Preconditions: none (root query). " +
+    "Suggested next: get_tasks (inspect flagged tasks), get_sprint_detail (sprint context), analyze_backlog (fix suggestions).",
+  {
+    sprint: z.string().optional().describe("Sprint ID for sprint-scoped checks. Omit for general checks."),
+  },
+  async ({ sprint }) => {
+    try {
+      const sprintId = sprint || await getCurrentSprint(supabase) || undefined;
+      const alerts = await runAllChecks(supabase, sprintId);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            sprintChecked: sprintId ?? "none",
+            alertCount: alerts.length,
+            alerts: alerts.map(a => ({
+              type: a.type,
+              severity: a.severity,
+              message: a.message,
+              data: a.data,
+            })),
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "manage_feature",
+  "List, enable, or disable feature flags. Controls optional features like intent_detection, deliberation, progressive_autonomy, etc. " +
+    "Preconditions: none (independent). " +
+    "Suggested next: none (standalone action).",
+  {
+    action: z.enum(["list", "enable", "disable"]).describe("Action: list all flags, enable a flag, or disable a flag"),
+    flag: z.string().optional().describe("Flag name (required for enable/disable, e.g., 'intent_detection')"),
+  },
+  async ({ action, flag }) => {
+    try {
+      if (action === "list") {
+        const features = listFeatures();
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ features }, null, 2),
+          }],
+        };
+      }
+
+      if (!flag) {
+        return { content: [{ type: "text" as const, text: "Error: flag name required for enable/disable" }] };
+      }
+
+      const enabled = action === "enable";
+      setFeature(flag, enabled);
+
+      await enqueueMcpNotification({
+        type: "alert",
+        severity: "normal",
+        message: `Feature flag ${flag} ${enabled ? "activee" : "desactivee"} via MCP`,
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ flag, enabled, status: "updated" }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "get_estimate",
+  "Estimate cost for a pipeline execution based on agent budgets and historical data. " +
+    "Preconditions: better after get_tasks or get_sprint_detail (to know task count). " +
+    "Suggested next: task_create (plan tasks), get_cost_summary (compare with actuals).",
+  {
+    task_count: z.number().min(1).describe("Number of tasks to estimate for"),
+    pipeline: z.string().optional().describe("Pipeline type: DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH (default: DEFAULT)"),
+  },
+  async ({ task_count, pipeline }) => {
+    try {
+      const result = await estimateSprintCost(supabase, task_count, pipeline || "DEFAULT");
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
+server.tool(
+  "analyze_backlog",
+  "Run proactive backlog analysis: detect stuck patterns, groupable tasks, pacing issues, priority inversions, splittable tasks, pipeline recommendations, deferrable tasks. " +
+    "Preconditions: better after get_tasks or get_sprint_detail (provides context for recommendations). " +
+    "Suggested next: task_create (create suggested tasks), task_update (reorder/reprioritize), get_estimate (budget for recommendations).",
+  {
+    sprint: z.string().optional().describe("Sprint ID to analyze. Omit for current sprint."),
+  },
+  async ({ sprint }) => {
+    try {
+      const result = await analyzeBacklog(supabase, sprint);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            sprintHealth: result.sprintHealth,
+            summary: result.summary,
+            recommendationCount: result.recommendations.length,
+            recommendations: result.recommendations.map(r => ({
+              type: r.type,
+              title: r.title,
+              description: r.description,
+              confidence: r.confidence,
+              taskIds: r.taskIds,
+              suggestedPipeline: r.suggestedPipeline,
+              estimatedCost: r.estimatedCost,
+              complexityScore: r.complexityScore,
+            })),
+          }, null, 2),
+        }],
+      };
     } catch (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
     }

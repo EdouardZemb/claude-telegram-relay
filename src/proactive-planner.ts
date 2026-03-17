@@ -18,7 +18,6 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Task } from "./tasks.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
 import { loadGraph, findAffectedModules, estimateComplexity } from "./code-graph.ts";
 import { findSimilarPastTasks } from "./memory.ts";
 import { getCachedTrustScore, getAutonomyLevel } from "./trust-scores.ts";
@@ -277,7 +276,6 @@ function detectSplittableTasks(tasks: any[]): PlannerRecommendation[] {
  * S42: Recommend pipeline per task based on code graph complexity and history.
  */
 function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerRecommendation[] {
-  if (!isFeatureEnabled("progressive_autonomy") || !isFeatureEnabled("code_graph")) return [];
 
   const recs: PlannerRecommendation[] = [];
   const graph = loadGraph();
@@ -324,7 +322,6 @@ function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerReco
  * S42: Auto-defer P4/P5 tasks if sprint is overloaded.
  */
 function detectDeferrableTasks(tasks: any[]): PlannerRecommendation[] {
-  if (!isFeatureEnabled("progressive_autonomy")) return [];
 
   const recs: PlannerRecommendation[] = [];
   const remaining = tasks.filter((t: any) => t.status !== "done" && t.status !== "cancelled");

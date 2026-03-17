@@ -22,10 +22,9 @@ import { runAutoPipeline, formatPipelineResult } from "../auto-pipeline.ts";
 import { WorkflowTracker } from "../workflow.ts";
 import { resolveProjectContext } from "../projects.ts";
 import { buildTaskContext } from "../document-sharding.ts";
-import { notifyPRCreated, notifyTaskDone } from "../notifications.ts";
+import { enqueue } from "../notification-queue.ts";
 import { findLatestPipelineRun } from "../pipeline-state.ts";
 import { getSession, buildConversationContext, hasActiveSession } from "../conversation-session.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
 
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -165,10 +164,28 @@ export default function execution(bctx: BotContext): Composer<Context> {
       // Proactive notifications to other topics
       if (result.prUrl) {
         const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
-        await notifyPRCreated(task.title, result.prUrl, branchName);
+        const ts = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "pr",
+          severity: "normal",
+          message: [`[${ts}] PR creee`, task.title, `Branche: ${branchName}`, result.prUrl].join("\n"),
+          data: { prUrl: result.prUrl },
+        });
       }
       if (result.ciPassed !== false) {
-        await notifyTaskDone(task.title, task.id);
+        const ts = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit", minute: "2-digit",
+          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+        });
+        await enqueue({
+          type: "task",
+          severity: "normal",
+          message: `[${ts}] Tache terminee: ${task.title} [${task.id.substring(0, 8)}]`,
+          data: { taskId: task.id, taskStatus: "done" },
+        });
       }
     } else {
       // Log failure
@@ -191,17 +208,15 @@ export default function execution(bctx: BotContext): Composer<Context> {
     }
 
     const args = ctx.match?.trim() || "";
-    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--parallel] [--resume [sessionId]]
+    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--resume [sessionId]]
     // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
     const useBlackboard = args.includes("--blackboard");
-    const useParallel = args.includes("--parallel");
     const useResume = args.includes("--resume");
     // Extract explicit session ID after --resume if present
     const resumeMatch = args.match(/--resume\s+([^\s-]\S*)/);
     const explicitResumeId = resumeMatch ? resumeMatch[1] : undefined;
     const cleanArgs = args
       .replace(/--blackboard/g, "")
-      .replace(/--parallel/g, "")
       .replace(/--resume\s+\S*/g, "")
       .replace(/--resume/g, "")
       .trim();
@@ -211,7 +226,7 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     if (!idPrefix) {
       await ctx.reply(
-        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--parallel] [--resume]\n\n" +
+        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--resume]\n\n" +
         "Pipelines disponibles:\n" +
         "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
         "  quick — Dev -> QA\n" +
@@ -219,7 +234,6 @@ export default function execution(bctx: BotContext): Composer<Context> {
         "  custom — ex: /orchestrate abc pm,dev,qa\n\n" +
         "Options:\n" +
         "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)\n" +
-        "  --parallel — Execution parallele DAG (agents independants en parallele)\n" +
         "  --resume [sessionId] — Reprendre depuis le dernier echec (ou un sessionId specifique)",
         bctx.threadOpts(ctx)
       );
@@ -288,29 +302,25 @@ export default function execution(bctx: BotContext): Composer<Context> {
     }
 
     const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
-    const parallelLabel = useParallel ? "\nMode: parallele (DAG)" : "";
     const resumeLabel = resumeSessionId ? `\nResume: ${resumeSessionId}` : "";
     await ctx.reply(
-      `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${parallelLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
+      `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
       bctx.threadOpts(ctx)
     );
 
     // S43: Inject conversation context if session is active
     let convCtx: string | undefined;
-    if (isFeatureEnabled("conversation_sessions")) {
-      const chatId = ctx.chat?.id || 0;
-      const threadId = bctx.getThreadId(ctx);
-      if (hasActiveSession(chatId, threadId)) {
-        const session = getSession(chatId, threadId);
-        convCtx = buildConversationContext(session);
-      }
+    const chatId = ctx.chat?.id || 0;
+    const threadId = bctx.getThreadId(ctx);
+    if (hasActiveSession(chatId, threadId)) {
+      const session = getSession(chatId, threadId);
+      convCtx = buildConversationContext(session);
     }
 
     const result = await orchestrate(bctx.supabase, task, {
       pipeline,
       stopOnFailure: true,
       useBlackboard,
-      parallel: useParallel,
       resumeSessionId,
       conversationContext: convCtx || undefined,
       onProgress: async (msg) => {

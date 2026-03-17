@@ -20,7 +20,6 @@ import {
   buildAgentTaskPromptPart,
 } from "../bmad-prompts.ts";
 import { resolveProjectContext } from "../projects.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
 import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
 
@@ -51,11 +50,6 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     const blocked = bctx.commandGuard(ctx, "explore");
     if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
 
-    if (!isFeatureEnabled("explore_mode")) {
-      await ctx.reply("La commande /explore n'est pas encore activee. Utilise /feature enable explore_mode pour l'activer.", bctx.threadOpts(ctx));
-      return;
-    }
-
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -76,17 +70,15 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     }
 
     // Fast-path: try to answer from code graph alone (zero LLM cost)
-    if (isFeatureEnabled("code_graph")) {
-      try {
-        const graph = getGraph();
-        const graphResult = tryGraphResponse(query, graph);
-        if (graphResult) {
-          await bctx.sendResponse(ctx, `EXPLORATION (code-graph): ${query}\n\n${graphResult.response}`);
-          return;
-        }
-      } catch {
-        // Graph unavailable — fall through to LLM
+    try {
+      const graph = getGraph();
+      const graphResult = tryGraphResponse(query, graph);
+      if (graphResult) {
+        await bctx.sendResponse(ctx, `EXPLORATION (code-graph): ${query}\n\n${graphResult.response}`);
+        return;
       }
+    } catch {
+      // Graph unavailable — fall through to LLM
     }
 
     const explorer = getAgent("explorer");
@@ -96,7 +88,7 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     }
 
     // Detect web research intent for budget/model upgrade
-    const isWebResearch = isFeatureEnabled("tavily_search") && detectWebResearchIntent(query);
+    const isWebResearch = detectWebResearchIntent(query);
 
     const statusMsg = isWebResearch
       ? `Exploration en cours: ${query}\nAgent Ada analyse le codebase + recherche web...`

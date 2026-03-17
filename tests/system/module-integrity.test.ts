@@ -43,15 +43,12 @@ describe("Module Imports: Core", () => {
     expect((mod as any).getProjectById).toBeUndefined();
   });
 
-  it("imports notifications module", async () => {
-    const mod = await import("../../src/notifications");
-    expect(mod.initNotifications).toBeFunction();
-    expect(mod.notifyPRCreated).toBeFunction();
-    expect(mod.notifyTaskStarted).toBeFunction();
-    expect(mod.notifyTaskDone).toBeFunction();
-    // notifyPRMerged and notifyDeploy were removed in S18-01
-    expect((mod as any).notifyPRMerged).toBeUndefined();
-    expect((mod as any).notifyDeploy).toBeUndefined();
+  it("imports notification-queue module", async () => {
+    const mod = await import("../../src/notification-queue");
+    expect(mod.enqueue).toBeFunction();
+    expect(mod.getQueue).toBeFunction();
+    expect(mod.loadQueue).toBeFunction();
+    expect(mod.startQueue).toBeFunction();
   });
 });
 
@@ -146,16 +143,7 @@ describe("Module Imports: Workflow & Analysis", () => {
     expect((mod as any).shardMemoryFacts).toBeUndefined();
   });
 
-  it("imports workflow-propagation module", async () => {
-    const mod = await import("../../src/workflow-propagation");
-    expect(mod.proposeWorkflowChange).toBeFunction();
-    expect(mod.getPendingProposals).toBeFunction();
-    expect(mod.extractProposalsFromRetro).toBeFunction();
-    expect(mod.formatProposals).toBeFunction();
-    // rejectProposal and getPromotedProposals were removed in S18-01
-    expect((mod as any).rejectProposal).toBeUndefined();
-    expect((mod as any).getPromotedProposals).toBeUndefined();
-  });
+  // workflow-propagation module was removed (dead code cleanup)
 });
 
 describe("Module Imports: Utilities", () => {

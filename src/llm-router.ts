@@ -9,7 +9,6 @@ import type { Task } from "./tasks.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnClaude } from "./agent.ts";
 import type { AgentRole } from "./orchestrator.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
 import {
   getGraph,
   estimateComplexity,
@@ -80,19 +79,17 @@ No other text. Only valid JSON.`;
 export async function routeTask(task: Task): Promise<RouterDecision | null> {
   // S39: Add complexity hint from code graph
   let complexityHint = "";
-  if (isFeatureEnabled("code_graph")) {
-    try {
-      const graph = getGraph();
-      const taskText = `${task.title} ${task.description || ""}`;
-      const affected = findAffectedModules(graph, taskText);
-      if (affected.length > 0) {
-        const scores = affected.map((m) => estimateComplexity(graph, m));
-        const maxScore = Math.max(...scores);
-        complexityHint = `Code complexity: ${maxScore.toFixed(1)}/10 (${affected.length} module(s) affected: ${affected.map((a) => a.replace("src/", "")).join(", ")})`;
-      }
-    } catch {
-      // Best-effort
+  try {
+    const graph = getGraph();
+    const taskText = `${task.title} ${task.description || ""}`;
+    const affected = findAffectedModules(graph, taskText);
+    if (affected.length > 0) {
+      const scores = affected.map((m) => estimateComplexity(graph, m));
+      const maxScore = Math.max(...scores);
+      complexityHint = `Code complexity: ${maxScore.toFixed(1)}/10 (${affected.length} module(s) affected: ${affected.map((a) => a.replace("src/", "")).join(", ")})`;
     }
+  } catch {
+    // Best-effort
   }
 
   const prompt = ROUTER_PROMPT_TEMPLATE
@@ -375,15 +372,13 @@ export async function computeDifficultyScore(
   let graphScore = -1;
   let affectedModules: string[] = [];
 
-  if (isFeatureEnabled("code_graph")) {
-    try {
-      const graph = getGraph();
-      const result = computeGraphScoreFromGraph(graph, taskText);
-      graphScore = result.score;
-      affectedModules = result.modules;
-    } catch {
-      // EC-003: graph unavailable
-    }
+  try {
+    const graph = getGraph();
+    const result = computeGraphScoreFromGraph(graph, taskText);
+    graphScore = result.score;
+    affectedModules = result.modules;
+  } catch {
+    // EC-003: graph unavailable
   }
 
   // Component 2: Description analysis (always available)

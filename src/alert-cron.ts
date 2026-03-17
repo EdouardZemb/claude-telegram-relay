@@ -1,10 +1,16 @@
 /**
+ * DEPRECATED: Use heartbeat instead. Alert checks, memory archival, and morning
+ * digest flush are now consolidated into src/heartbeat.ts (periodic tasks).
+ * This file is kept for reference and will be removed in a future cleanup.
+ *
  * @module alert-cron
  * @description Hourly scheduled alert runner + memory archival + morning digest flush.
  */
 
 /**
  * Alert Cron — S13 Intelligence Reflexive + S26 Smart Notifications
+ *
+ * DEPRECATED: Consolidated into heartbeat.ts periodic tasks.
  *
  * Standalone script that runs periodically via PM2 cron.
  * Checks for anomalies and queues notifications.

@@ -8,7 +8,7 @@
 import { Composer, type Context, InputFile } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { synthesize } from "../tts.ts";
-import { isFeatureEnabled, setFeature, formatFeatures } from "../feature-flags.ts";
+import { setFeature, formatFeatures } from "../feature-flags.ts";
 import { estimateSprintCost, formatCostEstimate } from "../cost-estimate.ts";
 import { overrideGate } from "../gates.ts";
 import { updateTaskStatus, getCurrentSprint, getSprintSummary, formatSprintSummary } from "../tasks.ts";

@@ -1,10 +1,16 @@
 /**
+ * DEPRECATED: Use heartbeat instead. Daily autonomy scanning is now
+ * consolidated into src/heartbeat.ts (periodic tasks).
+ * This file is kept for reference and will be removed in a future cleanup.
+ *
  * @module autonomy-cron
  * @description Scheduled autonomy runner: daily scan trigger via PM2 cron.
  */
 
 /**
  * Autonomy Cron — Proactive Task Creation
+ *
+ * DEPRECATED: Consolidated into heartbeat.ts periodic tasks.
  *
  * Standalone script that runs periodically via PM2.
  * Scans the project for improvement opportunities,

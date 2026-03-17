@@ -20,8 +20,7 @@ import {
   autoRemember,
 } from "../memory.ts";
 import { recordResponseTime } from "../alerts.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
-import { detectIntent, detectIntentWithLLM, formatIntentSuggestion } from "../intent-detection.ts";
+import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
 import { routeIntent, checkPendingClarification, handleConfirmationCallback } from "../command-router.ts";
 import { formatActionsForLLM } from "../action-registry.ts";
 import {
@@ -31,8 +30,6 @@ import {
   extractConstraints,
   addConstraint,
   formatSessionForIntent,
-  cleanupExpiredSessions,
-  hasActiveSession,
 } from "../conversation-session.ts";
 
 export default function messagesComposer(bctx: BotContext): Composer<Context> {
@@ -86,31 +83,26 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       // S43: Track conversation session
       const chatId = ctx.chat?.id || 0;
-      let session: ReturnType<typeof getSession> | undefined;
-      if (isFeatureEnabled("conversation_sessions")) {
-        session = getSession(chatId, threadId);
-        addSessionMessage(session, text);
+      const session = getSession(chatId, threadId);
+      addSessionMessage(session, text);
 
-        // Extract user constraints from the message
-        const constraints = extractConstraints(text);
-        for (const c of constraints) {
-          addConstraint(session, c.type, c.value, c.source);
-        }
+      // Extract user constraints from the message
+      const constraints = extractConstraints(text);
+      for (const c of constraints) {
+        addConstraint(session, c.type, c.value, c.source);
       }
 
       // S37: Check if this is a response to a pending clarification
-      if (isFeatureEnabled("intent_detection")) {
-        const clarificationCmd = checkPendingClarification(ctx, text);
-        if (clarificationCmd) {
-          // Send the resolved command for Grammy to route
-          const chatId = ctx.chat?.id;
-          if (chatId) {
-            const opts: Record<string, unknown> = {};
-            if (threadId) opts.message_thread_id = threadId;
-            await bctx.bot.api.sendMessage(chatId, clarificationCmd, opts);
-          }
-          return;
+      const clarificationCmd = checkPendingClarification(ctx, text);
+      if (clarificationCmd) {
+        // Send the resolved command for Grammy to route
+        const chatId2 = ctx.chat?.id;
+        if (chatId2) {
+          const opts: Record<string, unknown> = {};
+          if (threadId) opts.message_thread_id = threadId;
+          await bctx.bot.api.sendMessage(chatId2, clarificationCmd, opts);
         }
+        return;
       }
 
       const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
@@ -125,51 +117,41 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         autoRemember(bctx.supabase, text, classification).catch(() => {});
       }
 
-      // S37: Intent detection + routing (behind feature flag)
-      if (isFeatureEnabled("intent_detection")) {
-        // Two-tier: regex fast path, then LLM fallback for ambiguous
-        const regexResult = detectIntent(text);
+      // S37: Intent detection + routing
+      // Two-tier: regex fast path, then LLM fallback for ambiguous
+      const regexResult = detectIntent(text);
 
-        if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
-          // High-confidence regex match — route to command
-          if (session) addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
-          const routeResult = await routeIntent(ctx, regexResult.detected, {
+      if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
+        // High-confidence regex match — route to command
+        addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+        const routeResult = await routeIntent(ctx, regexResult.detected, {
+          supabase: bctx.supabase,
+          getThreadId: bctx.getThreadId,
+          threadOpts: bctx.threadOpts,
+        });
+        if (routeResult.handled) return;
+      } else {
+        // LLM fallback for ambiguous messages — S43: with session context
+        const sessionCtx = formatSessionForIntent(session);
+        const llmResult = await detectIntentWithLLM(text, {
+          callLLM: (prompt) => bctx.callClaude(prompt),
+          recentMessages,
+          timeoutMs: 5000,
+          sessionContext: sessionCtx,
+        });
+        if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
+          addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+          const routeResult = await routeIntent(ctx, llmResult.detected, {
             supabase: bctx.supabase,
             getThreadId: bctx.getThreadId,
             threadOpts: bctx.threadOpts,
           });
           if (routeResult.handled) return;
-        } else if (isFeatureEnabled("llm_router")) {
-          // LLM fallback for ambiguous messages — S43: with session context
-          const sessionCtx = session ? formatSessionForIntent(session) : undefined;
-          const llmResult = await detectIntentWithLLM(text, {
-            callLLM: (prompt) => bctx.callClaude(prompt),
-            recentMessages,
-            timeoutMs: 5000,
-            sessionContext: sessionCtx,
-          });
-          if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
-            if (session) addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
-            const routeResult = await routeIntent(ctx, llmResult.detected, {
-              supabase: bctx.supabase,
-              getThreadId: bctx.getThreadId,
-              threadOpts: bctx.threadOpts,
-            });
-            if (routeResult.handled) return;
-          }
-        } else if (regexResult.detected) {
-          // Medium-confidence regex — just suggest (original behavior)
-          const suggestion = formatIntentSuggestion(regexResult);
-          if (suggestion) {
-            await ctx.reply(suggestion, bctx.threadOpts(ctx));
-          }
         }
       }
 
       // S37-07: Conversation fallback with action awareness
-      const actionContext = isFeatureEnabled("intent_detection")
-        ? `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`
-        : "";
+      const actionContext = `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`;
 
       const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext + actionContext, recentMessages, topicName, dynProfile);
       const rawResponse = await bctx.callClaude(enrichedPrompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
