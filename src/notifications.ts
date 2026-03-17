@@ -33,9 +33,10 @@ export function initNotifications(bot: Bot): void {
 }
 
 export async function sendToTopic(threadId: number, message: string): Promise<void> {
-  if (!botInstance || !GROUP_ID || !threadId) return;
+  const groupId = process.env.TELEGRAM_GROUP_ID || "";
+  if (!botInstance || !groupId || !threadId) return;
   try {
-    await botInstance.api.sendMessage(parseInt(GROUP_ID), message, {
+    await botInstance.api.sendMessage(parseInt(groupId), message, {
       message_thread_id: threadId,
     });
   } catch (error) {
