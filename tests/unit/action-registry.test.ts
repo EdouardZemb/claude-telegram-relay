@@ -43,7 +43,7 @@ describe("action-registry", () => {
   describe("getAllActions", () => {
     it("returns all registered actions", () => {
       const actions = getAllActions();
-      expect(actions.length).toBeGreaterThanOrEqual(33);
+      expect(actions.length).toBeGreaterThanOrEqual(34);
     });
 
     it("covers all known commands", () => {
@@ -52,6 +52,7 @@ describe("action-registry", () => {
         "help", "workflow", "agents", "status", "monitor",
         "task", "backlog", "sprint", "start", "done",
         "exec", "orchestrate", "autopipeline",
+        "explore",
         "plan", "prd", "planify",
         "brain", "ideas", "remind",
         "metrics", "retro", "patterns", "alerts", "cost",

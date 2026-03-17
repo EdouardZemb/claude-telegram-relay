@@ -90,6 +90,47 @@ export interface SmOutput {
   follow_ups: string[];
 }
 
+export interface PlannerOutput {
+  role: "planner";
+  feasibility: "high" | "medium" | "low";
+  analysis: string;
+  risks: Array<{
+    severity: "high" | "medium" | "low";
+    description: string;
+  }>;
+  subtasks: Array<{
+    title: string;
+    description: string;
+    priority: number;
+    acceptance_criteria: string;
+    dependencies?: string[];
+    files?: string[];
+  }>;
+  priorities: string[];
+}
+
+export interface ExplorerOutput {
+  role: "explorer";
+  etat_des_lieux: string;
+  options: Array<{
+    label: string;
+    description: string;
+    pros: string[];
+    cons: string[];
+  }>;
+  recommandations: Array<{
+    action: string;
+    effort: "trivial" | "small" | "medium" | "large";
+    impact: "low" | "medium" | "high";
+    files: string[];
+  }>;
+  effort_estimate: {
+    total: string;
+    breakdown: string[];
+  };
+  references: string[];
+}
+
 /** Union of all structured agent outputs */
 export type StructuredAgentOutput =
   | AnalystOutput
@@ -97,7 +138,9 @@ export type StructuredAgentOutput =
   | ArchitectOutput
   | DevOutput
   | QaOutput
-  | SmOutput;
+  | SmOutput
+  | PlannerOutput
+  | ExplorerOutput;
 
 // ── AgentMessage: wrapper around structured output ───────────
 
@@ -176,6 +219,29 @@ const SCHEMA_DESCRIPTIONS: Record<AgentRole, string> = {
   "blockers": ["blocage actuel"],
   "next_steps": ["prochaine etape"],
   "follow_ups": ["point de suivi"]
+}`,
+  explorer: `{
+  "role": "explorer",
+  "etat_des_lieux": "description factuelle de l'etat actuel (2-3 paragraphes)",
+  "options": [{"label": "Option A", "description": "...", "pros": ["avantage"], "cons": ["inconvenient"]}],
+  "recommandations": [{"action": "action concrete", "effort": "trivial|small|medium|large", "impact": "low|medium|high", "files": ["src/fichier.ts"]}],
+  "effort_estimate": {"total": "estimation globale", "breakdown": ["detail 1", "detail 2"]},
+  "references": ["src/module.ts:42", "docs/adr/001.md"]
+}`,
+  planner: `{
+  "role": "planner",
+  "feasibility": "high|medium|low",
+  "analysis": "resume de l'analyse de faisabilite (1-2 paragraphes)",
+  "risks": [{"severity": "high|medium|low", "description": "risque identifie"}],
+  "subtasks": [{
+    "title": "titre court imperatif",
+    "description": "contexte technique 1-2 phrases",
+    "priority": 1,
+    "acceptance_criteria": "Given/When/Then",
+    "dependencies": ["autre sous-tache"],
+    "files": ["src/fichier.ts"]
+  }],
+  "priorities": ["priorite strategique 1"]
 }`,
 };
 
@@ -315,6 +381,85 @@ const JSON_SCHEMAS: Record<string, object> = {
       follow_ups: { type: "array", items: { type: "string" } },
     },
     required: ["role", "summary", "next_steps"],
+  },
+  planner: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "planner" },
+      feasibility: { type: "string", enum: ["high", "medium", "low"] },
+      analysis: { type: "string" },
+      risks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            description: { type: "string" },
+          },
+          required: ["severity", "description"],
+        },
+      },
+      subtasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+            priority: { type: "number" },
+            acceptance_criteria: { type: "string" },
+            dependencies: { type: "array", items: { type: "string" } },
+            files: { type: "array", items: { type: "string" } },
+          },
+          required: ["title", "description", "priority"],
+        },
+      },
+      priorities: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "feasibility", "analysis", "subtasks", "priorities"],
+  },
+  explorer: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "explorer" },
+      etat_des_lieux: { type: "string" },
+      options: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            description: { type: "string" },
+            pros: { type: "array", items: { type: "string" } },
+            cons: { type: "array", items: { type: "string" } },
+          },
+          required: ["label", "description"],
+        },
+      },
+      recommandations: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            action: { type: "string" },
+            effort: { type: "string", enum: ["trivial", "small", "medium", "large"] },
+            impact: { type: "string", enum: ["low", "medium", "high"] },
+            files: { type: "array", items: { type: "string" } },
+          },
+          required: ["action", "effort", "impact"],
+        },
+      },
+      effort_estimate: {
+        type: "object",
+        properties: {
+          total: { type: "string" },
+          breakdown: { type: "array", items: { type: "string" } },
+        },
+        required: ["total"],
+      },
+      references: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "etat_des_lieux", "options", "recommandations"],
   },
   gate_evaluation: {
     type: "object",
@@ -513,6 +658,19 @@ export function validateAgentOutput(
         typeof obj.summary === "string" &&
         Array.isArray(obj.next_steps)
       );
+    case "explorer":
+      return (
+        typeof obj.etat_des_lieux === "string" &&
+        Array.isArray(obj.options) &&
+        Array.isArray(obj.recommandations)
+      );
+    case "planner":
+      return (
+        typeof obj.feasibility === "string" &&
+        typeof obj.analysis === "string" &&
+        Array.isArray(obj.subtasks) &&
+        Array.isArray(obj.priorities)
+      );
     default:
       return false;
   }
@@ -653,6 +811,41 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
           : "",
         output.next_steps.length > 0
           ? `Prochaines etapes: ${output.next_steps.join("; ")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+    case "planner":
+      return [
+        `Faisabilite: ${output.feasibility}`,
+        `Analyse: ${output.analysis}`,
+        output.risks.length > 0
+          ? `Risques: ${output.risks.map((r) => `[${r.severity}] ${r.description}`).join("; ")}`
+          : "",
+        `Sous-taches (${output.subtasks.length}):`,
+        ...output.subtasks.map(
+          (st, i) =>
+            `  ${i + 1}. [P${st.priority}] ${st.title}: ${st.description}`
+        ),
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+    case "explorer":
+      return [
+        `Etat des lieux: ${output.etat_des_lieux}`,
+        output.options.length > 0
+          ? `Options: ${output.options.map((o) => `${o.label} — ${o.description}`).join("; ")}`
+          : "",
+        output.recommandations.length > 0
+          ? `Recommandations: ${output.recommandations.map((r) => `[${r.effort}/${r.impact}] ${r.action}`).join("; ")}`
+          : "",
+        output.effort_estimate
+          ? `Effort: ${output.effort_estimate.total}`
+          : "",
+        output.references.length > 0
+          ? `References: ${output.references.join(", ")}`
           : "",
       ]
         .filter(Boolean)

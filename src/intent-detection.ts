@@ -172,6 +172,38 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /\b(rollback|revenir?\s+en\s+arriere|annuler?\s+(le\s+)?deploy)\b/i,
     ],
   },
+  {
+    intent: "explore_topic",
+    command: "explore",
+    patterns: [
+      /\b(explore|investigu[ée]?r?|etudi[ée]?r?)\s+(le\s+|la\s+|l'|les?\s+|un\s+|une?\s+)?(\w+)/i,
+      /\b(comment\s+fonctionne|c'?est\s+quoi|qu'?est[- ]ce\s+que)\s+(le\s+|la\s+|l')?(\w+)/i,
+      /\bimpact\s+de\s+/i,
+      /\b(regarde|examine|cherche)\s+(dans\s+)?/i,
+      /\b(dependances?|dependents?|qui\s+utilise|utilise\s+par)\s+/i,
+      /\b(complexite|architecture)\s+(de|du)\s+/i,
+      /\b(recherche|research|compare|comparer|evaluer|benchmark)\s+(les?\s+|des?\s+|un\s+|une?\s+)?/i,
+      /\b(state\s+of\s+the\s+art|etat\s+de\s+l'art|alternatives?\s+(a|pour))\b/i,
+    ],
+    argExtractor: (text) => {
+      // Remove the trigger verb/phrase, keep the topic
+      const patterns = [
+        /(?:explore|investiguer|etudier|examiner|regarder|chercher)\s+(?:le\s+|la\s+|l'|les?\s+|un\s+|une?\s+)?(.+)/i,
+        /comment\s+fonctionne\s+(?:le\s+|la\s+|l')?(.+)/i,
+        /(?:c'?est\s+quoi|qu'?est[- ]ce\s+que)\s+(?:le\s+|la\s+|l')?(.+)/i,
+        /impact\s+de\s+(?:modifier\s+)?(.+)/i,
+        /(?:dependances?|dependents?|qui\s+utilise)\s+(?:de\s+|du\s+)?(.+)/i,
+        /complexite\s+(?:de|du)\s+(.+)/i,
+        /architecture\s+(?:de|du)\s+(.+)/i,
+      ];
+      for (const p of patterns) {
+        const m = text.match(p);
+        const captured = m?.[m.length > 2 ? 2 : 1];
+        if (captured) return captured.replace(/\s*\?\s*$/, "").trim();
+      }
+      return undefined;
+    },
+  },
 ];
 
 // ── Core Regex Detection ─────────────────────────────────────

@@ -179,6 +179,18 @@ const ACTIONS: ActionDefinition[] = [
     aliases: ["auto pipeline", "pipeline automatique", "lancer tout"],
   },
 
+  // ─── exploration.ts ───
+  {
+    command: "explore",
+    description: "Explorer un sujet, module ou question dans le codebase",
+    usage: "/explore <sujet a investiguer>",
+    params: [{ name: "query", required: true, description: "Sujet, module ou question a explorer" }],
+    risk: "low",
+    module: "exploration",
+    requiresSupabase: true,
+    aliases: ["explorer", "investiguer", "analyser codebase", "comment fonctionne", "impact de", "regarder", "rechercher", "comparer", "benchmark", "state of the art", "etat de l'art", "alternative"],
+  },
+
   // ─── planning.ts ───
   {
     command: "plan",
