@@ -10,5 +10,6 @@
   "model_cascade": false,
   "auto_gate_approval": true,
   "inter_agent_messaging": true,
-  "code_graph": false
+  "code_graph": true,
+  "enhanced_agent_context": true
 }

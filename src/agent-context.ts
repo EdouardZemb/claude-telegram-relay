@@ -1,6 +1,7 @@
 /**
  * @module agent-context
- * @description Supabase context assembly for BMad agents: memory, sprint, tasks, profile with token budgets per role.
+ * @description Supabase context assembly for BMad agents: memory, sprint, tasks, profile,
+ * code graph, trust scores, sprint metrics, and document shards with token budgets per role.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -9,6 +10,8 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { getGraph, formatGraphContext, findAffectedModules } from "./code-graph.ts";
+import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
+import { buildTaskContext } from "./document-sharding.ts";
 
 const PROJECT_ROOT = process.env.PROJECT_DIR || process.cwd();
 
@@ -19,19 +22,20 @@ const CHARS_PER_TOKEN = 4;
 
 /**
  * Token budget per agent role.
+ * S40: Increased by ~30% to accommodate trust scores, metrics, and doc shards.
  * Analyst/PM need more context (strategic), Dev needs less (tactical).
  */
 const ROLE_TOKEN_BUDGETS: Record<string, number> = {
-  analyst: 3000,
-  pm: 2500,
-  architect: 2500,
-  dev: 1500,
-  qa: 2000,
-  sm: 1500,
+  analyst: 4000,
+  pm: 3500,
+  architect: 3500,
+  dev: 2000,
+  qa: 2500,
+  sm: 2000,
 };
 
 export function getTokenBudget(role: AgentRole | string): number {
-  return ROLE_TOKEN_BUDGETS[role] ?? 2000;
+  return ROLE_TOKEN_BUDGETS[role] ?? 2500;
 }
 
 // ── Context Assembly ─────────────────────────────────────────
@@ -46,12 +50,13 @@ export interface AgentContextOptions {
 /**
  * Assemble Supabase context for a BMad agent.
  *
- * Fetches memory (facts/goals), sprint summary, recent tasks, and user profile
- * in parallel. Returns a formatted string ready for --append-system-prompt.
+ * Fetches memory (facts/goals), sprint summary, recent tasks, user profile,
+ * code graph, trust scores, sprint metrics, and document shards in parallel.
+ * Returns a formatted string ready for --append-system-prompt.
  * Returns "" if supabase is null or all fetches fail.
  *
- * Output is truncated to the role's token budget via priority-based allocation:
- *   40% memory, 20% sprint, 25% tasks, 15% profile (capped at 500 tokens)
+ * S40: Enhanced with trust scores, sprint metrics, and document shards.
+ * Priority-based allocation across 8 sections with role-aware weights.
  */
 export async function buildAgentContext(
   supabase: SupabaseClient | null,
@@ -62,14 +67,28 @@ export async function buildAgentContext(
   const { role, projectId, sprintId } = options;
   const budget = getTokenBudget(role);
   const charBudget = budget * CHARS_PER_TOKEN;
+  const enhanced = isFeatureEnabled("enhanced_agent_context");
 
   try {
-    const [memoryCtx, sprintCtx, tasksCtx, profileCtx] = await Promise.all([
+    // Base fetches (always)
+    const baseFetches: Promise<string>[] = [
       fetchMemoryContext(supabase),
       fetchSprintContext(supabase, sprintId),
       fetchRecentTasks(supabase, projectId),
       loadProfile(),
-    ]);
+    ];
+
+    // S40: Enhanced fetches (parallel)
+    const enhancedFetches: Promise<string>[] = enhanced
+      ? [
+          fetchTrustContext(role),
+          fetchSprintMetrics(supabase, sprintId),
+          fetchDocumentContext(supabase, projectId, options.taskTitle),
+        ]
+      : [Promise.resolve(""), Promise.resolve(""), Promise.resolve("")];
+
+    const [memoryCtx, sprintCtx, tasksCtx, profileCtx, trustCtx, metricsCtx, docCtx] =
+      await Promise.all([...baseFetches, ...enhancedFetches]);
 
     // S39: Code graph context
     let graphCtx = "";
@@ -89,14 +108,17 @@ export async function buildAgentContext(
       }
     }
 
-    // Priority-based truncation: memory > tasks > sprint > graph > profile
+    // Priority-based truncation with role-aware weights
     const sections: Array<{ label: string; content: string; share: number }> = [];
 
-    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.35 });
-    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.15 });
-    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.20 });
-    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: 0.15 });
-    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.15 });
+    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.25 });
+    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.10 });
+    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.15 });
+    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: 0.10 });
+    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: 0.08 });
+    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: 0.10 });
+    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: 0.12 });
+    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.10 });
 
     if (sections.length === 0) return "";
 
@@ -237,5 +259,99 @@ function loadProfile(): Promise<string> {
     return Promise.resolve(lines.join("\n"));
   } catch {
     return Promise.resolve("");
+  }
+}
+
+// ── S40: Enhanced Context Fetchers ───────────────────────────
+
+/**
+ * Fetch trust score context for the current agent role.
+ * Reads from in-memory cache (no DB call needed).
+ * Shows this agent's trust + peers for collaborative awareness.
+ */
+export async function fetchTrustContext(role: AgentRole | string): Promise<string> {
+  try {
+    const ownScore = getCachedTrustScore(role);
+    const allScores = getCachedTrustScores();
+    const roles = Object.keys(allScores);
+
+    if (roles.length === 0 && ownScore.totalEvaluations === 0) return "";
+
+    const lines: string[] = [];
+    lines.push(`Ton score de confiance: ${ownScore.score}/100 (${ownScore.totalPasses}/${ownScore.totalEvaluations} passes)`);
+
+    if (ownScore.score >= 80) {
+      lines.push("Statut: fiable — auto-approbation possible pour les gates spec/plan (P3+)");
+    }
+    if (ownScore.score >= 90) {
+      lines.push("Statut: tres fiable — auto-approbation possible pour les gates implementation (P3+)");
+    }
+    if (ownScore.consecutiveFailures > 0) {
+      lines.push(`Attention: ${ownScore.consecutiveFailures} echec(s) consecutif(s) — sois plus rigoureux`);
+    }
+
+    // Peer scores (compact)
+    const peers = roles.filter((r) => r !== role);
+    if (peers.length > 0) {
+      const peerSummary = peers
+        .map((r) => `${r}:${allScores[r].score}`)
+        .join(", ");
+      lines.push(`Pairs: ${peerSummary}`);
+    }
+
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch sprint metrics: velocity and rework rate from sprint_metrics table.
+ * Provides historical context for the agent.
+ */
+export async function fetchSprintMetrics(
+  supabase: SupabaseClient,
+  sprintId?: string
+): Promise<string> {
+  try {
+    const { data, error } = await supabase
+      .from("sprint_metrics")
+      .select("sprint_id, velocity, rework_rate, cycle_time_avg, created_at")
+      .order("created_at", { ascending: false })
+      .limit(3);
+
+    if (error || !data?.length) return "";
+
+    const lines: string[] = [];
+
+    for (const m of data) {
+      const parts: string[] = [`${m.sprint_id}:`];
+      if (m.velocity != null) parts.push(`velocite=${m.velocity}`);
+      if (m.rework_rate != null) parts.push(`rework=${Math.round(m.rework_rate * 100)}%`);
+      if (m.cycle_time_avg != null) parts.push(`cycle=${Math.round(m.cycle_time_avg)}h`);
+      lines.push(parts.join(" "));
+    }
+
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch relevant document shards (PRDs, architecture docs) for the task.
+ * Delegates to document-sharding.ts buildTaskContext().
+ */
+export async function fetchDocumentContext(
+  supabase: SupabaseClient,
+  projectId?: string,
+  taskTitle?: string
+): Promise<string> {
+  if (!projectId || !taskTitle) return "";
+
+  try {
+    return await buildTaskContext(supabase, taskTitle, projectId, 1500);
+  } catch {
+    return "";
   }
 }

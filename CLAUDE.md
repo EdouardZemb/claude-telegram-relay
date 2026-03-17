@@ -27,7 +27,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
 | `commands/zz-messages.ts` | Composer: message:text (with intent routing), message:voice, message:photo, message:document handlers (loaded last) |
 | `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
-| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph with token budgets per role |
+| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph, trust scores, sprint metrics, document shards with token budgets per role |
 | `code-graph.ts` | Knowledge graph of the codebase: regex-based TypeScript indexer, dependency/dependent queries, BFS impact radius, complexity estimation, agent context formatting |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection |
@@ -187,6 +187,8 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function.
 
 **Knowledge Graph (S39):** Structural understanding of the codebase for agents. (1) Regex-based Indexer: `code-graph.ts` parses all `src/**/*.ts` files — extracts imports, exports (function, class, interface, type, const), and inter-module edges. No TypeScript compiler dependency. (2) Local Cache: graph stored in `config/code-graph.json`, regenerated via `bun run graph:index`. In-memory cache for fast queries. (3) Graph Queries: `getModuleDependencies()` (what a module imports), `getDependents()` (what imports it), `getImpactRadius()` (BFS of transitive dependents with depth limit), `getRelatedModules()` (imports + importers), `findNode()` (partial match). (4) Agent Context Integration: `buildAgentContext()` injects relevant subgraph when `code_graph` flag enabled. Uses `findAffectedModules()` to match task title to module names, then formats graph context per role (architect/qa get impact radius). (5) LLM Router Enhancement: `routeTask()` includes complexity hint from graph — affected module count and max complexity score — to improve pipeline selection. (6) MCP Tools: `query_dependencies`, `query_dependents`, `query_impact_radius` exposed in MCP memory server for Claude Code agent real-time graph queries. (7) Monitoring: `/monitor` shows graph stats (modules, edges, exports, avg dependencies, most connected). (8) Complexity Estimation: `estimateComplexity()` scores 0-10 based on dependencies, dependents, impact radius, and line count. Behind `code_graph` feature flag (disabled by default).
 
+**Agent Context Complet (S40):** Enriched agent context with full Supabase data. (1) Token Budgets Increased: +30% per role (analyst 4000, pm/architect 3500, dev/sm 2000, qa 2500) to accommodate new sections. (2) Trust Score Context: `fetchTrustContext()` reads from in-memory cache (no DB call), injects agent's own trust score + peer scores, shows auto-approval eligibility and consecutive failure warnings. (3) Sprint Metrics: `fetchSprintMetrics()` queries `sprint_metrics` table for last 3 sprints — velocity, rework rate, cycle time. Gives agents historical performance awareness. (4) Document Shards: `fetchDocumentContext()` delegates to `buildTaskContext()` from document-sharding.ts — injects relevant PRD/architecture shards for the current task (1500 token budget). (5) Double-loop Closure: feedback rules from gate evaluations (S35) already injected via `buildFeedbackContext()` in agent system prompts. Trust scores provide the confidence signal for progressive autonomy. (6) Section Rebalancing: 8 sections with updated weights — memory 25%, tasks 15%, docs 12%, sprint/graph/metrics/profile 10% each, trust 8%. Behind `enhanced_agent_context` feature flag (enabled by default).
+
 **Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 ### Infrastructure
@@ -218,7 +220,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1216 tests (unit + integration + E2E)
+tests/                  1228 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -226,7 +228,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1216 tests, all must pass before merge)
+- Tests: `bun test` (1228 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
