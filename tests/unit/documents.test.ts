@@ -5,7 +5,7 @@
  * All external calls (Claude CLI, Supabase, pdf-parse) are mocked.
  */
 
-import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ── Mock fetch globally ──────────────────────────────────────
@@ -124,6 +124,10 @@ import {
 
 beforeEach(() => {
   restoreFetch();
+  restoreSpawn();
+});
+
+afterEach(() => {
   restoreSpawn();
 });
 
@@ -682,7 +686,7 @@ describe("createDocument", () => {
   it("runs full pipeline: extract → classify → upload → insert", async () => {
     // Mock CLI for extraction and classification (sequential calls)
     let callCount = 0;
-    spyOn(Bun, "spawn").mockImplementation(() => {
+    spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
       const output = callCount === 1
         ? "Facture n°1"
@@ -790,7 +794,7 @@ describe("createDocument", () => {
   it("cleans up storage on insert failure", async () => {
     // Mock CLI for extraction and classification
     let callCount = 0;
-    spyOn(Bun, "spawn").mockImplementation(() => {
+    spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
       const output = callCount === 1
         ? "extracted"
@@ -864,7 +868,7 @@ describe("createDocument", () => {
   it("throws on storage upload failure", async () => {
     // Mock CLI for extraction and classification
     let callCount = 0;
-    spyOn(Bun, "spawn").mockImplementation(() => {
+    spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
       const output = callCount === 1
         ? "extracted text"
@@ -985,7 +989,7 @@ describe("createDocument", () => {
   it("uses title from input when provided", async () => {
     // Mock CLI for extraction and classification
     let callCount = 0;
-    spyOn(Bun, "spawn").mockImplementation(() => {
+    spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
       const output = callCount === 1
         ? "extracted"

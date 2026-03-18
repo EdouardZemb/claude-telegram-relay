@@ -3,15 +3,15 @@
  * Tests: /docs commands, callback query handling, photo/document handler routing.
  * Uses Grammy handleUpdate injection via E2E framework.
  *
- * External API calls (Anthropic Vision, Telegram file download, Supabase
- * Storage) are intercepted via fetch mock. Supabase REST calls go through
+ * External calls (Claude CLI via Bun.spawn, Telegram file download, Supabase
+ * Storage) are intercepted via mocks. Supabase REST calls go through
  * the real client when configured.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { E2EFramework } from "./framework";
 
-// ── Fetch mock for Telegram file downloads + Anthropic API ──────
+// ── Fetch mock for Telegram file downloads + Supabase ───────────
 
 const originalFetch = globalThis.fetch;
 
@@ -28,47 +28,6 @@ function mockExternalFetch(): void {
         status: 200,
         headers: { "content-type": "image/jpeg" },
       });
-    }
-
-    // Anthropic Vision/Classification API → fake responses
-    if (url.includes("api.anthropic.com")) {
-      const body = init?.body ? JSON.parse(init.body as string) : {};
-      const isVision = body?.messages?.[0]?.content?.some?.(
-        (c: { type: string }) => c.type === "image",
-      );
-
-      if (isVision) {
-        return new Response(
-          JSON.stringify({
-            content: [
-              {
-                type: "text",
-                text: "Facture EDF montant 150 EUR date 18/03/2026",
-              },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-
-      // Classification response
-      return new Response(
-        JSON.stringify({
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                category_name: "facture",
-                confidence: 0.9,
-                description: "Facture electricite EDF",
-                document_date: "2026-03-18",
-                suggested_title: "Facture EDF Mars 2026",
-              }),
-            },
-          ],
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
     }
 
     // Supabase Storage upload → fake success (bucket may not exist)
@@ -96,6 +55,39 @@ function restoreFetch(): void {
   globalThis.fetch = originalFetch;
 }
 
+// ── Bun.spawn mock for Claude CLI calls ─────────────────────────
+
+let spawnMock: ReturnType<typeof spyOn> | null = null;
+
+function mockClaudeCLI(): void {
+  let callCount = 0;
+  spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
+    callCount++;
+    // Alternate: extraction (odd calls) → classification (even calls)
+    const output = callCount % 2 === 1
+      ? "Facture EDF montant 150 EUR date 18/03/2026"
+      : JSON.stringify({
+          category_name: "facture",
+          confidence: 0.9,
+          description: "Facture electricite EDF",
+          document_date: "2026-03-18",
+          suggested_title: "Facture EDF Mars 2026",
+        });
+    return {
+      stdout: new Response(output).body,
+      stderr: new Response("").body,
+      exited: Promise.resolve(0),
+    } as any;
+  });
+}
+
+function restoreSpawn(): void {
+  if (spawnMock) {
+    spawnMock.mockRestore();
+    spawnMock = null;
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 const hasSupabase = !!(
@@ -105,33 +97,20 @@ const hasSupabase = !!(
 // Valid UUID for Supabase queries (non-existent document)
 const FAKE_DOC_UUID = "00000000-0000-4000-a000-000000000001";
 
-// ── Environment setup for E2E ───────────────────────────────────
-
-// Save original to restore later
-const origAnthropicKey = process.env.ANTHROPIC_API_KEY;
-
 // ── Tests ───────────────────────────────────────────────────────
 
 describe("E2E Document Flow", () => {
   let fw: E2EFramework;
 
   beforeAll(async () => {
-    // Set fake Anthropic key so extractText uses fetch (mocked) instead of throwing
-    process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "e2e-fake-key";
-
     mockExternalFetch();
+    mockClaudeCLI();
     fw = new E2EFramework({ runId: `doc-e2e-${Date.now()}` });
     await fw.setup();
   });
 
   afterAll(async () => {
-    // Restore original
-    if (origAnthropicKey) {
-      process.env.ANTHROPIC_API_KEY = origAnthropicKey;
-    } else {
-      delete process.env.ANTHROPIC_API_KEY;
-    }
-
+    restoreSpawn();
     restoreFetch();
     await fw.teardown();
   });
