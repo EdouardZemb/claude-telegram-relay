@@ -205,7 +205,7 @@ export async function executeDag(
         results.set(node.agent, result);
         options.onNodeCompleted?.(node.agent, result);
       } else {
-        // Let supervisor/callback decide
+        // Callback decides on failed node handling (retry/skip/escalate)
         if (options.onNodeFailed) {
           const decision = await options.onNodeFailed(node);
           if (decision === "skip") {

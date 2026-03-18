@@ -202,7 +202,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         const llmResult = await detectIntentWithLLM(text, {
           callLLM: (prompt) => bctx.callClaude(prompt),
           recentMessages,
-          timeoutMs: 5000,
+          timeoutMs: 15000,
           sessionContext: sessionCtx,
         });
         if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
@@ -432,7 +432,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       }
 
       const mimeType = doc.mime_type || "";
-      const fileName = doc.file_name || `file_${Date.now()}`;
+      const fileName = (doc.file_name || `file_${Date.now()}`).replace(/[/\\]/g, "_");
 
       // S45-T4: Route eligible MIME types through document storage pipeline
       if (bctx.supabase && DOCUMENT_MIME_TYPES.has(mimeType)) {

@@ -60,7 +60,7 @@ export async function scanMissingTests(projectRoot: string): Promise<Opportunity
   const testedModules = new Set(testFiles.map((f) => f.replace(".test.ts", "")));
 
   // Modules that are standalone scripts or too large to unit test meaningfully
-  const skipModules = new Set(["relay", "alert-cron", "autonomy-cron"]);
+  const skipModules = new Set(["relay"]);
 
   for (const srcFile of srcFiles) {
     const moduleName = srcFile.replace(".ts", "");

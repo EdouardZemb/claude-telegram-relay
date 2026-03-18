@@ -7,7 +7,7 @@
  * Semaphore — S25 T1
  *
  * Promise-based counting semaphore for concurrency control.
- * Used by DAG executor, fan-out, and batch pipeline.
+ * Used by DAG executor and parallel pipeline execution.
  */
 
 export class Semaphore {

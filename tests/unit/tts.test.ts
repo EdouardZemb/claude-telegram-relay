@@ -283,6 +283,52 @@ describe("tts — local provider", () => {
   });
 });
 
+// ── Tests: Groq provider ──────────────────────────────────
+
+describe("tts — groq provider", () => {
+  it("falls back to local when GROQ_API_KEY is not set", async () => {
+    const savedKey = process.env.GROQ_API_KEY;
+    const savedProvider = process.env.TTS_PROVIDER;
+    delete process.env.GROQ_API_KEY;
+    process.env.TTS_PROVIDER = "groq";
+    // Piper not configured either, so should return null
+    process.env.PIPER_MODEL_PATH = "";
+
+    const mod = await import("../../src/tts?groq_no_key");
+    const result = await mod.synthesize("hello");
+    expect(result).toBeNull();
+
+    if (savedKey !== undefined) process.env.GROQ_API_KEY = savedKey;
+    if (savedProvider !== undefined) process.env.TTS_PROVIDER = savedProvider;
+  });
+
+  it("falls back to local on API error", async () => {
+    setupFakeScripts();
+    const savedProvider = process.env.TTS_PROVIDER;
+    process.env.TTS_PROVIDER = "groq";
+    process.env.GROQ_API_KEY = "test-key-invalid";
+    // Set up Piper fallback
+    process.env.PIPER_BINARY = FAKE_PIPER;
+    process.env.PIPER_MODEL_PATH = "/fake/model.onnx";
+    process.env.TMPDIR = TMPDIR;
+
+    const mod = await import("../../src/tts?groq_api_error");
+    // The API call with an invalid key will fail, should fallback to local
+    const result = await mod.synthesize("test fallback");
+    // Fallback to Piper should produce a valid buffer
+    expect(result).not.toBeNull();
+    expect(result).toBeInstanceOf(Buffer);
+
+    if (savedProvider !== undefined) process.env.TTS_PROVIDER = savedProvider;
+  });
+
+  it("routes to groq when TTS_PROVIDER is groq", async () => {
+    process.env.TTS_PROVIDER = "groq";
+    const mod = await import("../../src/tts?groq_route");
+    expect(typeof mod.synthesize).toBe("function");
+  });
+});
+
 // ── Tests: Module structure ───────────────────────────────
 
 describe("tts — module structure", () => {

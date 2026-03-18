@@ -29,7 +29,7 @@ describe("doc-utils", () => {
       expect(modules).toContain("relay.ts");
       expect(modules).toContain("agent.ts");
       expect(modules).toContain("autonomy-scanner.ts");
-      expect(modules).toContain("autonomy-cron.ts");
+      expect(modules).not.toContain("autonomy-cron.ts");
     });
 
     test("returns sorted array", async () => {

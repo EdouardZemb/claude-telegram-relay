@@ -141,7 +141,7 @@ export async function getAgentEvents(
 }
 
 /**
- * Get in-memory events for a session (for inclusion in supervisor report).
+ * Get in-memory events for a session (e.g., for agent timeline display).
  */
 export function getInMemoryEventsForSession(sessionId: string): AgentEvent[] {
   return inMemoryEvents.get(sessionId) || [];

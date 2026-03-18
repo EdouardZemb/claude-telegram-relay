@@ -356,7 +356,7 @@ export async function detectIntentWithLLM(
       "Ne force pas un match si le message est juste une conversation normale.",
     ].filter(Boolean).join("\n");
 
-    const timeoutMs = options.timeoutMs ?? 5000;
+    const timeoutMs = options.timeoutMs ?? 15000;
     const result = await Promise.race([
       options.callLLM(prompt),
       new Promise<string>((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), timeoutMs)),
