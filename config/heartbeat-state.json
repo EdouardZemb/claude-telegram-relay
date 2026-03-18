@@ -1,6 +1,6 @@
 {
-  "lastPulseAt": "2026-03-18T16:20:00.118Z",
-  "lastCommitSha": "786d044322d75313a5c36f0cafc0411cecb0eb3d",
+  "lastPulseAt": "2026-03-18T22:00:00.135Z",
+  "lastCommitSha": "6f44633c4ddf7a96b803094c00c33d54321ca46f",
   "lastSprintSnapshot": {
     "sprint": null,
     "done": 0,
@@ -8,60 +8,60 @@
   },
   "recentActions": [
     {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T14:50:13.654Z"
+      "type": "notify",
+      "summary": "⚠️ PR #13 (path traversal fix) bloquée depuis 23j. Sécurité critique — vérifier CI ou décider du statut.",
+      "timestamp": "2026-03-18T20:30:14.121Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T15:00:10.850Z"
+      "timestamp": "2026-03-18T20:40:11.394Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T20:50:10.916Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T21:00:14.968Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T21:10:12.792Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T21:20:09.340Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T21:30:11.390Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T21:40:12.186Z"
     },
     {
       "type": "notify",
-      "summary": "🔴 SECURITE: PR #13 (path traversal) ouvert 23 jours — faille critique non fermée. Priorite absolue: merger ou fermer.",
-      "timestamp": "2026-03-18T15:10:21.373Z"
+      "summary": "⚠️ PR #13 (path traversal in documents) bloquee depuis 23 jours. Securite — a investiguer ou fermer.",
+      "timestamp": "2026-03-18T21:50:15.832Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T15:20:19.367Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T15:30:13.382Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T15:40:16.959Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T15:50:11.405Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T16:00:16.130Z"
-    },
-    {
-      "type": "notify",
-      "summary": "🚨 PR #13 (path traversal security fix) bloquée depuis 23 jours. À merger ou rerevoir?",
-      "timestamp": "2026-03-18T16:10:18.921Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T16:20:12.484Z"
+      "timestamp": "2026-03-18T22:00:10.438Z"
     }
   ],
   "cooldowns": {
-    "🚨 PR #13 (path traversal security fix) bloquée de": 1773852018923
+    "⚠️ PR #13 (path traversal in documents) bloquee de": 1773872415834
   },
-  "lastAlertCheckAt": "2026-03-18T15:40:00.121Z",
-  "lastArchivalAt": "2026-03-18T15:40:00.121Z",
-  "lastAutonomyScanAt": "2026-03-17T18:30:00.117Z"
+  "lastAlertCheckAt": "2026-03-18T21:40:00.120Z",
+  "lastArchivalAt": "2026-03-18T21:40:00.120Z",
+  "lastAutonomyScanAt": "2026-03-18T18:30:00.124Z"
 }

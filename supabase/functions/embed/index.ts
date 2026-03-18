@@ -16,9 +16,8 @@ Deno.serve(async (req) => {
   try {
     const { record, table } = await req.json();
 
-    // Documents table uses extracted_text, others use content
-    const textField = table === "documents" ? "extracted_text" : "content";
-    const text = record?.[textField];
+    // Trigger always sends text as 'content' (normalized from extracted_text for documents)
+    const text = record?.content;
 
     if (!text || !record?.id) {
       return new Response("Missing record data", { status: 400 });
