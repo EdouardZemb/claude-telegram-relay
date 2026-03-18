@@ -16,7 +16,11 @@ Deno.serve(async (req) => {
   try {
     const { record, table } = await req.json();
 
-    if (!record?.content || !record?.id) {
+    // Documents table uses extracted_text, others use content
+    const textField = table === "documents" ? "extracted_text" : "content";
+    const text = record?.[textField];
+
+    if (!text || !record?.id) {
       return new Response("Missing record data", { status: 400 });
     }
 
@@ -41,7 +45,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           model: "text-embedding-3-small",
-          input: record.content,
+          input: text,
         }),
       }
     );

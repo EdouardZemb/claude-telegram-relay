@@ -1272,7 +1272,7 @@ describe("searchDocuments", () => {
         query: "facture electricite",
         table: "documents",
         match_count: 10,
-        match_threshold: 0.7,
+        match_threshold: 0.3,
         user_id: "user-1",
       },
     });
@@ -1325,7 +1325,7 @@ describe("searchDocuments", () => {
         query: "query",
         table: "documents",
         match_count: 10,
-        match_threshold: 0.7,
+        match_threshold: 0.3,
         user_id: undefined,
       },
     });

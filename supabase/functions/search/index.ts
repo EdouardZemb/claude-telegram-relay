@@ -6,7 +6,7 @@
  * so the relay never needs it.
  *
  * POST body:
- *   { query: string, table?: "messages" | "memory", match_count?: number, match_threshold?: number }
+ *   { query: string, table?: "messages" | "memory" | "documents", match_count?: number, match_threshold?: number, user_id?: string }
  *
  * Returns: array of matching rows with similarity scores.
  */
@@ -20,6 +20,7 @@ Deno.serve(async (req) => {
       table = "messages",
       match_count = 10,
       match_threshold = 0.7,
+      user_id,
     } = await req.json();
 
     if (!query) {
@@ -61,13 +62,22 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const rpcName = table === "memory" ? "match_memory" : "match_messages";
+    const rpcName =
+      table === "memory" ? "match_memory" :
+      table === "documents" ? "match_documents" :
+      "match_messages";
 
-    const { data: results, error } = await supabase.rpc(rpcName, {
+    const rpcParams: Record<string, unknown> = {
       query_embedding: embedding,
       match_threshold,
       match_count,
-    });
+    };
+
+    if (table === "documents" && user_id) {
+      rpcParams.p_user_id = user_id;
+    }
+
+    const { data: results, error } = await supabase.rpc(rpcName, rpcParams);
 
     if (error) {
       return new Response(`Search error: ${error.message}`, { status: 500 });

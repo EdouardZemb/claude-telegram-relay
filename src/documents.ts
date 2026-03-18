@@ -556,7 +556,7 @@ export async function searchDocuments(
   userId?: string,
   options: { matchCount?: number; matchThreshold?: number } = {},
 ): Promise<DocumentSearchResult[]> {
-  const { matchCount = 10, matchThreshold = 0.7 } = options;
+  const { matchCount = 10, matchThreshold = 0.3 } = options;
 
   try {
     const { data, error } = await supabase.functions.invoke("search", {
