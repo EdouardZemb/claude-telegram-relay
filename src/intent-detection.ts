@@ -209,6 +209,15 @@ const INTENT_PATTERNS: IntentPattern[] = [
     },
   },
   {
+    intent: "view_jobs",
+    command: "jobs",
+    patterns: [
+      /\b(jobs?|travaux|taches?\s+en\s+cours)\b/i,
+      /\b(ou\s+en\s+est|c'?est\s+fini|statut\s+des?\s+jobs?)\b/i,
+      /\b(qu'?est[- ]ce\s+qui\s+tourne)\b/i,
+    ],
+  },
+  {
     intent: "explore_topic",
     command: "explore",
     patterns: [

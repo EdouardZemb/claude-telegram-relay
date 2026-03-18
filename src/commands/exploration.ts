@@ -22,6 +22,7 @@ import {
 import { resolveProjectContext } from "../projects.ts";
 import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
+import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
 
 // ── Web Research Detection ───────────────────────────────────
 
@@ -90,87 +91,89 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     // Detect web research intent for budget/model upgrade
     const isWebResearch = detectWebResearchIntent(query);
 
-    const statusMsg = isWebResearch
-      ? `Exploration en cours: ${query}\nAgent Ada analyse le codebase + recherche web...`
-      : `Exploration en cours: ${query}\nAgent Ada analyse le codebase...`;
-    await ctx.reply(statusMsg, bctx.threadOpts(ctx));
+    // ── Explore function (shared between sync/async) ──────────
+    const exploreFn = async (): Promise<string> => {
+      const currentProject = await resolveProjectContext(bctx.supabase!, ctx.message?.message_thread_id);
 
-    // Resolve project context
-    const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+      const agentContext = await buildAgentContext(bctx.supabase!, {
+        role: "explorer",
+        projectId: currentProject?.id,
+        sprintId: currentProject?.current_sprint || undefined,
+        taskTitle: query,
+      });
 
-    // Build agent context from Supabase
-    const agentContext = await buildAgentContext(bctx.supabase, {
-      role: "explorer",
-      projectId: currentProject?.id,
-      sprintId: currentProject?.current_sprint || undefined,
-      taskTitle: query,
-    });
+      const systemPrompt = buildAgentSystemPromptPart("explorer", {
+        command: "explore",
+        taskTitle: query,
+        projectName: currentProject?.slug || "telegram-relay",
+      });
 
-    // Build system prompt from YAML template
-    const systemPrompt = buildAgentSystemPromptPart("explorer", {
-      command: "explore",
-      taskTitle: query,
-      projectName: currentProject?.slug || "telegram-relay",
-    });
+      const taskPrompt = buildAgentTaskPromptPart("explorer", {
+        command: "explore",
+        taskTitle: query,
+        projectName: currentProject?.slug || "telegram-relay",
+      });
 
-    // Build task prompt
-    const taskPrompt = buildAgentTaskPromptPart("explorer", {
-      command: "explore",
-      taskTitle: query,
-      projectName: currentProject?.slug || "telegram-relay",
-    });
+      const outputInstructions = buildStructuredOutputInstructions("explorer" as any);
 
-    // Structured output instructions
-    const outputInstructions = buildStructuredOutputInstructions("explorer" as any);
+      const fullPrompt = [
+        taskPrompt,
+        "",
+        agentContext ? `CONTEXTE PROJET:\n${agentContext}` : "",
+        "",
+        "QUESTION A EXPLORER:",
+        query,
+        "",
+        "Explore le codebase, analyse les fichiers pertinents, et produis un rapport structure.",
+        outputInstructions,
+      ].filter(Boolean).join("\n");
 
-    // Assemble full prompt
-    const fullPrompt = [
-      taskPrompt,
-      "",
-      agentContext ? `CONTEXTE PROJET:\n${agentContext}` : "",
-      "",
-      "QUESTION A EXPLORER:",
-      query,
-      "",
-      "Explore le codebase, analyse les fichiers pertinents, et produis un rapport structure.",
-      outputInstructions,
-    ].filter(Boolean).join("\n");
+      const jsonSchema = getJsonSchemaForRole("explorer");
+      const model = isWebResearch ? "claude-sonnet-4-6" : explorer.model;
+      const effort = isWebResearch ? "medium" : explorer.effort;
 
-    const jsonSchema = getJsonSchemaForRole("explorer");
+      const result = await spawnClaude({
+        prompt: fullPrompt,
+        systemPrompt: systemPrompt || undefined,
+        outputFormat: "json",
+        jsonSchema: jsonSchema || undefined,
+        model,
+        fallbackModel: explorer.fallbackModel,
+        effort: effort as any,
+        mcpRole: "explorer",
+      });
 
-    // Web research: upgrade model for richer synthesis (no budget limits)
-    const model = isWebResearch ? "claude-sonnet-4-6" : explorer.model;
-    const effort = isWebResearch ? "medium" : explorer.effort;
+      if (result.exitCode !== 0 || !result.stdout.trim()) {
+        throw new Error(result.stderr || "Pas de reponse de l'agent.");
+      }
 
-    const result = await spawnClaude({
-      prompt: fullPrompt,
-      systemPrompt: systemPrompt || undefined,
-      outputFormat: "json",
-      jsonSchema: jsonSchema || undefined,
-      model,
-      fallbackModel: explorer.fallbackModel,
-      // Budget limits removed — agents run unconstrained
-      effort: effort as any,
-      mcpRole: "explorer",
-    });
-
-    if (result.exitCode !== 0 || !result.stdout.trim()) {
-      const errMsg = result.stderr || "Pas de reponse de l'agent.";
-      await ctx.reply(`Exploration echouee:\n${errMsg.substring(0, 2000)}`, bctx.threadOpts(ctx));
-      return;
-    }
-
-    // Parse structured output
-    const parsed = parseAgentOutput(result.stdout, "explorer" as any);
-    if (parsed) {
-      const formatted = formatStructuredOutput(parsed);
-      await bctx.sendResponse(ctx, `EXPLORATION: ${query}\n\n${formatted}`);
-    } else {
-      // Fallback: send raw output
+      const parsed = parseAgentOutput(result.stdout, "explorer" as any);
+      if (parsed) {
+        return `EXPLORATION: ${query}\n\n${formatStructuredOutput(parsed)}`;
+      }
       const output = result.stdout.length > 4000
         ? result.stdout.substring(0, 4000) + "\n...(tronque)"
         : result.stdout;
-      await bctx.sendResponse(ctx, `EXPLORATION: ${query}\n\n${output}`);
+      return `EXPLORATION: ${query}\n\n${output}`;
+    };
+
+    // ── Background job or blocking (S46) ────────────────────────
+    if (isJobManagerEnabled()) {
+      const chatId = ctx.chat?.id || 0;
+      const jobId = await launchJob("explore", chatId, exploreFn);
+      await ctx.reply(`Job lance explore (id: ${jobId})\nQuery: ${query}`, bctx.threadOpts(ctx));
+    } else {
+      const statusMsg = isWebResearch
+        ? `Exploration en cours: ${query}\nAgent Ada analyse le codebase + recherche web...`
+        : `Exploration en cours: ${query}\nAgent Ada analyse le codebase...`;
+      await ctx.reply(statusMsg, bctx.threadOpts(ctx));
+
+      try {
+        const resultMsg = await exploreFn();
+        await bctx.sendResponse(ctx, resultMsg);
+      } catch (error: any) {
+        await ctx.reply(`Exploration echouee:\n${(error.message || "").substring(0, 2000)}`, bctx.threadOpts(ctx));
+      }
     }
   });
 
