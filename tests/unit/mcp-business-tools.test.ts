@@ -172,12 +172,12 @@ describe("MCP Business Server — S44 PRD Tools", () => {
     expect(serverCode).toContain("enqueueMcpNotification");
   });
 
-  it("prd_create returns error when generation fails (EC-008)", () => {
-    expect(serverCode).toContain("Error: PRD generation failed (Claude CLI may be unavailable)");
+  it("prd_create throws when generation fails (EC-008)", () => {
+    expect(serverCode).toContain("PRD generation failed (Claude CLI may be unavailable)");
   });
 
-  it("prd_create returns error when save fails", () => {
-    expect(serverCode).toContain("Error: failed to save PRD in Supabase");
+  it("prd_create throws when save fails", () => {
+    expect(serverCode).toContain("Failed to save PRD in Supabase");
   });
 
   it("prd_create defaults project to telegram-relay", () => {
@@ -295,6 +295,48 @@ describe("MCP Business Server — S44 PRD Tools", () => {
     expect(serverCode).toContain("getPRDs");
     expect(serverCode).toContain("updatePRDStatus");
     expect(serverCode).toContain('from "../src/prd.ts"');
+  });
+});
+
+describe("MCP Background Job Launcher", () => {
+  it("defines launchMcpBackgroundJob function", () => {
+    expect(serverCode).toContain("function launchMcpBackgroundJob(");
+  });
+
+  it("generates a short job ID via randomUUID", () => {
+    expect(serverCode).toContain("randomUUID().slice(0, 8)");
+  });
+
+  it("sends notification on success with job ID", () => {
+    expect(serverCode).toContain("[Job ${jobId}]");
+    expect(serverCode).toContain("termine");
+  });
+
+  it("sends critical notification on failure", () => {
+    expect(serverCode).toContain("echoue:");
+    expect(serverCode).toContain('severity: "critical"');
+  });
+
+  it("prd_create uses launchMcpBackgroundJob for async execution", () => {
+    const prdSection = serverCode.slice(
+      serverCode.indexOf('"prd_create"'),
+      serverCode.indexOf('"prd_create"') + 1500
+    );
+    expect(prdSection).toContain("launchMcpBackgroundJob");
+    expect(prdSection).toContain("Job lance (id:");
+  });
+
+  it("orchestrate_task uses launchMcpBackgroundJob for async execution", () => {
+    const orchSection = serverCode.slice(
+      serverCode.indexOf('"orchestrate_task"'),
+      serverCode.indexOf('"orchestrate_task"') + 4000
+    );
+    expect(orchSection).toContain("launchMcpBackgroundJob");
+    expect(orchSection).toContain("Job lance (id:");
+  });
+
+  it("imports randomUUID from crypto", () => {
+    expect(serverCode).toContain('import { randomUUID } from "crypto"');
   });
 });
 

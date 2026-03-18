@@ -397,6 +397,7 @@ import {
 } from "../src/prd.ts";
 import { readFile, writeFile, mkdir, rename as fsRename } from "fs/promises";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
 import { estimateSprintCost } from "../src/cost-estimate.ts";
 import { runAllChecks } from "../src/alerts.ts";
@@ -441,6 +442,41 @@ async function enqueueMcpNotification(notif: Omit<McpNotification, "createdAt">)
   } catch (error) {
     console.error("MCP notification enqueue error:", error);
   }
+}
+
+// ── Async MCP Job Launcher ────────────────────────────────────
+// Long-running MCP tools (prd_create, orchestrate_task) use this to run
+// work in background and return immediately with a job ID.
+// Completion notifications go through the existing mcp-pending-notifications bridge.
+
+function launchMcpBackgroundJob(
+  type: string,
+  description: string,
+  fn: () => Promise<string>,
+): string {
+  const jobId = randomUUID().slice(0, 8);
+
+  // Fire-and-forget: run in background, notify on completion
+  fn()
+    .then(async (result) => {
+      await enqueueMcpNotification({
+        type: "task",
+        severity: "normal",
+        message: `[Job ${jobId}] ${type} termine\n${result}`,
+        data: { jobId, jobType: type },
+      });
+    })
+    .catch(async (error) => {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      await enqueueMcpNotification({
+        type: "alert",
+        severity: "critical",
+        message: `[Job ${jobId}] ${type} echoue: ${errMsg}`,
+        data: { jobId, jobType: type },
+      });
+    });
+
+  return jobId;
 }
 
 server.tool(
@@ -543,30 +579,22 @@ server.tool(
   async ({ description, project, tags, requested_by }) => {
     try {
       const projectName = project ?? "telegram-relay";
-      const generated = await generatePRD(description, projectName);
 
-      if (!generated) {
-        return { content: [{ type: "text" as const, text: "Error: PRD generation failed (Claude CLI may be unavailable)" }] };
-      }
+      const jobId = launchMcpBackgroundJob("prd_create", description.substring(0, 100), async () => {
+        const generated = await generatePRD(description, projectName);
+        if (!generated) throw new Error("PRD generation failed (Claude CLI may be unavailable)");
 
-      const prd = await savePRD(supabase, generated, {
-        project: projectName,
-        tags,
-        requested_by,
+        const prd = await savePRD(supabase, generated, {
+          project: projectName,
+          tags,
+          requested_by,
+        });
+        if (!prd) throw new Error("Failed to save PRD in Supabase");
+
+        return `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`;
       });
 
-      if (!prd) {
-        return { content: [{ type: "text" as const, text: "Error: failed to save PRD in Supabase" }] };
-      }
-
-      await enqueueMcpNotification({
-        type: "task",
-        severity: "normal",
-        message: `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`,
-        data: { taskId: prd.id },
-      });
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+      return { content: [{ type: "text" as const, text: `Job lance (id: ${jobId}). PRD en cours de generation, tu recevras une notification Telegram quand ce sera fini.` }] };
     } catch (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
     }
@@ -952,7 +980,7 @@ server.tool(
   },
   async ({ task_id, pipeline, use_blackboard, auto_pipeline, resume_session_id }) => {
     try {
-      // Resolve task by ID or prefix
+      // Resolve task by ID or prefix (fast, before launching background job)
       let resolvedTask: any = null;
       if (task_id.length < 36) {
         const tasks = await getBacklog(supabase);
@@ -968,85 +996,41 @@ server.tool(
         return { content: [{ type: "text" as const, text: `Error: no task found with ID '${task_id}'` }] };
       }
 
-      // Notify start
-      await enqueueMcpNotification({
-        type: "task",
-        severity: "normal",
-        message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
-        data: { taskId: resolvedTask.id },
-      });
-
-      // Build options
       const selectedPipeline = pipeline ? PIPELINE_MAP[pipeline] : undefined;
       const useAuto = auto_pipeline ?? (!pipeline);
 
-      const result = await orchestrate(supabase, resolvedTask, {
-        pipeline: selectedPipeline,
-        autoPipeline: useAuto,
-        stopOnFailure: true,
-        useBlackboard: use_blackboard ?? false,
-        resumeSessionId: resume_session_id,
-        onProgress: async (msg) => {
-          await enqueueMcpNotification({
-            type: "task",
-            severity: "normal",
-            message: msg,
-            data: { taskId: resolvedTask.id },
-          });
-        },
+      const jobId = launchMcpBackgroundJob("orchestrate", resolvedTask.title.substring(0, 80), async () => {
+        await enqueueMcpNotification({
+          type: "task",
+          severity: "normal",
+          message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
+          data: { taskId: resolvedTask.id },
+        });
+
+        const result = await orchestrate(supabase, resolvedTask, {
+          pipeline: selectedPipeline,
+          autoPipeline: useAuto,
+          stopOnFailure: true,
+          useBlackboard: use_blackboard ?? false,
+          resumeSessionId: resume_session_id,
+          onProgress: async (msg) => {
+            await enqueueMcpNotification({
+              type: "task",
+              severity: "normal",
+              message: msg,
+              data: { taskId: resolvedTask.id },
+            });
+          },
+        });
+
+        const formatted = formatOrchestrationResult(result);
+        return formatted;
       });
 
-      // Send formatted result to Telegram
-      const formatted = formatOrchestrationResult(result);
-      await enqueueMcpNotification({
-        type: "task",
-        severity: result.success ? "normal" : "critical",
-        message: formatted,
-        data: { taskId: resolvedTask.id },
-      });
-
-      // Return structured result to MCP client
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            success: result.success,
-            taskId: resolvedTask.id,
-            taskTitle: resolvedTask.title,
-            pipeline: result.steps.map(s => s.agentId),
-            totalDurationMs: result.totalDurationMs,
-            totalCostUsd: result.steps.reduce((sum, s) => sum + (s.costUsd || 0), 0),
-            steps: result.steps.map(s => ({
-              agent: s.agentId,
-              name: s.agentName,
-              success: s.success,
-              durationMs: s.durationMs,
-              costUsd: s.costUsd,
-              error: s.error,
-            })),
-            summary: result.summary,
-            blackboard: result.blackboard ? {
-              sessionId: result.blackboard.sessionId,
-              gateCount: result.blackboard.gateEvaluations.length,
-              gates: result.blackboard.gateEvaluations.map(g => ({
-                gate: g.gate_name,
-                pass: g.pass,
-                score: g.score,
-              })),
-            } : undefined,
-          }, null, 2),
-        }],
-      };
+      return { content: [{ type: "text" as const, text: `Job lance (id: ${jobId}). Pipeline "${pipeline || "auto"}" en cours pour "${resolvedTask.title}", tu recevras des notifications de progression sur Telegram.` }] };
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      const errStack = error instanceof Error ? error.stack : undefined;
-      console.error(`[orchestrate_task] Pipeline error:`, errMsg, errStack);
-      await enqueueMcpNotification({
-        type: "alert",
-        severity: "critical",
-        message: `Pipeline echoue via MCP: ${errMsg}`,
-      }).catch(() => {});
-      return { content: [{ type: "text" as const, text: `Error: ${errMsg}${errStack ? `\nStack: ${errStack.substring(0, 500)}` : ""}` }] };
+      return { content: [{ type: "text" as const, text: `Error: ${errMsg}` }] };
     }
   }
 );

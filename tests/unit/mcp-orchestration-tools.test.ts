@@ -443,13 +443,13 @@ describe("MCP Orchestration Tools — orchestrate_task", () => {
     expect(serverCode).toContain("const useAuto = auto_pipeline ?? (!pipeline)");
   });
 
-  it("returns structured result with step details", () => {
-    expect(serverCode).toContain("totalDurationMs: result.totalDurationMs");
-    expect(serverCode).toContain("steps: result.steps.map");
+  it("returns immediately with job ID (async execution)", () => {
+    expect(serverCode).toContain("launchMcpBackgroundJob");
+    expect(serverCode).toContain("Job lance (id:");
   });
 
-  it("handles errors with critical notification", () => {
-    expect(serverCode).toContain("Pipeline echoue via MCP");
+  it("handles errors via background job notification", () => {
+    expect(serverCode).toContain("launchMcpBackgroundJob");
     expect(serverCode).toContain('severity: "critical"');
   });
 
