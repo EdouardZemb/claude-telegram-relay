@@ -364,11 +364,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             );
           }
 
+          const extractionFailed2 = (doc.metadata as Record<string, unknown>)?.extraction_failed === true;
           const resultText = [
             `Document enregistre [${doc.id.substring(0, 8)}]`,
             doc.title ? `Titre: ${doc.title}` : "",
             doc.description ? `Description: ${doc.description}` : "",
             doc.document_date ? `Date: ${doc.document_date}` : "",
+            extractionFailed2 ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
           ].filter(Boolean).join("\n");
 
           await ctx.reply(resultText, {
@@ -467,12 +469,14 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             );
           }
 
+          const extractionFailed = (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
           const resultText = [
             `Document enregistre [${createdDoc.id.substring(0, 8)}]`,
             createdDoc.title ? `Titre: ${createdDoc.title}` : "",
             createdDoc.description ? `Description: ${createdDoc.description}` : "",
             createdDoc.document_date ? `Date: ${createdDoc.document_date}` : "",
             `Type: ${mimeType}`,
+            extractionFailed ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
           ].filter(Boolean).join("\n");
 
           await ctx.reply(resultText, {

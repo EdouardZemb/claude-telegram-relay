@@ -263,36 +263,58 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       }
 
       // Build category grid (2 per row)
+      // Use 8-char short IDs to stay within Telegram's 64-byte callback_data limit
+      const shortDocId = docId.substring(0, 8);
       const keyboard = new InlineKeyboard();
       for (let i = 0; i < categories.length; i++) {
-        keyboard.text(categories[i].name, `doc_setcat:${docId}:${categories[i].id}`);
+        const shortCatId = categories[i].id.substring(0, 8);
+        keyboard.text(categories[i].name, `dsc:${shortDocId}:${shortCatId}`);
         if (i % 2 === 1 && i < categories.length - 1) keyboard.row();
       }
       // "Autre" always on a new row
-      keyboard.row().text("Autre", `doc_newcat:${docId}`);
+      keyboard.row().text("Autre", `doc_newcat:${shortDocId}`);
 
       await ctx.answerCallbackQuery();
       await ctx.editMessageText("Choisir une categorie:", { reply_markup: keyboard });
       return;
     }
 
-    // ── doc_setcat:<docId>:<categoryId> — apply category ────
-    if (data.startsWith("doc_setcat:")) {
+    // ── dsc:<shortDocId>:<shortCatId> — apply category (short IDs) ────
+    if (data.startsWith("dsc:")) {
       const parts = data.split(":");
-      const docId = parts[1];
-      const categoryId = parts[2];
-      if (!docId || !categoryId) {
+      const shortDocId = parts[1];
+      const shortCatId = parts[2];
+      if (!shortDocId || !shortCatId) {
         await ctx.answerCallbackQuery({ text: "Donnees manquantes." });
+        return;
+      }
+
+      // Resolve full IDs from short prefixes
+      const { data: docRow } = await bctx.supabase
+        .from("documents")
+        .select("id")
+        .like("id", `${shortDocId}%`)
+        .limit(1)
+        .single();
+      const { data: catRow } = await bctx.supabase
+        .from("document_categories")
+        .select("id, name")
+        .like("id", `${shortCatId}%`)
+        .limit(1)
+        .single();
+
+      if (!docRow || !catRow) {
+        await ctx.answerCallbackQuery({ text: "Document ou categorie introuvable." });
         return;
       }
 
       const { error } = await bctx.supabase
         .from("documents")
-        .update({ category_id: categoryId })
-        .eq("id", docId);
+        .update({ category_id: catRow.id })
+        .eq("id", docRow.id);
 
       if (error) {
-        console.error("doc_setcat error:", error);
+        console.error("dsc error:", error);
         await ctx.answerCallbackQuery({ text: "Erreur lors de la mise a jour." });
         return;
       }
@@ -301,14 +323,10 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       const chatId = ctx.callbackQuery.message?.chat.id;
       if (chatId) pendingClassifications.delete(chatId);
 
-      // Get category name for display
-      const categories = await getCategories(bctx.supabase);
-      const cat = categories.find((c) => c.id === categoryId);
-
       await ctx.answerCallbackQuery({ text: "Categorie mise a jour !" });
-      const doc = await getDocumentById(bctx.supabase, docId);
+      const doc = await getDocumentById(bctx.supabase, docRow.id);
       await ctx.editMessageText(
-        `Document: ${doc?.title || "Sans titre"} [${docId.substring(0, 8)}]\nCategorie: ${cat?.name || "inconnue"}\nClassification confirmee.`,
+        `Document: ${doc?.title || "Sans titre"} [${shortDocId}]\nCategorie: ${catRow.name}\nClassification confirmee.`,
       );
       return;
     }

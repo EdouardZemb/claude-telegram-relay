@@ -124,7 +124,7 @@ export async function extractTextFromImage(
   try {
     await writeFile(tmpPath, buffer);
     const result = await callClaudeCLI(
-      `Read the file at ${tmpPath} and extract ALL text visible in it. Return ONLY the raw extracted text, no commentary. If there is no text, return an empty string.`,
+      `Read the file at ${tmpPath} and extract ALL text visible in it. If the document contains tables, preserve the tabular structure using aligned columns or a simple delimiter (pipe | or tab). Extract every row and column — do not summarize or skip repeated rows. Return ONLY the raw extracted text, no commentary. If there is no text, return an empty string.`,
     );
     return result;
   } finally {
@@ -133,22 +133,89 @@ export async function extractTextFromImage(
 }
 
 /**
- * Extract text from a PDF using pdf-parse, with Vision fallback if empty.
+ * Convert PDF pages to PNG images using pdftoppm, then extract text
+ * from each page using Claude Vision. Much more reliable for tables.
  */
 export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  // First try pdf-parse for simple text PDFs (fast path)
   try {
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse(new Uint8Array(buffer));
     await parser.load();
     const result = await parser.getText();
     const text = (typeof result === "string" ? result : result?.text ?? "").trim();
-    if (text.length > 0) return text;
+    if (text.length > 50) {
+      // Check that text has a reasonable ratio of alphanumeric chars (not garbled binary)
+      const alnumCount = (text.substring(0, 500).match(/[\p{L}\p{N}]/gu) || []).length;
+      const ratio = alnumCount / Math.min(text.length, 500);
+      if (ratio > 0.3) {
+        console.log(`pdf-parse OK: ${text.length} chars, alnum ratio ${ratio.toFixed(2)}`);
+        return text;
+      }
+      console.log(`pdf-parse rejected: alnum ratio too low (${ratio.toFixed(2)}), using Vision`);
+    } else {
+      console.log(`pdf-parse too short (${text.length} chars), using Vision`);
+    }
   } catch (e) {
-    console.error("pdf-parse error, falling back to Vision:", e);
+    console.error("pdf-parse failed, using Vision pipeline:", e);
   }
 
-  // Fallback: Vision on first page (convert PDF buffer to image-like for Vision)
-  return extractTextFromImage(buffer, "application/pdf");
+  // Vision fallback: convert PDF to PNG images via pdftoppm, then extract via Claude Vision
+  console.log("Starting pdftoppm + Vision extraction for PDF...");
+  const tmpPdf = join(tmpdir(), `doc-pdf-${Date.now()}.pdf`);
+  const tmpPrefix = join(tmpdir(), `doc-page-${Date.now()}`);
+
+  try {
+    await writeFile(tmpPdf, buffer);
+
+    // Convert PDF pages to PNG at 300 DPI (max 10 pages)
+    const proc = Bun.spawn(
+      ["pdftoppm", "-png", "-r", "300", "-l", "10", tmpPdf, tmpPrefix],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    await proc.exited;
+
+    // Find generated page images
+    const { readdir } = await import("fs/promises");
+    const dir = tmpdir();
+    const prefix = `doc-page-${tmpPrefix.split("doc-page-")[1]}`;
+    const allFiles = await readdir(dir);
+    const pageFiles = allFiles
+      .filter((f) => f.startsWith(prefix.split("/").pop()!) && f.endsWith(".png"))
+      .sort();
+
+    if (pageFiles.length === 0) {
+      console.log("pdftoppm produced no pages, falling back to direct PDF read");
+      return extractTextFromImage(buffer, "application/pdf");
+    }
+
+    console.log(`pdftoppm produced ${pageFiles.length} page(s)`);
+
+    // Extract text from each page image via Claude Vision
+    const pageTexts: string[] = [];
+    for (const pageFile of pageFiles) {
+      const pagePath = join(dir, pageFile);
+      try {
+        const text = await callClaudeCLI(
+          `Read the file at ${pagePath} and extract ALL text visible in it. If the document contains tables, preserve the tabular structure using aligned columns or a simple delimiter (pipe | or tab). Extract every row and column — do not summarize or skip repeated rows. Return ONLY the raw extracted text, no commentary. If there is no text, return an empty string.`,
+        );
+        if (text) pageTexts.push(text);
+      } finally {
+        await unlink(pagePath).catch(() => {});
+      }
+    }
+
+    const combined = pageTexts.join("\n\n--- Page suivante ---\n\n").trim();
+    if (combined.length > 0) {
+      console.log(`Vision extraction OK: ${combined.length} chars from ${pageFiles.length} page(s)`);
+      return combined;
+    }
+
+    console.log("Vision extraction returned empty, falling back to direct PDF read");
+    return extractTextFromImage(buffer, "application/pdf");
+  } finally {
+    await unlink(tmpPdf).catch(() => {});
+  }
 }
 
 /**
@@ -315,7 +382,17 @@ export async function createDocument(
   input: DocumentCreateInput,
 ): Promise<Document> {
   // 1. Extract text
-  const extractedText = await extractText(input.buffer, input.fileType);
+  let extractedText = "";
+  let extractionFailed = false;
+  try {
+    extractedText = await extractText(input.buffer, input.fileType);
+    if (!extractedText || extractedText.length === 0) {
+      extractionFailed = true;
+    }
+  } catch (e) {
+    console.error("Text extraction failed:", e);
+    extractionFailed = true;
+  }
 
   // 2. Classify
   const categories = await getCategories(supabase);
@@ -360,6 +437,7 @@ export async function createDocument(
       original_filename: input.filePath.split("/").pop(),
       classification_confidence: classification?.confidence || null,
       is_new_category: classification?.is_new_category || false,
+      extraction_failed: extractionFailed,
     },
   };
 
