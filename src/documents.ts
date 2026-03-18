@@ -65,6 +65,7 @@ export interface DocumentSearchResult {
   category_id: string | null;
   created_at: string;
   similarity: number;
+  file_path: string | null;
 }
 
 export interface ListDocumentsOptions {
@@ -613,4 +614,37 @@ export async function getDocumentStats(
     .sort((a, b) => b.count - a.count);
 
   return { total: docs.length, byCategory };
+}
+
+/**
+ * Generate signed download URLs for a list of file paths.
+ * Returns a map from file_path to signed URL. Expired after 1 hour.
+ */
+export async function createSignedUrls(
+  supabase: SupabaseClient,
+  filePaths: string[],
+  expiresIn = 3600,
+): Promise<Map<string, string>> {
+  const urlMap = new Map<string, string>();
+  if (filePaths.length === 0) return urlMap;
+
+  try {
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrls(filePaths, expiresIn);
+
+    if (error) {
+      console.error("createSignedUrls error:", error);
+      return urlMap;
+    }
+
+    for (const item of data || []) {
+      if (item.signedUrl && item.path) {
+        urlMap.set(item.path, item.signedUrl);
+      }
+    }
+  } catch (e) {
+    console.error("createSignedUrls exception:", e);
+  }
+  return urlMap;
 }

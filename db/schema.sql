@@ -607,7 +607,7 @@ EXCEPTION WHEN OTHERS THEN
   RAISE WARNING 'link_memory error: %', SQLERRM;
   RETURN v_links_created;
 END;
-$$ LANGUAGE plpgsql SET search_path = '';
+$$ LANGUAGE plpgsql SET search_path = 'public';
 
 -- auto_link_memory() trigger: fires when embedding transitions NULL → non-NULL
 CREATE OR REPLACE FUNCTION auto_link_memory()
@@ -932,7 +932,7 @@ BEGIN
   ORDER BY m.embedding <=> query_embedding
   LIMIT match_count;
 END;
-$$ LANGUAGE plpgsql SET search_path = '';
+$$ LANGUAGE plpgsql SET search_path = 'public';
 
 -- Match memory entries by embedding similarity
 CREATE OR REPLACE FUNCTION match_memory(
@@ -961,7 +961,7 @@ BEGIN
   ORDER BY m.embedding <=> query_embedding
   LIMIT match_count;
 END;
-$$ LANGUAGE plpgsql SET search_path = '';
+$$ LANGUAGE plpgsql SET search_path = 'public';
 
 -- Match documents by embedding similarity (S45)
 CREATE OR REPLACE FUNCTION match_documents(
@@ -978,7 +978,8 @@ RETURNS TABLE (
   document_date DATE,
   category_id UUID,
   created_at TIMESTAMPTZ,
-  similarity FLOAT
+  similarity FLOAT,
+  file_path TEXT
 ) AS $$
 BEGIN
   RETURN QUERY
@@ -990,7 +991,8 @@ BEGIN
     d.document_date,
     d.category_id,
     d.created_at,
-    1 - (d.embedding <=> query_embedding) AS similarity
+    1 - (d.embedding <=> query_embedding) AS similarity,
+    d.file_path
   FROM public.documents d
   WHERE d.embedding IS NOT NULL
     AND 1 - (d.embedding <=> query_embedding) > match_threshold
@@ -998,7 +1000,7 @@ BEGIN
   ORDER BY d.embedding <=> query_embedding
   LIMIT match_count;
 END;
-$$ LANGUAGE plpgsql SET search_path = '';
+$$ LANGUAGE plpgsql SET search_path = 'public';
 
 -- ============================================================
 -- MEMORY ARCHIVE RPC

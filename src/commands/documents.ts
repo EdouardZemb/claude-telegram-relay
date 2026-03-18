@@ -16,6 +16,7 @@ import {
   searchDocuments,
   getDocumentStats,
   getCategories,
+  createSignedUrls,
 } from "../documents.ts";
 import type { Document, DocumentCategory } from "../documents.ts";
 
@@ -99,7 +100,14 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         return;
       }
 
-      const lines = docs.map((d, i) => formatDocumentLine(d, i));
+      const filePaths = docs.map((d) => d.file_path).filter(Boolean);
+      const urlMap = await createSignedUrls(bctx.supabase, filePaths);
+
+      const lines = docs.map((d, i) => {
+        const line = formatDocumentLine(d, i);
+        const url = urlMap.get(d.file_path);
+        return url ? `${line}\n  ${url}` : line;
+      });
       await bctx.sendResponse(ctx, `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search <query> pour chercher.`);
       return;
     }
@@ -118,12 +126,18 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         return;
       }
 
-      const lines = results.slice(0, 10).map((r, i) => {
+      const top = results.slice(0, 10);
+      const filePaths = top.map((r) => r.file_path).filter((p): p is string => !!p);
+      const urlMap = await createSignedUrls(bctx.supabase, filePaths);
+
+      const lines = top.map((r, i) => {
         const title = r.title || "Sans titre";
         const id = r.id.substring(0, 8);
         const score = Math.round(r.similarity * 100);
         const desc = r.description ? ` — ${r.description.substring(0, 60)}` : "";
-        return `${i + 1}. ${title} [${id}] (${score}%)${desc}`;
+        const line = `${i + 1}. ${title} [${id}] (${score}%)${desc}`;
+        const url = r.file_path ? urlMap.get(r.file_path) : undefined;
+        return url ? `${line}\n  ${url}` : line;
       });
       await bctx.sendResponse(ctx, `RESULTATS POUR "${arg}" (${results.length})\n\n${lines.join("\n")}`);
       return;
@@ -198,7 +212,13 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         await ctx.reply(`Aucun document trouve avec l'ID "${subcommand}".`, bctx.threadOpts(ctx));
         return;
       }
-      await bctx.sendResponse(ctx, formatDocumentDetail(doc));
+      let detail = formatDocumentDetail(doc);
+      if (doc.file_path) {
+        const urlMap = await createSignedUrls(bctx.supabase, [doc.file_path]);
+        const url = urlMap.get(doc.file_path);
+        if (url) detail += `\n\nTelecharger: ${url}`;
+      }
+      await bctx.sendResponse(ctx, detail);
       return;
     }
 

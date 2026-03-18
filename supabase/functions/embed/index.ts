@@ -16,8 +16,8 @@ Deno.serve(async (req) => {
   try {
     const { record, table } = await req.json();
 
-    // Trigger always sends text as 'content' (normalized from extracted_text for documents)
-    const text = record?.content;
+    // Webhook sends raw row: 'content' for messages/memory, 'extracted_text' for documents
+    const text = record?.content || record?.extracted_text;
 
     if (!text || !record?.id) {
       return new Response("Missing record data", { status: 400 });

@@ -112,6 +112,7 @@ import {
   deleteDocument,
   searchDocuments,
   getDocumentStats,
+  createSignedUrls,
   type DocumentCategory,
   type Document,
   type DocumentCreateInput,
@@ -1428,6 +1429,133 @@ describe("getDocumentStats", () => {
   });
 });
 
+// ── createSignedUrls ─────────────────────────────────────────
+
+describe("createSignedUrls", () => {
+  it("returns URL map for valid file paths", async () => {
+    const signedData = [
+      { path: "user/123.pdf", signedUrl: "https://storage.example.com/signed/123.pdf" },
+      { path: "user/456.jpg", signedUrl: "https://storage.example.com/signed/456.jpg" },
+    ];
+
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => Promise.resolve({ data: signedData, error: null })),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, ["user/123.pdf", "user/456.jpg"]);
+
+    expect(result.size).toBe(2);
+    expect(result.get("user/123.pdf")).toBe("https://storage.example.com/signed/123.pdf");
+    expect(result.get("user/456.jpg")).toBe("https://storage.example.com/signed/456.jpg");
+  });
+
+  it("returns empty map for empty file paths array", async () => {
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => Promise.resolve({ data: [], error: null })),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, []);
+    expect(result.size).toBe(0);
+  });
+
+  it("returns empty map on Supabase error", async () => {
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => Promise.resolve({ data: null, error: { message: "bucket not found" } })),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, ["user/123.pdf"]);
+    expect(result.size).toBe(0);
+  });
+
+  it("returns empty map on exception", async () => {
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => { throw new Error("network error"); }),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, ["user/123.pdf"]);
+    expect(result.size).toBe(0);
+  });
+
+  it("skips items with missing signedUrl or path", async () => {
+    const signedData = [
+      { path: "user/123.pdf", signedUrl: "https://storage.example.com/signed/123.pdf" },
+      { path: null, signedUrl: "https://storage.example.com/signed/no-path" },
+      { path: "user/456.jpg", signedUrl: null },
+    ];
+
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => Promise.resolve({ data: signedData, error: null })),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, ["user/123.pdf", "user/456.jpg"]);
+    expect(result.size).toBe(1);
+    expect(result.get("user/123.pdf")).toBe("https://storage.example.com/signed/123.pdf");
+  });
+
+  it("passes custom expiresIn to Supabase", async () => {
+    const createSignedUrlsMock = mock(() => Promise.resolve({ data: [], error: null }));
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: createSignedUrlsMock,
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    await createSignedUrls(supabase, ["user/123.pdf"], 7200);
+
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(["user/123.pdf"], 7200);
+  });
+
+  it("uses default expiresIn of 3600 seconds", async () => {
+    const createSignedUrlsMock = mock(() => Promise.resolve({ data: [], error: null }));
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: createSignedUrlsMock,
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    await createSignedUrls(supabase, ["user/123.pdf"]);
+
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(["user/123.pdf"], 3600);
+  });
+
+  it("handles null data response", async () => {
+    const supabase = {
+      storage: {
+        from: mock(() => ({
+          createSignedUrls: mock(() => Promise.resolve({ data: null, error: null })),
+        })),
+      },
+    } as unknown as SupabaseClient;
+
+    const result = await createSignedUrls(supabase, ["user/123.pdf"]);
+    expect(result.size).toBe(0);
+  });
+});
+
 // ── Type exports ─────────────────────────────────────────────
 
 describe("type exports", () => {
@@ -1451,6 +1579,7 @@ describe("type exports", () => {
     const searchResult: DocumentSearchResult = {
       id: "1", title: null, extracted_text: null, description: null,
       document_date: null, category_id: null, created_at: "", similarity: 0.9,
+      file_path: null,
     };
     const opts: ListDocumentsOptions = { categoryId: "c", limit: 10, offset: 0 };
 
@@ -1479,5 +1608,6 @@ describe("function exports", () => {
     expect(typeof deleteDocument).toBe("function");
     expect(typeof searchDocuments).toBe("function");
     expect(typeof getDocumentStats).toBe("function");
+    expect(typeof createSignedUrls).toBe("function");
   });
 });
