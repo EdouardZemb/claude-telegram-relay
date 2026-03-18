@@ -245,6 +245,37 @@ describe("intent-detection", () => {
       expect(result.detected).not.toBeNull();
       expect(result.detected!.command).not.toBe("docs");
     });
+
+    // ── Job status intent patterns (S46) ──
+    it("detects jobs intent from 'jobs'", () => {
+      const result = detectIntent("montre les jobs");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("jobs");
+    });
+
+    it("detects jobs intent from 'ou en est'", () => {
+      const result = detectIntent("ou en est le job ?");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("jobs");
+    });
+
+    it("detects jobs intent from 'c'est fini'", () => {
+      const result = detectIntent("c'est fini ?");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("jobs");
+    });
+
+    it("detects jobs intent from 'qu'est-ce qui tourne'", () => {
+      const result = detectIntent("qu'est-ce qui tourne ?");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("jobs");
+    });
+
+    it("detects jobs intent from 'statut des jobs'", () => {
+      const result = detectIntent("statut des jobs");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("jobs");
+    });
   });
 
   describe("detectIntentWithLLM", () => {

@@ -13,6 +13,7 @@ import { estimateSprintCost, formatCostEstimate } from "../cost-estimate.ts";
 import { overrideGate } from "../gates.ts";
 import { updateTaskStatus, getCurrentSprint, getSprintSummary, formatSprintSummary } from "../tasks.ts";
 import { getIdea, promoteIdea, archiveIdea } from "../memory.ts";
+import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
 
 export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -160,9 +161,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
 
     const reason = ctx.match?.trim() || "rollback manuel via Telegram";
 
-    await ctx.reply("Rollback en cours...", bctx.threadOpts(ctx));
-
-    try {
+    const rollbackFn = async (): Promise<string> => {
       const { spawn } = await import("bun");
       const proc = spawn(["bash", "./scripts/rollback.sh", reason], {
         cwd: process.cwd(),
@@ -174,13 +173,24 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
       const exitCode = await proc.exited;
 
       if (exitCode === 0) {
-        await ctx.reply(`Rollback termine avec succes.\n\n${stdout.trim().slice(-500)}`, bctx.threadOpts(ctx));
-      } else {
-        await ctx.reply(`Rollback echoue (exit ${exitCode}).\n\n${stdout.trim().slice(-500)}`, bctx.threadOpts(ctx));
+        return `Rollback termine avec succes.\n\n${stdout.trim().slice(-500)}`;
       }
-    } catch (error) {
-      console.error("Rollback error:", error);
-      await ctx.reply("Erreur lors du rollback.", bctx.threadOpts(ctx));
+      throw new Error(`Rollback echoue (exit ${exitCode}).\n\n${stdout.trim().slice(-500)}`);
+    };
+
+    if (isJobManagerEnabled()) {
+      const chatId = ctx.chat?.id || 0;
+      const jobId = await launchJob("rollback", chatId, rollbackFn);
+      await ctx.reply(`Job lance rollback (id: ${jobId})`, bctx.threadOpts(ctx));
+    } else {
+      await ctx.reply("Rollback en cours...", bctx.threadOpts(ctx));
+      try {
+        const resultMsg = await rollbackFn();
+        await ctx.reply(resultMsg, bctx.threadOpts(ctx));
+      } catch (error: any) {
+        console.error("Rollback error:", error);
+        await ctx.reply(error.message || "Erreur lors du rollback.", bctx.threadOpts(ctx));
+      }
     }
   });
 

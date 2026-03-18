@@ -32,6 +32,8 @@ export interface ActionDefinition {
   requiresSupabase: boolean;
   /** Natural language aliases (French) for intent detection */
   aliases: string[];
+  /** Whether this command can run as a background job (S46) */
+  backgroundEligible?: boolean;
 }
 
 // ── Registry ─────────────────────────────────────────────────
@@ -151,6 +153,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "execution",
     requiresSupabase: true,
     aliases: ["executer tache", "lancer agent", "implementer"],
+    backgroundEligible: true,
   },
   {
     command: "orchestrate",
@@ -164,6 +167,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "execution",
     requiresSupabase: true,
     aliases: ["orchestrer", "pipeline multi-agents", "lancer pipeline"],
+    backgroundEligible: true,
   },
   {
     command: "autopipeline",
@@ -177,6 +181,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "execution",
     requiresSupabase: true,
     aliases: ["auto pipeline", "pipeline automatique", "lancer tout"],
+    backgroundEligible: true,
   },
 
   // ─── exploration.ts ───
@@ -189,6 +194,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "exploration",
     requiresSupabase: true,
     aliases: ["explorer", "investiguer", "analyser codebase", "comment fonctionne", "impact de", "regarder", "rechercher", "comparer", "benchmark", "state of the art", "etat de l'art", "alternative"],
+    backgroundEligible: true,
   },
 
   // ─── documents.ts ───
@@ -216,6 +222,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "planning",
     requiresSupabase: true,
     aliases: ["planifier", "decomposer", "decouper en taches"],
+    backgroundEligible: true,
   },
   {
     command: "prd",
@@ -226,6 +233,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "planning",
     requiresSupabase: true,
     aliases: ["prd", "product requirement", "specification"],
+    backgroundEligible: true,
   },
   {
     command: "planify",
@@ -236,6 +244,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "planning",
     requiresSupabase: true,
     aliases: ["analyser backlog", "recommandations", "reordonner"],
+    backgroundEligible: true,
   },
 
   // ─── memory-cmds.ts ───
@@ -296,6 +305,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "quality",
     requiresSupabase: true,
     aliases: ["retrospective", "retro", "bilan sprint", "retour d'experience"],
+    backgroundEligible: true,
   },
   {
     command: "patterns",
@@ -378,6 +388,21 @@ const ACTIONS: ActionDefinition[] = [
     aliases: ["projet", "changer projet", "creer projet"],
   },
 
+  // ─── jobs.ts ───
+  {
+    command: "jobs",
+    description: "Voir les jobs en cours et recents",
+    usage: "/jobs [cancel <id>]",
+    params: [
+      { name: "subcommand", required: false, description: "cancel" },
+      { name: "jobId", required: false, description: "ID du job" },
+    ],
+    risk: "low",
+    module: "jobs",
+    requiresSupabase: false,
+    aliases: ["jobs", "travaux en cours", "qu'est-ce qui tourne", "statut jobs"],
+  },
+
   // ─── utilities.ts ───
   {
     command: "speak",
@@ -434,6 +459,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "utilities",
     requiresSupabase: false,
     aliases: ["rollback", "revenir en arriere", "annuler deploy"],
+    backgroundEligible: true,
   },
 ];
 

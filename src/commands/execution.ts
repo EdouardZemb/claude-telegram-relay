@@ -26,6 +26,7 @@ import { buildTaskContext } from "../document-sharding.ts";
 import { enqueue } from "../notification-queue.ts";
 import { findLatestPipelineRun } from "../pipeline-state.ts";
 import { getSession, buildConversationContext, hasActiveSession } from "../conversation-session.ts";
+import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
 
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -105,98 +106,101 @@ export default function execution(bctx: BotContext): Composer<Context> {
       }
     }
 
-    await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, bctx.threadOpts(ctx));
-
-    // Workflow tracking
-    const tracker = new WorkflowTracker(bctx.supabase, {
-      taskId: task.id,
-      sprintId: task.sprint || undefined,
-      startStep: "request",
-    });
-
-    // Log transition: request -> execution
-    await tracker.transition("execution", { agent_notes: `Exec lance pour: ${task.title}` });
-
-    // Periodic heartbeat so user knows the agent is still running
-    let heartbeatCount = 0;
-    const heartbeat = setInterval(async () => {
-      heartbeatCount++;
-      const elapsed = heartbeatCount * 2;
-      try {
-        await ctx.reply(`Agent en cours... (${elapsed} min)`, bctx.threadOpts(ctx));
-      } catch {}
-    }, 120_000); // Every 2 minutes
-
-    const result = await executeTask(bctx.supabase, task, async (msg) => {
-      await ctx.reply(msg, bctx.threadOpts(ctx));
-    });
-
-    clearInterval(heartbeat);
-
-    if (result.success) {
-      // Log transition: execution -> review
-      await tracker.transition("review", {
-        checkpoint_result: "pass",
-        agent_notes: `Agent termine avec succes`,
+    // ── Background job wrapper (S46) ────────────────────────────
+    const execFn = async (progressFn: (msg: string) => Promise<void>): Promise<string> => {
+      const tracker = new WorkflowTracker(bctx.supabase!, {
+        taskId: task.id,
+        sprintId: task.sprint || undefined,
+        startStep: "request",
       });
+      await tracker.transition("execution", { agent_notes: `Exec lance pour: ${task.title}` });
 
-      const duration = Math.round(result.durationMs / 1000);
-      const summary = result.output.length > 3000
-        ? result.output.substring(result.output.length - 3000)
-        : result.output;
-      const prLine = result.prUrl ? `\n\nPR: ${result.prUrl}` : "";
-      const ciLine = result.ciPassed === false
-        ? `\n\nCI echouee: ${result.ciDetails || "voir la PR"}\nTache en statut "review" — a corriger avant merge.`
-        : result.ciPassed === true
-        ? "\n\nCI OK"
-        : "";
-      await bctx.sendResponse(ctx, `Tache terminee en ${duration}s: ${task.title}${prLine}${ciLine}\n\n${summary}`);
+      const result = await executeTask(bctx.supabase!, task, progressFn);
 
-      // Log transition: review -> closure (if CI passed)
-      if (result.ciPassed !== false) {
-        await tracker.transition("closure", {
-          checkpoint_result: result.ciPassed ? "pass" : "skipped",
-          agent_notes: result.ciPassed ? "CI OK, tache cloturee" : "Pas de CI, tache cloturee",
+      if (result.success) {
+        await tracker.transition("review", {
+          checkpoint_result: "pass",
+          agent_notes: `Agent termine avec succes`,
         });
+
+        const duration = Math.round(result.durationMs / 1000);
+        const summary = result.output.length > 3000
+          ? result.output.substring(result.output.length - 3000)
+          : result.output;
+        const prLine = result.prUrl ? `\nPR: ${result.prUrl}` : "";
+        const ciLine = result.ciPassed === false
+          ? `\nCI echouee: ${result.ciDetails || "voir la PR"}`
+          : result.ciPassed === true ? "\nCI OK" : "";
+
+        if (result.ciPassed !== false) {
+          await tracker.transition("closure", {
+            checkpoint_result: result.ciPassed ? "pass" : "skipped",
+            agent_notes: result.ciPassed ? "CI OK, tache cloturee" : "Pas de CI, tache cloturee",
+          });
+        } else {
+          await tracker.logCheckpoint("fail", `CI echouee: ${result.ciDetails || "details dans la PR"}`);
+        }
+
+        if (result.prUrl) {
+          const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
+          const ts = new Date().toLocaleTimeString("fr-FR", {
+            hour: "2-digit", minute: "2-digit",
+            timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+          });
+          await enqueue({
+            type: "pr",
+            severity: "normal",
+            message: [`[${ts}] PR creee`, task.title, `Branche: ${branchName}`, result.prUrl].join("\n"),
+            data: { prUrl: result.prUrl },
+          });
+        }
+        if (result.ciPassed !== false) {
+          const ts = new Date().toLocaleTimeString("fr-FR", {
+            hour: "2-digit", minute: "2-digit",
+            timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+          });
+          await enqueue({
+            type: "task",
+            severity: "normal",
+            message: `[${ts}] Tache terminee: ${task.title} [${task.id.substring(0, 8)}]`,
+            data: { taskId: task.id, taskStatus: "done" },
+          });
+        }
+
+        await clearGateOverrides(bctx.supabase!, task.id);
+        return `Tache terminee en ${duration}s: ${task.title}${prLine}${ciLine}\n\n${summary}`;
       } else {
-        await tracker.logCheckpoint("fail", `CI echouee: ${result.ciDetails || "details dans la PR"}`);
+        await tracker.logCheckpoint("fail", result.error || "Execution echouee");
+        await clearGateOverrides(bctx.supabase!, task.id);
+        const errMsg = result.error || result.output || "Erreur inconnue";
+        throw new Error(`Echec: ${task.title}\n${errMsg.substring(0, 500)}`);
       }
+    };
 
-      // Proactive notifications to other topics
-      if (result.prUrl) {
-        const branchName = `feature/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 50)}`;
-        const ts = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
-          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
-        });
-        await enqueue({
-          type: "pr",
-          severity: "normal",
-          message: [`[${ts}] PR creee`, task.title, `Branche: ${branchName}`, result.prUrl].join("\n"),
-          data: { prUrl: result.prUrl },
-        });
-      }
-      if (result.ciPassed !== false) {
-        const ts = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
-          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
-        });
-        await enqueue({
-          type: "task",
-          severity: "normal",
-          message: `[${ts}] Tache terminee: ${task.title} [${task.id.substring(0, 8)}]`,
-          data: { taskId: task.id, taskStatus: "done" },
-        });
-      }
+    if (isJobManagerEnabled()) {
+      const chatId = ctx.chat?.id || 0;
+      const jobId = await launchJob("exec", chatId, () => execFn(async () => {}), { taskId: task.id });
+      await ctx.reply(`Job lance exec (id: ${jobId})\nTache: ${task.title}`, bctx.threadOpts(ctx));
     } else {
-      // Log failure
-      await tracker.logCheckpoint("fail", result.error || "Execution echouee");
-      const errMsg = result.error || result.output || "Erreur inconnue";
-      await bctx.sendResponse(ctx, `Echec de la tache: ${task.title}\n\nErreur:\n${errMsg.substring(0, 2000)}`);
-    }
+      await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, bctx.threadOpts(ctx));
 
-    // Clear gate overrides after execution
-    await clearGateOverrides(bctx.supabase, task.id);
+      let heartbeatCount = 0;
+      const heartbeat = setInterval(async () => {
+        heartbeatCount++;
+        try { await ctx.reply(`Agent en cours... (${heartbeatCount * 2} min)`, bctx.threadOpts(ctx)); } catch {}
+      }, 120_000);
+
+      try {
+        const resultMsg = await execFn(async (msg) => {
+          await ctx.reply(msg, bctx.threadOpts(ctx));
+        });
+        clearInterval(heartbeat);
+        await bctx.sendResponse(ctx, resultMsg);
+      } catch (error: any) {
+        clearInterval(heartbeat);
+        await bctx.sendResponse(ctx, error.message || "Erreur inconnue");
+      }
+    }
   });
 
   // /orchestrate — run a task through a multi-agent pipeline
@@ -302,13 +306,6 @@ export default function execution(bctx: BotContext): Composer<Context> {
       }
     }
 
-    const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
-    const resumeLabel = resumeSessionId ? `\nResume: ${resumeSessionId}` : "";
-    await ctx.reply(
-      `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
-      bctx.threadOpts(ctx)
-    );
-
     // S43: Inject conversation context if session is active
     let convCtx: string | undefined;
     const chatId = ctx.chat?.id || 0;
@@ -318,27 +315,46 @@ export default function execution(bctx: BotContext): Composer<Context> {
       convCtx = buildConversationContext(session);
     }
 
-    // Mark task as in_progress before orchestration
-    await updateTaskStatus(bctx.supabase, task.id, "in_progress");
+    const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
+    const resumeLabel = resumeSessionId ? `\nResume: ${resumeSessionId}` : "";
 
-    const result = await orchestrate(bctx.supabase, task, {
-      pipeline,
-      stopOnFailure: true,
-      useBlackboard,
-      resumeSessionId,
-      conversationContext: convCtx || undefined,
-      onProgress: async (msg) => {
+    // ── Background job wrapper (S46) ────────────────────────────
+    const orchestrateFn = async (progressFn: (msg: string) => Promise<void>): Promise<string> => {
+      await updateTaskStatus(bctx.supabase!, task.id, "in_progress");
+
+      const result = await orchestrate(bctx.supabase!, task, {
+        pipeline,
+        stopOnFailure: true,
+        useBlackboard,
+        resumeSessionId,
+        conversationContext: convCtx || undefined,
+        onProgress: progressFn,
+      });
+
+      if (result.success) {
+        await updateTaskStatus(bctx.supabase!, task.id, "done");
+      }
+
+      return formatOrchestrationResult(result);
+    };
+
+    if (isJobManagerEnabled()) {
+      const jobId = await launchJob("orchestrate", chatId, () => orchestrateFn(async () => {}), { taskId: task.id });
+      await ctx.reply(
+        `Job lance orchestrate (id: ${jobId})\nTache: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}`,
+        bctx.threadOpts(ctx)
+      );
+    } else {
+      await ctx.reply(
+        `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
+        bctx.threadOpts(ctx)
+      );
+
+      const resultMsg = await orchestrateFn(async (msg) => {
         await ctx.reply(msg, bctx.threadOpts(ctx));
-      },
-    });
-
-    // Update task status based on result
-    if (result.success) {
-      await updateTaskStatus(bctx.supabase, task.id, "done");
+      });
+      await bctx.sendResponse(ctx, resultMsg);
     }
-
-    const formatted = formatOrchestrationResult(result);
-    await bctx.sendResponse(ctx, formatted);
   });
 
   // /autopipeline — run a task through the full automated BMad pipeline
@@ -387,20 +403,33 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     const task = autoMatches[0];
 
-    await ctx.reply(
-      `AUTO-PIPELINE lance pour: ${task.title}\nMode: ${mode}\nLe pipeline tourne en autonomie. Notifications a chaque phase.`,
-      bctx.threadOpts(ctx)
-    );
+    // ── Background job wrapper (S46) ────────────────────────────
+    const autoPipelineFn = async (progressFn: (msg: string) => Promise<void>): Promise<string> => {
+      const result = await runAutoPipeline(bctx.supabase!, task, {
+        includeAnalysis: mode === "full",
+        onProgress: progressFn,
+      });
+      return formatPipelineResult(result);
+    };
 
-    const result = await runAutoPipeline(bctx.supabase, task, {
-      includeAnalysis: mode === "full",
-      onProgress: async (msg) => {
+    if (isJobManagerEnabled()) {
+      const chatId = ctx.chat?.id || 0;
+      const jobId = await launchJob("autopipeline", chatId, () => autoPipelineFn(async () => {}), { taskId: task.id });
+      await ctx.reply(
+        `Job lance autopipeline (id: ${jobId})\nTache: ${task.title}\nMode: ${mode}`,
+        bctx.threadOpts(ctx)
+      );
+    } else {
+      await ctx.reply(
+        `AUTO-PIPELINE lance pour: ${task.title}\nMode: ${mode}\nLe pipeline tourne en autonomie. Notifications a chaque phase.`,
+        bctx.threadOpts(ctx)
+      );
+
+      const resultMsg = await autoPipelineFn(async (msg) => {
         await ctx.reply(msg, bctx.threadOpts(ctx));
-      },
-    });
-
-    const formatted = formatPipelineResult(result);
-    await bctx.sendResponse(ctx, formatted);
+      });
+      await bctx.sendResponse(ctx, resultMsg);
+    }
   });
 
   return composer;
