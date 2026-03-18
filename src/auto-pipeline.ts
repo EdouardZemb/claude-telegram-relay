@@ -160,6 +160,11 @@ export async function runAutoPipeline(
     await progress("Gates OK.");
   }
 
+  // Mark task as in_progress after gates pass
+  if (supabase) {
+    await updateTaskStatus(supabase, task.id, "in_progress");
+  }
+
   // Phase 2: Story enrichment
   await progress("Phase 2/5: Generation du story file...");
   const story = buildStoryFile(task);

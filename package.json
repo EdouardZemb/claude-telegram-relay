@@ -28,6 +28,7 @@
     "dotenv": "^17.2.4",
     "grammy": "^1.21.1",
     "groq-sdk": "^0.8.0",
+    "pdf-parse": "^2.4.5",
     "yaml": "^2.8.2"
   },
   "devDependencies": {

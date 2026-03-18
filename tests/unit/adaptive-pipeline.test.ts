@@ -128,7 +128,6 @@ describe("Planner Agent (S44 T8)", () => {
     const planner = getAgent("planner");
     expect(planner!.effort).toBe("medium");
     expect(planner!.model).toBe("claude-sonnet-4-6");
-    expect(planner!.maxBudgetUsd).toBe(0.50);
   });
 
   it("has trust thresholds", () => {

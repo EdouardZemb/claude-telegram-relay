@@ -99,9 +99,9 @@ describe("/explore Agent Mapping", () => {
     expect(agent!.effort).toBe("low");
   });
 
-  it("explorer agent has $0.10 budget", () => {
+  it("explorer agent has no budget limit", () => {
     const agent = getAgent("explorer");
-    expect(agent!.maxBudgetUsd).toBe(0.10);
+    expect(agent!.maxBudgetUsd).toBeUndefined();
   });
 });
 

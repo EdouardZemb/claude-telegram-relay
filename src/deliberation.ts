@@ -72,7 +72,7 @@ export async function runDeliberation(
     prompt: reviewPrompt,
     effort: "low",
     model: reviewerAgent?.model || "sonnet",
-    maxBudgetUsd: 0.05,
+    // Budget limits removed
   });
 
   const reviewOutput = reviewResult.stdout.trim();

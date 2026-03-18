@@ -47,11 +47,9 @@ describe("BmadAgent CLI flags (T3)", () => {
     }
   });
 
-  it("all 6 agents have maxBudgetUsd defined", () => {
+  it("agents have no maxBudgetUsd (unlimited)", () => {
     for (const agent of getAgents()) {
-      expect(agent.maxBudgetUsd).toBeDefined();
-      expect(typeof agent.maxBudgetUsd).toBe("number");
-      expect(agent.maxBudgetUsd).toBeGreaterThan(0);
+      expect(agent.maxBudgetUsd).toBeUndefined();
     }
   });
 
@@ -59,42 +57,36 @@ describe("BmadAgent CLI flags (T3)", () => {
     const agent = getAgent("analyst")!;
     expect(agent.effort).toBe("medium");
     expect(agent.model).toBe("claude-sonnet-4-6");
-    expect(agent.maxBudgetUsd).toBe(0.50);
   });
 
   it("dev uses high effort and opus", () => {
     const agent = getAgent("dev")!;
     expect(agent.effort).toBe("high");
     expect(agent.model).toBe("claude-opus-4-6");
-    expect(agent.maxBudgetUsd).toBe(2.00);
   });
 
   it("sm uses low effort and haiku", () => {
     const agent = getAgent("sm")!;
     expect(agent.effort).toBe("low");
     expect(agent.model).toBe("claude-haiku-4-5");
-    expect(agent.maxBudgetUsd).toBe(0.25);
   });
 
   it("architect uses high effort and opus", () => {
     const agent = getAgent("architect")!;
     expect(agent.effort).toBe("high");
     expect(agent.model).toBe("claude-opus-4-6");
-    expect(agent.maxBudgetUsd).toBe(1.00);
   });
 
   it("qa uses high effort and sonnet", () => {
     const agent = getAgent("qa")!;
     expect(agent.effort).toBe("high");
     expect(agent.model).toBe("claude-sonnet-4-6");
-    expect(agent.maxBudgetUsd).toBe(1.00);
   });
 
   it("pm uses medium effort and sonnet", () => {
     const agent = getAgent("pm")!;
     expect(agent.effort).toBe("medium");
     expect(agent.model).toBe("claude-sonnet-4-6");
-    expect(agent.maxBudgetUsd).toBe(0.50);
   });
 });
 

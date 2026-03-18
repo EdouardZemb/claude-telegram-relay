@@ -171,6 +171,80 @@ describe("intent-detection", () => {
       expect(result.suggestion).toContain("/plan");
       expect(result.suggestion).toContain("migration database");
     });
+
+    // ── Document search intent patterns ──
+    it("detects document search from 'trouve mon'", () => {
+      const result = detectIntent("trouve mon contrat d'assurance");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+      expect(result.detected!.args).toContain("contrat");
+    });
+
+    it("detects document search from 'retrouve ma'", () => {
+      const result = detectIntent("retrouve ma facture EDF");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+      expect(result.detected!.args).toContain("facture");
+    });
+
+    it("detects document search from 'ou est'", () => {
+      const result = detectIntent("ou est ma facture de mars ?");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+      expect(result.detected!.args).toContain("facture");
+    });
+
+    it("detects document search from 'cherche une facture'", () => {
+      const result = detectIntent("cherche une facture de mars");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+    });
+
+    it("detects document search from 'montre-moi mes'", () => {
+      const result = detectIntent("montre-moi mes documents");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+    });
+
+    it("detects document search from 'j'ai un document de'", () => {
+      const result = detectIntent("j'ai un document de mars a retrouver");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+    });
+
+    it("detects document search from 'ma facture de'", () => {
+      const result = detectIntent("ma facture de janvier");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toContain("search");
+      expect(result.detected!.args).toContain("facture");
+    });
+
+    it("extracts search term for document intent", () => {
+      const result = detectIntent("trouve mes releves bancaires");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).toBe("docs");
+      expect(result.detected!.args).toBe("search releves bancaires");
+    });
+
+    it("document suggestion routes to /docs search", () => {
+      const result = detectIntent("ou est mon contrat");
+      expect(result.suggestion).toContain("/docs");
+      expect(result.suggestion).toContain("search");
+    });
+
+    it("does not match document intent for code exploration", () => {
+      // "cherche dans le code" should match explore, not docs
+      const result = detectIntent("cherche dans le code le bug");
+      expect(result.detected).not.toBeNull();
+      expect(result.detected!.command).not.toBe("docs");
+    });
   });
 
   describe("detectIntentWithLLM", () => {

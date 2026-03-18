@@ -189,18 +189,31 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
   // Always skip permissions for automation
   args.push("--dangerously-skip-permissions");
 
-  const proc = spawn(args, {
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: options.cwd || PROJECT_DIR,
-    env: { ...process.env },
-  });
+  // Log spawn command for debugging
+  const cmdSummary = args.slice(0, 3).join(" ") + (args.length > 3 ? ` ... (${args.length} args)` : "");
+  console.log(`[spawnClaude] Spawning: ${cmdSummary} | model=${options.model || "default"} | effort=${options.effort || "default"}`);
 
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
-  const exitCode = await proc.exited;
+  try {
+    const proc = spawn(args, {
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: options.cwd || PROJECT_DIR,
+      env: { ...process.env },
+    });
 
-  return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      console.error(`[spawnClaude] Exit code ${exitCode} | stderr: ${stderr.substring(0, 500)}`);
+    }
+
+    return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
+  } catch (error) {
+    console.error(`[spawnClaude] Spawn failed:`, error);
+    return { stdout: "", stderr: String(error), exitCode: 1 };
+  }
 }
 
 /**

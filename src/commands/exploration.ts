@@ -138,9 +138,8 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
 
     const jsonSchema = getJsonSchemaForRole("explorer");
 
-    // Web research: upgrade model + budget for richer synthesis
+    // Web research: upgrade model for richer synthesis (no budget limits)
     const model = isWebResearch ? "claude-sonnet-4-6" : explorer.model;
-    const budget = isWebResearch ? 0.25 : explorer.maxBudgetUsd;
     const effort = isWebResearch ? "medium" : explorer.effort;
 
     const result = await spawnClaude({
@@ -150,7 +149,7 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
       jsonSchema: jsonSchema || undefined,
       model,
       fallbackModel: explorer.fallbackModel,
-      maxBudgetUsd: budget,
+      // Budget limits removed — agents run unconstrained
       effort: effort as any,
       mcpRole: "explorer",
     });

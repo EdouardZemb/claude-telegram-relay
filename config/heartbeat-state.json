@@ -1,65 +1,65 @@
 {
-  "lastPulseAt": "2026-03-17T18:20:00.125Z",
-  "lastCommitSha": "d708ce9e3e0a8ce3242b8fff96e117cb4ef79f61",
+  "lastPulseAt": "2026-03-18T07:50:00.120Z",
+  "lastCommitSha": "6853a32d32f02429ddd6c7511a44ad3e2ba134ff",
   "lastSprintSnapshot": {
-    "sprint": "S19",
-    "done": 14,
-    "total": 17
+    "sprint": "S45",
+    "done": 8,
+    "total": 12
   },
   "recentActions": [
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T16:50:13.524Z"
+      "timestamp": "2026-03-18T06:20:14.886Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:00:14.448Z"
+      "timestamp": "2026-03-18T06:30:15.760Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:10:19.963Z"
+      "timestamp": "2026-03-18T06:40:13.471Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:20:14.901Z"
+      "timestamp": "2026-03-18T06:50:11.679Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:30:16.947Z"
+      "timestamp": "2026-03-18T07:00:12.223Z"
+    },
+    {
+      "type": "notify",
+      "summary": "PR #13 (path traversal) blocked for 23 days. Check status: is it waiting for review, blocked by CI, or abandoned?",
+      "timestamp": "2026-03-18T07:10:15.265Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:40:15.399Z"
+      "timestamp": "2026-03-18T07:20:11.550Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T17:50:12.811Z"
+      "timestamp": "2026-03-18T07:30:11.976Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T18:00:19.457Z"
+      "timestamp": "2026-03-18T07:40:10.657Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T18:10:22.727Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-17T18:20:12.527Z"
+      "timestamp": "2026-03-18T07:50:12.078Z"
     }
   ],
   "cooldowns": {},
-  "lastAlertCheckAt": null,
-  "lastArchivalAt": null,
-  "lastAutonomyScanAt": null
+  "lastAlertCheckAt": "2026-03-18T07:30:00.118Z",
+  "lastArchivalAt": "2026-03-18T07:30:00.118Z",
+  "lastAutonomyScanAt": "2026-03-17T18:30:00.117Z"
 }

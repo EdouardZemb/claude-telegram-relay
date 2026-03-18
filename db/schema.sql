@@ -1,7 +1,7 @@
 -- ============================================================
 -- Supabase Schema for Claude Telegram Relay
 -- ============================================================
--- Authoritative database schema. Reflects all 12 public tables,
+-- Authoritative database schema. Reflects all 25 public tables,
 -- indexes, RLS policies, helper functions, and semantic search.
 --
 -- To set up from scratch: run this in Supabase SQL Editor.
@@ -799,6 +799,18 @@ CREATE POLICY "Allow all for authenticated" ON gate_evaluations FOR ALL USING (t
 ALTER TABLE trust_scores ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for authenticated" ON trust_scores FOR ALL USING (true);
 
+-- Document categories: full access
+ALTER TABLE document_categories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON document_categories FOR ALL USING (true);
+
+-- Documents: project-scoped reads, open writes/updates/deletes
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "documents_insert" ON documents FOR INSERT WITH CHECK (true);
+CREATE POLICY "documents_select_by_project" ON documents FOR SELECT
+  USING (current_project_id() IS NULL OR project_id = current_project_id());
+CREATE POLICY "documents_update" ON documents FOR UPDATE USING (true);
+CREATE POLICY "documents_delete" ON documents FOR DELETE USING (true);
+
 -- ============================================================
 -- HELPER FUNCTIONS (RPCs)
 -- ============================================================
@@ -951,6 +963,43 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
 
+-- Match documents by embedding similarity (S45)
+CREATE OR REPLACE FUNCTION match_documents(
+  query_embedding VECTOR(1536),
+  match_threshold FLOAT DEFAULT 0.7,
+  match_count INT DEFAULT 10,
+  p_user_id TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  id UUID,
+  title TEXT,
+  extracted_text TEXT,
+  description TEXT,
+  document_date DATE,
+  category_id UUID,
+  created_at TIMESTAMPTZ,
+  similarity FLOAT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    d.id,
+    d.title,
+    d.extracted_text,
+    d.description,
+    d.document_date,
+    d.category_id,
+    d.created_at,
+    1 - (d.embedding <=> query_embedding) AS similarity
+  FROM public.documents d
+  WHERE d.embedding IS NOT NULL
+    AND 1 - (d.embedding <=> query_embedding) > match_threshold
+    AND (p_user_id IS NULL OR d.user_id = p_user_id)
+  ORDER BY d.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
 -- ============================================================
 -- MEMORY ARCHIVE RPC
 -- ============================================================
@@ -978,6 +1027,63 @@ BEGIN
   RETURN archived_count;
 END;
 $$ LANGUAGE plpgsql SET search_path = '';
+
+-- ============================================================
+-- DOCUMENT CATEGORIES TABLE (S45: Dynamic document classification)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS document_categories (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  description TEXT,
+  usage_count INTEGER DEFAULT 0,
+  created_by TEXT DEFAULT 'system',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE document_categories IS 'Dynamic document categories for automatic classification. Base categories seeded on creation.';
+
+-- Seed 7 base categories
+INSERT INTO document_categories (name, description, created_by) VALUES
+  ('facture', 'Factures et notes de frais', 'system'),
+  ('contrat', 'Contrats et accords', 'system'),
+  ('recu', 'Recus et tickets de caisse', 'system'),
+  ('note', 'Notes et memo', 'system'),
+  ('identite', 'Pieces d identite et passeports', 'system'),
+  ('attestation', 'Attestations et certificats', 'system'),
+  ('courrier', 'Courrier administratif', 'system')
+ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================
+-- DOCUMENTS TABLE (S45: Document storage with semantic search)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS documents (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  project_id UUID REFERENCES projects(id),
+  category_id UUID REFERENCES document_categories(id),
+  title TEXT,
+  extracted_text TEXT,
+  description TEXT,
+  document_date DATE,
+  file_path TEXT NOT NULL,
+  file_type TEXT NOT NULL,
+  file_size INTEGER,
+  metadata JSONB DEFAULT '{}',
+  embedding VECTOR(1536),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMENT ON TABLE documents IS 'User documents with extracted text, automatic classification, and semantic search via embeddings.';
+
+CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
+CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category_id);
+CREATE INDEX IF NOT EXISTS idx_documents_date ON documents(document_date DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_project_id ON documents(project_id);
+CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
+
+-- IVFFlat index for semantic search on extracted text embeddings
+CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- ============================================================
 -- AGENT EVENTS TABLE (S38: Agent lifecycle event sourcing)
