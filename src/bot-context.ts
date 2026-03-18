@@ -74,6 +74,7 @@ export interface BotContext {
 
   // Message handling
   sendResponse: (ctx: Context, response: string) => Promise<void>;
+  sendResponseHtml: (ctx: Context, response: string) => Promise<void>;
   sendVoiceResponse: (ctx: Context, response: string) => Promise<void>;
   buildPrompt: (
     userMessage: string,
@@ -519,9 +520,46 @@ function buildPrompt(
 // RESPONSE HELPERS
 // ============================================================
 
+export function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function sendResponse(ctx: Context, response: string): Promise<void> {
   const MAX_LENGTH = 4000;
   const opts = threadOpts(ctx);
+
+  if (!response || !response.trim()) return Promise.resolve();
+
+  if (response.length <= MAX_LENGTH) {
+    return ctx.reply(response, opts).then(() => {});
+  }
+
+  const chunks: string[] = [];
+  let remaining = response;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= MAX_LENGTH) {
+      chunks.push(remaining);
+      break;
+    }
+    let splitIndex = remaining.lastIndexOf("\n\n", MAX_LENGTH);
+    if (splitIndex === -1) splitIndex = remaining.lastIndexOf("\n", MAX_LENGTH);
+    if (splitIndex === -1) splitIndex = remaining.lastIndexOf(" ", MAX_LENGTH);
+    if (splitIndex === -1) splitIndex = MAX_LENGTH;
+    chunks.push(remaining.substring(0, splitIndex));
+    remaining = remaining.substring(splitIndex).trim();
+  }
+
+  return (async () => {
+    for (const chunk of chunks) {
+      await ctx.reply(chunk, opts);
+    }
+  })();
+}
+
+function sendResponseHtml(ctx: Context, response: string): Promise<void> {
+  const MAX_LENGTH = 4000;
+  const opts = { ...threadOpts(ctx), parse_mode: "HTML" as const };
 
   if (!response || !response.trim()) return Promise.resolve();
 
@@ -616,6 +654,7 @@ export async function createBotContext(bot: Bot): Promise<BotContext> {
     supabase,
     callClaude,
     sendResponse,
+    sendResponseHtml,
     sendVoiceResponse,
     buildPrompt,
     saveMessage,

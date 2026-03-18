@@ -8,7 +8,7 @@
 
 import { Composer, Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { ALLOWED_USER_ID } from "../bot-context.ts";
+import { ALLOWED_USER_ID, escapeHtml } from "../bot-context.ts";
 import {
   listDocuments,
   getDocumentById,
@@ -58,6 +58,15 @@ function formatDocumentLine(doc: Document, index: number): string {
   return `${index + 1}. ${title} [${id}] ${date}${size ? ` (${size})` : ""}`;
 }
 
+function formatDocumentLineHtml(doc: Document, index: number, url?: string): string {
+  const date = new Date(doc.created_at).toLocaleDateString("fr-FR");
+  const title = escapeHtml(doc.title || "Sans titre");
+  const id = doc.id.substring(0, 8);
+  const size = doc.file_size ? `${Math.round(doc.file_size / 1024)}Ko` : "";
+  const titlePart = url ? `<a href="${escapeHtml(url)}">${title}</a>` : title;
+  return `${index + 1}. ${titlePart} [${id}] ${date}${size ? ` (${size})` : ""}`;
+}
+
 function formatDocumentDetail(doc: Document): string {
   const date = new Date(doc.created_at).toLocaleDateString("fr-FR");
   const lines = [
@@ -67,6 +76,21 @@ function formatDocumentDetail(doc: Document): string {
     `Type: ${doc.file_type}`,
     doc.file_size ? `Taille: ${Math.round(doc.file_size / 1024)}Ko` : "",
     doc.document_date ? `Date document: ${doc.document_date}` : "",
+    `Ajoute le: ${date}`,
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+function formatDocumentDetailHtml(doc: Document, url: string): string {
+  const date = new Date(doc.created_at).toLocaleDateString("fr-FR");
+  const title = escapeHtml(doc.title || "Sans titre");
+  const lines = [
+    `DOCUMENT [${doc.id.substring(0, 8)}]`,
+    `Titre: <a href="${escapeHtml(url)}">${title}</a>`,
+    doc.description ? `Description: ${escapeHtml(doc.description)}` : "",
+    `Type: ${escapeHtml(doc.file_type)}`,
+    doc.file_size ? `Taille: ${Math.round(doc.file_size / 1024)}Ko` : "",
+    doc.document_date ? `Date document: ${escapeHtml(doc.document_date)}` : "",
     `Ajoute le: ${date}`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -103,12 +127,21 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       const filePaths = docs.map((d) => d.file_path).filter(Boolean);
       const urlMap = await createSignedUrls(bctx.supabase, filePaths);
 
+      const hasUrls = urlMap.size > 0;
       const lines = docs.map((d, i) => {
-        const line = formatDocumentLine(d, i);
         const url = urlMap.get(d.file_path);
+        if (hasUrls) {
+          return formatDocumentLineHtml(d, i, url);
+        }
+        const line = formatDocumentLine(d, i);
         return url ? `${line}\n  ${url}` : line;
       });
-      await bctx.sendResponse(ctx, `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search <query> pour chercher.`);
+      const text = `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search &lt;query&gt; pour chercher.`;
+      if (hasUrls) {
+        await bctx.sendResponseHtml(ctx, text);
+      } else {
+        await bctx.sendResponse(ctx, `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search <query> pour chercher.`);
+      }
       return;
     }
 
@@ -130,16 +163,28 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       const filePaths = top.map((r) => r.file_path).filter((p): p is string => !!p);
       const urlMap = await createSignedUrls(bctx.supabase, filePaths);
 
+      const hasUrls = urlMap.size > 0;
       const lines = top.map((r, i) => {
         const title = r.title || "Sans titre";
         const id = r.id.substring(0, 8);
         const score = Math.round(r.similarity * 100);
         const desc = r.description ? ` — ${r.description.substring(0, 60)}` : "";
-        const line = `${i + 1}. ${title} [${id}] (${score}%)${desc}`;
         const url = r.file_path ? urlMap.get(r.file_path) : undefined;
+        if (hasUrls) {
+          const escapedTitle = escapeHtml(title);
+          const titlePart = url ? `<a href="${escapeHtml(url)}">${escapedTitle}</a>` : escapedTitle;
+          const escapedDesc = escapeHtml(desc);
+          return `${i + 1}. ${titlePart} [${id}] (${score}%)${escapedDesc}`;
+        }
+        const line = `${i + 1}. ${title} [${id}] (${score}%)${desc}`;
         return url ? `${line}\n  ${url}` : line;
       });
-      await bctx.sendResponse(ctx, `RESULTATS POUR "${arg}" (${results.length})\n\n${lines.join("\n")}`);
+      const header = hasUrls ? escapeHtml(`RESULTATS POUR "${arg}" (${results.length})`) : `RESULTATS POUR "${arg}" (${results.length})`;
+      if (hasUrls) {
+        await bctx.sendResponseHtml(ctx, `${header}\n\n${lines.join("\n")}`);
+      } else {
+        await bctx.sendResponse(ctx, `${header}\n\n${lines.join("\n")}`);
+      }
       return;
     }
 
@@ -213,12 +258,20 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         return;
       }
       let detail = formatDocumentDetail(doc);
+      let useHtml = false;
       if (doc.file_path) {
         const urlMap = await createSignedUrls(bctx.supabase, [doc.file_path]);
         const url = urlMap.get(doc.file_path);
-        if (url) detail += `\n\nTelecharger: ${url}`;
+        if (url) {
+          detail = formatDocumentDetailHtml(doc, url);
+          useHtml = true;
+        }
       }
-      await bctx.sendResponse(ctx, detail);
+      if (useHtml) {
+        await bctx.sendResponseHtml(ctx, detail);
+      } else {
+        await bctx.sendResponse(ctx, detail);
+      }
       return;
     }
 
