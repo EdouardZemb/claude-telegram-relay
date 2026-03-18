@@ -956,10 +956,7 @@ server.tool(
       let resolvedTask: any = null;
       if (task_id.length < 36) {
         const tasks = await getBacklog(supabase);
-        const allTasks = await callSupabaseRest(
-          `tasks?id=like.${task_id}*&select=*&limit=1`
-        ) as any[];
-        resolvedTask = allTasks?.[0] || tasks.find(t => t.id.startsWith(task_id));
+        resolvedTask = tasks.find(t => t.id.startsWith(task_id));
       } else {
         const result = await callSupabaseRest(
           `tasks?id=eq.${task_id}&select=*&limit=1`
@@ -1041,12 +1038,15 @@ server.tool(
         }],
       };
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : undefined;
+      console.error(`[orchestrate_task] Pipeline error:`, errMsg, errStack);
       await enqueueMcpNotification({
         type: "alert",
         severity: "critical",
-        message: `Pipeline echoue via MCP: ${error instanceof Error ? error.message : String(error)}`,
-      });
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+        message: `Pipeline echoue via MCP: ${errMsg}`,
+      }).catch(() => {});
+      return { content: [{ type: "text" as const, text: `Error: ${errMsg}${errStack ? `\nStack: ${errStack.substring(0, 500)}` : ""}` }] };
     }
   }
 );

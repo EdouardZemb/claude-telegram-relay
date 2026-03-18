@@ -103,7 +103,7 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
       prompt,
       model: "claude-haiku-4-5",
       effort: "low",
-      maxBudgetUsd: 0.02,
+      // Budget limits removed
     });
 
     // AC-018: 5s timeout

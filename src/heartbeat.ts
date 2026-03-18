@@ -410,7 +410,7 @@ export async function pulse(): Promise<{
         systemPrompt: HEARTBEAT_SYSTEM_PROMPT,
         model: "claude-haiku-4-5",
         effort: "low",
-        maxBudgetUsd: 0.10,
+        // Budget limits removed
         outputFormat: "json",
       });
 

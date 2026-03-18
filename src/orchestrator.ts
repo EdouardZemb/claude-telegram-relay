@@ -244,7 +244,7 @@ export async function runAgentStep(
       effort: agent?.effort,
       model: cascade ? undefined : effectiveModel, // cascade handles model selection
       fallbackModel: cascade ? undefined : agent?.fallbackModel,
-      maxBudgetUsd: agent?.maxBudgetUsd,
+      // Budget limits removed — agents run unconstrained
       mcpRole: agentId,
       cascade,
     });
@@ -652,7 +652,7 @@ export async function orchestrate(
       // S38: Emit spawned event
       if (pipelineSessionId) {
         emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
-          model: agent?.model, effort: agent?.effort, budget: agent?.maxBudgetUsd,
+          model: agent?.model, effort: agent?.effort,
         }).catch(() => {});
       }
 

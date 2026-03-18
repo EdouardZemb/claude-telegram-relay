@@ -35,11 +35,11 @@ describe("Explorer Agent Definition", () => {
     expect(explorer!.icon).toBe("🔍");
   });
 
-  it("has Haiku model with low effort and small budget", () => {
+  it("has Haiku model with low effort and no budget limit", () => {
     const explorer = getAgent("explorer");
     expect(explorer!.effort).toBe("low");
     expect(explorer!.model).toBe("claude-haiku-4-5");
-    expect(explorer!.maxBudgetUsd).toBe(0.10);
+    expect(explorer!.maxBudgetUsd).toBeUndefined();
   });
 
   it("has trust thresholds", () => {

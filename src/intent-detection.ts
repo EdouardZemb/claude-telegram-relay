@@ -173,6 +173,42 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "search_document",
+    command: "docs",
+    patterns: [
+      // "trouve mon contrat", "retrouve ma facture", "trouve mes documents"
+      /\b(trouve|retrouve)\s+(mon|ma|mes)\s+/i,
+      // "ou est ma facture", "ou est mon contrat"
+      /\bou\s+est\s+(mon|ma)\s+/i,
+      // "cherche une facture", "recherche un document"
+      /\b(cherche|recherche)\s+(un|une|le|la|mon|ma|mes|des)\s+(document|facture|contrat|recu|attestation|certificat|rapport|note|fiche|devis|bon|releve|bulletin)/i,
+      // "montre-moi ma facture", "montre-moi mes documents"
+      /\b(montre[- ]moi|affiche[- ]moi)\s+(mon|ma|mes)\s+/i,
+      // "j'ai un document de mars"
+      /\bj'?ai\s+un\s+document\s+(de|du|sur|pour)\s+/i,
+      // "ma facture de janvier", "mon contrat d'assurance"
+      /\b(ma|mon|mes)\s+(facture|contrat|recu|attestation|certificat|rapport|note|fiche|devis|bon|releve|bulletin)\s+(de|d'|du)\s+/i,
+    ],
+    argExtractor: (text) => {
+      const extractors = [
+        /(?:trouve|retrouve)\s+(?:mon|ma|mes)\s+(.+)/i,
+        /ou\s+est\s+(?:mon|ma)\s+(.+)/i,
+        /(?:cherche|recherche)\s+(?:un|une|le|la|mon|ma|mes|des)\s+(.+)/i,
+        /(?:montre[- ]moi|affiche[- ]moi)\s+(?:mon|ma|mes)\s+(.+)/i,
+        /j'?ai\s+un\s+document\s+(?:de|du|sur|pour)\s+(.+)/i,
+        /(?:ma|mon|mes)\s+((?:facture|contrat|recu|attestation|certificat|rapport|note|fiche|devis|bon|releve|bulletin)(?:\s+.+)?)/i,
+      ];
+      for (const p of extractors) {
+        const m = text.match(p);
+        if (m?.[1]) {
+          const term = m[1].replace(/\s*[?!.]\s*$/, "").trim();
+          return `search ${term}`;
+        }
+      }
+      return "search";
+    },
+  },
+  {
     intent: "explore_topic",
     command: "explore",
     patterns: [

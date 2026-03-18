@@ -24,6 +24,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
 | `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
 | `commands/project.ts` | Composer: /projects, /project |
+| `commands/documents.ts` | Composer: /docs (list, search, stats, delete, categories) + classification callbacks (doc_confirm, doc_change, doc_cancel) |
 | `commands/exploration.ts` | Composer: /explore — launches Explorer agent (Ada) for codebase investigation |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
 | `commands/zz-messages.ts` | Composer: message:text (with intent routing), message:voice, message:photo, message:document handlers (loaded last) |
@@ -55,6 +56,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
 | `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment, effectiveness tracking, rule promotion/archival |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
+| `documents.ts` | Document management: text extraction (Claude Vision + pdf-parse), LLM classification (Haiku) with dynamic categories, CRUD with Supabase Storage, semantic search |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
 | `proactive-planner.ts` | Daily backlog analysis + recommendations, code graph complexity-based pipeline suggestions, auto-defer for overloaded sprints |
@@ -95,6 +97,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/exec <id>` | Launch Claude Code agent (requires Gate 1) |
 | `/orchestrate <id>` | Full BMad multi-agent pipeline (--blackboard for gated SDD flow) |
 | `/autopipeline <id>` | Autonomous end-to-end pipeline |
+| `/docs` | Document management (list, search, stats, delete, categories) |
 | `/explore <query>` | Launch Explorer agent to investigate a topic in the codebase |
 | `/plan <request>` | Decompose request into subtasks |
 | `/planify` | Proactive planner: backlog reordering, pacing |
@@ -123,9 +126,9 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`
 
-RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `archive_old_memories`, `bump_memory_access`
+RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `match_documents`, `archive_old_memories`, `bump_memory_access`
 
 Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search), `classify-thought` (GPT-4o-mini message classification with idea detection), `memory-mcp` (memory CRUD + semantic search API)
 
@@ -252,7 +255,7 @@ config/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1672 tests (unit + integration + E2E)
+tests/                  2061 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
@@ -260,7 +263,7 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1672 tests, all must pass before merge)
+- Tests: `bun test` (2061 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

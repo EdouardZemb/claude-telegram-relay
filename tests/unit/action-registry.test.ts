@@ -38,6 +38,17 @@ describe("action-registry", () => {
       expect(action!.requiresSupabase).toBe(false);
       expect(action!.params.length).toBe(0);
     });
+
+    it("returns correct metadata for docs", () => {
+      const action = getAction("docs");
+      expect(action).toBeDefined();
+      expect(action!.risk).toBe("low");
+      expect(action!.requiresSupabase).toBe(true);
+      expect(action!.module).toBe("documents");
+      expect(action!.params.length).toBe(2);
+      expect(action!.aliases).toContain("documents");
+      expect(action!.aliases).toContain("facture");
+    });
   });
 
   describe("getAllActions", () => {
@@ -52,7 +63,7 @@ describe("action-registry", () => {
         "help", "workflow", "agents", "status", "monitor",
         "task", "backlog", "sprint", "start", "done",
         "exec", "orchestrate", "autopipeline",
-        "explore",
+        "explore", "docs",
         "plan", "prd", "planify",
         "brain", "ideas", "remind",
         "metrics", "retro", "patterns", "alerts", "cost",

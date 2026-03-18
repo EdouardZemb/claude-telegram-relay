@@ -191,6 +191,21 @@ const ACTIONS: ActionDefinition[] = [
     aliases: ["explorer", "investiguer", "analyser codebase", "comment fonctionne", "impact de", "regarder", "rechercher", "comparer", "benchmark", "state of the art", "etat de l'art", "alternative"],
   },
 
+  // ─── documents.ts ───
+  {
+    command: "docs",
+    description: "Gerer et rechercher des documents (list, search, stats, categories)",
+    usage: "/docs [list|search|stats|delete|categories] [terme]",
+    params: [
+      { name: "subcommand", required: false, description: "list, search, stats, delete, categories" },
+      { name: "query", required: false, description: "Terme de recherche ou ID du document" },
+    ],
+    risk: "low",
+    module: "documents",
+    requiresSupabase: true,
+    aliases: ["documents", "mes documents", "chercher document", "trouver document", "facture", "contrat"],
+  },
+
   // ─── planning.ts ───
   {
     command: "plan",

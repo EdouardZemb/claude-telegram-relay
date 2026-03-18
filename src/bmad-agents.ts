@@ -37,7 +37,7 @@ export interface BmadAgent {
   effort?: "low" | "medium" | "high" | "max";
   model?: string;
   fallbackModel?: string;
-  maxBudgetUsd?: number;
+  // maxBudgetUsd removed — agents run unconstrained
   /** S42: Per-role trust thresholds for progressive autonomy */
   trustThresholds?: {
     specAutoApprove: number;   // Trust score to auto-approve spec/plan/tasks gates
@@ -77,7 +77,6 @@ const AGENTS: BmadAgent[] = [
     effort: "medium",
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
-    maxBudgetUsd: 0.50,
     trustThresholds: { specAutoApprove: 75, implAutoApprove: 90 },
   },
   {
@@ -104,7 +103,6 @@ const AGENTS: BmadAgent[] = [
     effort: "medium",
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
-    maxBudgetUsd: 0.50,
     trustThresholds: { specAutoApprove: 75, implAutoApprove: 88 },
   },
   {
@@ -127,7 +125,6 @@ const AGENTS: BmadAgent[] = [
     effort: "high",
     model: "claude-opus-4-6",
     fallbackModel: "claude-sonnet-4-6",
-    maxBudgetUsd: 1.00,
     trustThresholds: { specAutoApprove: 75, implAutoApprove: 88 },
   },
   {
@@ -152,7 +149,6 @@ const AGENTS: BmadAgent[] = [
     effort: "low",
     model: "claude-haiku-4-5",
     fallbackModel: "claude-haiku-4-5",
-    maxBudgetUsd: 0.25,
     trustThresholds: { specAutoApprove: 60, implAutoApprove: 80 },
   },
   {
@@ -183,7 +179,6 @@ const AGENTS: BmadAgent[] = [
     effort: "high",
     model: "claude-opus-4-6",
     fallbackModel: "claude-sonnet-4-6",
-    maxBudgetUsd: 2.00,
     trustThresholds: { specAutoApprove: 70, implAutoApprove: 85 },
   },
   {
@@ -210,7 +205,6 @@ const AGENTS: BmadAgent[] = [
     effort: "high",
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
-    maxBudgetUsd: 1.00,
     trustThresholds: { specAutoApprove: 80, implAutoApprove: 92 },
   },
   {
@@ -236,7 +230,6 @@ const AGENTS: BmadAgent[] = [
     effort: "medium",
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
-    maxBudgetUsd: 0.50,
     trustThresholds: { specAutoApprove: 75, implAutoApprove: 88 },
   },
   {
@@ -262,7 +255,6 @@ const AGENTS: BmadAgent[] = [
     effort: "low",
     model: "claude-haiku-4-5",
     fallbackModel: "claude-sonnet-4-6",
-    maxBudgetUsd: 0.10,
     trustThresholds: { specAutoApprove: 60, implAutoApprove: 80 },
   },
 ];

@@ -13,42 +13,42 @@ import {
 describe("estimatePipelineCost", () => {
   it("estimates DEFAULT pipeline cost", () => {
     const result = estimatePipelineCost("DEFAULT", 1);
-    // DEFAULT = analyst($0.50) + pm($0.50) + architect($1) + dev($2) + qa($1) + sm($0.25) = $5.25
-    expect(result.costPerTask).toBe(5.25);
-    expect(result.totalEstimate).toBe(5.25);
+    // DEFAULT = 6 agents * $0.50 fallback = $3.00 (no per-agent budgets)
+    expect(result.costPerTask).toBe(3.00);
+    expect(result.totalEstimate).toBe(3.00);
     expect(result.agentBreakdown.length).toBe(6);
   });
 
   it("estimates QUICK pipeline cost", () => {
     const result = estimatePipelineCost("QUICK", 1);
-    // QUICK = dev($2) + qa($1) = $3
-    expect(result.costPerTask).toBe(3);
+    // QUICK = 2 agents * $0.50 = $1.00
+    expect(result.costPerTask).toBe(1.00);
     expect(result.agentBreakdown.length).toBe(2);
   });
 
   it("estimates REVIEW pipeline cost", () => {
     const result = estimatePipelineCost("REVIEW", 1);
-    // REVIEW = qa($1) + architect($1) = $2
-    expect(result.costPerTask).toBe(2);
+    // REVIEW = 2 agents * $0.50 = $1.00
+    expect(result.costPerTask).toBe(1.00);
     expect(result.agentBreakdown.length).toBe(2);
   });
 
   it("multiplies by task count", () => {
     const result = estimatePipelineCost("DEFAULT", 8);
-    expect(result.totalEstimate).toBe(5.25 * 8);
+    expect(result.totalEstimate).toBe(3.00 * 8);
     expect(result.taskCount).toBe(8);
   });
 
   it("falls back to DEFAULT for unknown pipeline", () => {
     const result = estimatePipelineCost("UNKNOWN", 1);
-    expect(result.costPerTask).toBe(5.25);
+    expect(result.costPerTask).toBe(3.00);
   });
 });
 
 describe("estimateSprintCost", () => {
   it("returns estimate with no historical data", async () => {
     const result = await estimateSprintCost(null, 5, "DEFAULT");
-    expect(result.estimate.totalEstimate).toBe(5.25 * 5);
+    expect(result.estimate.totalEstimate).toBe(3.00 * 5);
     expect(result.historicalAvg).toBeNull();
     expect(result.ratio).toBeNull();
     expect(result.warning).toBe(false);
@@ -76,7 +76,7 @@ describe("estimateSprintCost", () => {
       ],
     });
 
-    // 10 tasks * $5.25 = $52.50 vs avg ~$2.5 = ~21x -> warning
+    // 10 tasks * $3.00 = $30.00 vs avg ~$2.5 = ~12x -> warning
     const result = await estimateSprintCost(supabase, 10, "DEFAULT");
     expect(result.warning).toBe(true);
   });

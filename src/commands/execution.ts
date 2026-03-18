@@ -8,6 +8,7 @@
 import { Composer, Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { executeTask } from "../agent.ts";
+import { updateTaskStatus } from "../tasks.ts";
 import { buildStoryFile, enrichTaskWithStory, formatStoryPreview } from "../story-files.ts";
 import { checkGatesWithOverrides, clearGateOverrides } from "../gates.ts";
 import {
@@ -317,6 +318,9 @@ export default function execution(bctx: BotContext): Composer<Context> {
       convCtx = buildConversationContext(session);
     }
 
+    // Mark task as in_progress before orchestration
+    await updateTaskStatus(bctx.supabase, task.id, "in_progress");
+
     const result = await orchestrate(bctx.supabase, task, {
       pipeline,
       stopOnFailure: true,
@@ -327,6 +331,11 @@ export default function execution(bctx: BotContext): Composer<Context> {
         await ctx.reply(msg, bctx.threadOpts(ctx));
       },
     });
+
+    // Update task status based on result
+    if (result.success) {
+      await updateTaskStatus(bctx.supabase, task.id, "done");
+    }
 
     const formatted = formatOrchestrationResult(result);
     await bctx.sendResponse(ctx, formatted);
