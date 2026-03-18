@@ -271,9 +271,66 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       const updated = await updatePRDStatus(bctx.supabase, prdId, "approved");
       if (updated) {
         await ctx.answerCallbackQuery({ text: "PRD approuve !" });
-        await ctx.editMessageText(
-          `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
-        );
+
+        // Auto-decompose PRD into tasks as background job
+        if (isJobManagerEnabled()) {
+          const prd = await getPRD(bctx.supabase, prdId);
+          if (prd) {
+            const projectSlug = prd.project || "telegram-relay";
+            const threadId = ctx.callbackQuery.message?.message_thread_id;
+            const currentProject = await resolveProjectContext(bctx.supabase, threadId);
+
+            const decomposeFn = async (): Promise<string> => {
+              const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
+              const subtasks = await decomposeTask(prdDescription);
+
+              if (subtasks.length === 0) {
+                throw new Error("Aucune sous-tache generee depuis le PRD.");
+              }
+
+              const added = [];
+              for (const st of subtasks) {
+                const task = await addTask(bctx.supabase!, st.title, {
+                  description: st.description,
+                  priority: st.priority,
+                  project: projectSlug,
+                  project_id: currentProject?.id,
+                });
+                if (task) {
+                  if (st.acceptance_criteria) {
+                    await bctx.supabase!.from("tasks").update({
+                      acceptance_criteria: st.acceptance_criteria,
+                    }).eq("id", task.id);
+                    task.acceptance_criteria = st.acceptance_criteria;
+                  }
+                  const story = buildStoryFile(task);
+                  await enrichTaskWithStory(bctx.supabase!, task.id, story);
+                  added.push(task);
+                }
+              }
+
+              const lines = added.map((t, i) => {
+                const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+                return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
+              });
+              return `${added.length} taches creees depuis le PRD "${prd.title}":\n${lines.join("\n")}`;
+            };
+
+            const chatId = ctx.chat?.id || 0;
+            const jobId = await launchJob("prd-decompose", chatId, decomposeFn);
+            await ctx.editMessageText(
+              `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`
+            );
+          } else {
+            await ctx.editMessageText(
+              `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
+            );
+          }
+        } else {
+          await ctx.editMessageText(
+            `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
+          );
+        }
       } else {
         await ctx.answerCallbackQuery({ text: "Erreur." });
       }

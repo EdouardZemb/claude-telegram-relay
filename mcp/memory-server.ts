@@ -404,6 +404,8 @@ import { runAllChecks } from "../src/alerts.ts";
 import { listFeatures, setFeature } from "../src/feature-flags.ts";
 import { analyzeBacklog, formatPlannerResult } from "../src/proactive-planner.ts";
 import { orchestrate, formatOrchestrationResult } from "../src/orchestrator.ts";
+import { decomposeTask } from "../src/agent.ts";
+import { buildStoryFile, enrichTaskWithStory } from "../src/story-files.ts";
 import {
   DEFAULT_PIPELINE,
   QUICK_PIPELINE,
@@ -639,11 +641,12 @@ server.tool(
 
 server.tool(
   "prd_approve",
-  "Approve a PRD (change status to approved). Same as /prd approve on Telegram. Sends a notification to Telegram.",
+  "Approve a PRD (change status to approved) and auto-decompose into tasks as a background job. Same as /prd approve on Telegram. Sends a notification to Telegram.",
   {
     prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
+    auto_decompose: z.boolean().optional().describe("Auto-decompose PRD into tasks after approval (default: true)"),
   },
-  async ({ prd_id }) => {
+  async ({ prd_id, auto_decompose }) => {
     try {
       const existing = await getPRD(supabase, prd_id);
       if (!existing) {
@@ -662,7 +665,50 @@ server.tool(
         data: { taskId: prd.id },
       });
 
-      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
+      // Auto-decompose PRD into tasks as background job
+      const shouldDecompose = auto_decompose !== false;
+      let decomposeJobId: string | undefined;
+
+      if (shouldDecompose) {
+        const projectSlug = prd.project || "telegram-relay";
+        decomposeJobId = launchMcpBackgroundJob("prd-decompose", prd.title.substring(0, 80), async () => {
+          const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
+          const subtasks = await decomposeTask(prdDescription);
+
+          if (subtasks.length === 0) {
+            throw new Error("Aucune sous-tache generee depuis le PRD.");
+          }
+
+          const added = [];
+          for (const st of subtasks) {
+            const task = await addTask(supabase, st.title, {
+              description: st.description,
+              priority: st.priority,
+              project: projectSlug,
+            });
+            if (task) {
+              if (st.acceptance_criteria) {
+                await supabase.from("tasks").update({
+                  acceptance_criteria: st.acceptance_criteria,
+                }).eq("id", task.id);
+              }
+              const story = buildStoryFile(task);
+              await enrichTaskWithStory(supabase, task.id, story);
+              added.push(task);
+            }
+          }
+
+          return `${added.length} taches creees depuis le PRD "${prd.title}"`;
+        });
+      }
+
+      const result: Record<string, unknown> = { ...prd };
+      if (decomposeJobId) {
+        result.decompose_job_id = decomposeJobId;
+        result.decompose_status = "launched";
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
     }
