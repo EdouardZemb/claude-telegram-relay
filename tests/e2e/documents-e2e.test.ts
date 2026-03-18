@@ -60,11 +60,20 @@ function restoreFetch(): void {
 let spawnMock: ReturnType<typeof spyOn> | null = null;
 
 function mockClaudeCLI(): void {
-  let callCount = 0;
-  spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
-    callCount++;
+  let claudeCallCount = 0;
+  spawnMock = spyOn(Bun, "spawn").mockImplementation((...args: any[]) => {
+    const cmd = Array.isArray(args[0]) ? args[0][0] : args[0];
+    // pdftoppm: return success but produce no files (fake PDF has no pages)
+    if (cmd === "pdftoppm") {
+      return {
+        stdout: new Response("").body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+      } as any;
+    }
+    claudeCallCount++;
     // Alternate: extraction (odd calls) → classification (even calls)
-    const output = callCount % 2 === 1
+    const output = claudeCallCount % 2 === 1
       ? "Facture EDF montant 150 EUR date 18/03/2026"
       : JSON.stringify({
           category_name: "facture",
