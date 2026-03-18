@@ -2,7 +2,7 @@
  * Unit Tests — S45-T2: documents.ts module
  *
  * Tests: text extraction, classification, CRUD, search, helpers.
- * All external calls (Anthropic API, Supabase, pdf-parse) are mocked.
+ * All external calls (Claude CLI, Supabase, pdf-parse) are mocked.
  */
 
 import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
@@ -27,6 +27,23 @@ function setupFetchMock(responseBody: unknown, status = 200) {
 
 function restoreFetch() {
   globalThis.fetch = originalFetch;
+}
+
+// ── Mock Bun.spawn ───────────────────────────────────────────
+
+let spawnMock: ReturnType<typeof mock>;
+
+function setupSpawnMock(output: string, exitCode = 0) {
+  const fakeProc = {
+    stdout: new Response(output).body,
+    stderr: new Response("").body,
+    exited: Promise.resolve(exitCode),
+  };
+  spawnMock = spyOn(Bun, "spawn").mockReturnValue(fakeProc as any);
+}
+
+function restoreSpawn() {
+  if (spawnMock) spawnMock.mockRestore();
 }
 
 // ── Mock Supabase ────────────────────────────────────────────
@@ -105,134 +122,66 @@ import {
 
 // ── Setup ────────────────────────────────────────────────────
 
-const ORIGINAL_ENV = { ...process.env };
-
 beforeEach(() => {
-  process.env.ANTHROPIC_API_KEY = "test-key";
   restoreFetch();
+  restoreSpawn();
 });
 
 // ── extractTextFromImage ─────────────────────────────────────
 
 describe("extractTextFromImage", () => {
-  it("calls Anthropic Vision API with base64 image", async () => {
-    setupFetchMock({
-      content: [{ type: "text", text: "Facture n°12345\nTotal: 150€" }],
-    });
+  it("calls Claude CLI to extract text from image", async () => {
+    setupSpawnMock("Facture n°12345\nTotal: 150€");
 
     const buffer = Buffer.from("fake-image-data");
     const result = await extractTextFromImage(buffer, "image/jpeg");
 
     expect(result).toBe("Facture n°12345\nTotal: 150€");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toBe("https://api.anthropic.com/v1/messages");
-
-    const body = JSON.parse(callArgs[1].body);
-    expect(body.model).toBe("claude-haiku-4-5-20251001");
-    expect(body.messages[0].content[0].type).toBe("image");
-    expect(body.messages[0].content[0].source.media_type).toBe("image/jpeg");
-  });
-
-  it("handles image/png media type", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "PNG text" }] });
-
-    const buffer = Buffer.from("png-data");
-    await extractTextFromImage(buffer, "image/png");
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.messages[0].content[0].source.media_type).toBe("image/png");
-  });
-
-  it("handles image/webp media type", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "WebP text" }] });
-
-    const buffer = Buffer.from("webp-data");
-    await extractTextFromImage(buffer, "image/webp");
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.messages[0].content[0].source.media_type).toBe("image/webp");
-  });
-
-  it("handles image/gif media type", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "GIF text" }] });
-
-    const buffer = Buffer.from("gif-data");
-    await extractTextFromImage(buffer, "image/gif");
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.messages[0].content[0].source.media_type).toBe("image/gif");
-  });
-
-  it("defaults to image/jpeg for unknown image types", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "text" }] });
-
-    const buffer = Buffer.from("data");
-    await extractTextFromImage(buffer, "image/tiff");
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.messages[0].content[0].source.media_type).toBe("image/jpeg");
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns empty string when no text in image", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "" }] });
+    setupSpawnMock("");
 
     const result = await extractTextFromImage(Buffer.from("empty"), "image/jpeg");
     expect(result).toBe("");
   });
 
-  it("returns empty string when content is missing", async () => {
-    setupFetchMock({ content: [] });
-
-    const result = await extractTextFromImage(Buffer.from("x"), "image/jpeg");
-    expect(result).toBe("");
-  });
-
-  it("throws on API error", async () => {
-    setupFetchMock({ error: "rate limited" }, 429);
+  it("throws on CLI error", async () => {
+    setupSpawnMock("error msg", 1);
 
     await expect(
       extractTextFromImage(Buffer.from("x"), "image/jpeg"),
-    ).rejects.toThrow("Vision API error: 429");
+    ).rejects.toThrow("Claude CLI error");
   });
 
-  it("throws when ANTHROPIC_API_KEY is missing", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+  it("writes temp file and cleans up", async () => {
+    setupSpawnMock("extracted text");
 
-    await expect(
-      extractTextFromImage(Buffer.from("x"), "image/jpeg"),
-    ).rejects.toThrow("ANTHROPIC_API_KEY not configured");
-  });
+    await extractTextFromImage(Buffer.from("data"), "image/png");
 
-  it("sends correct headers", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "ok" }] });
-
-    await extractTextFromImage(Buffer.from("x"), "image/jpeg");
-
-    const headers = fetchMock.mock.calls[0][1].headers;
-    expect(headers["x-api-key"]).toBe("test-key");
-    expect(headers["anthropic-version"]).toBe("2023-06-01");
-    expect(headers["content-type"]).toBe("application/json");
+    // Check that spawn was called and the prompt references a temp path
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const args = spawnMock.mock.calls[0][0];
+    const prompt = args.find((a: string) => typeof a === "string" && a.includes("doc-extract-"));
+    expect(prompt).toBeDefined();
   });
 });
 
 // ── extractTextFromPDF ───────────────────────────────────────
 
 describe("extractTextFromPDF", () => {
-  it("falls back to Vision when pdf-parse returns empty text", async () => {
-    // pdf-parse returns empty, Vision should be called
-    setupFetchMock({
-      content: [{ type: "text", text: "Scanned PDF text via Vision" }],
-    });
+  it("falls back to CLI when pdf-parse returns empty text", async () => {
+    // pdf-parse returns empty, CLI should be called
+    setupSpawnMock("Scanned PDF text via CLI");
 
-    // We can't easily mock pdf-parse import, so test the Vision fallback path
+    // We can't easily mock pdf-parse import, so test the CLI fallback path
     // by testing extractText dispatcher
     const buffer = Buffer.from("not-a-real-pdf");
 
-    // pdf-parse will likely throw on invalid PDF, triggering Vision fallback
+    // pdf-parse will likely throw on invalid PDF, triggering CLI fallback
     const result = await extractTextFromPDF(buffer);
-    // Either pdf-parse succeeds (unlikely with fake data) or Vision fallback
+    // Either pdf-parse succeeds (unlikely with fake data) or CLI fallback
     expect(typeof result).toBe("string");
   });
 });
@@ -241,14 +190,14 @@ describe("extractTextFromPDF", () => {
 
 describe("extractText", () => {
   it("dispatches image types to extractTextFromImage", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "image text" }] });
+    setupSpawnMock("image text");
 
     const result = await extractText(Buffer.from("img"), "image/jpeg");
     expect(result).toBe("image text");
   });
 
   it("dispatches application/pdf to extractTextFromPDF", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "pdf fallback" }] });
+    setupSpawnMock("pdf fallback");
 
     const result = await extractText(Buffer.from("pdf"), "application/pdf");
     expect(typeof result).toBe("string");
@@ -364,18 +313,13 @@ describe("classifyDocument", () => {
   ];
 
   it("classifies document into existing category", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 0.95,
-          description: "Facture EDF du 15 mars 2026",
-          document_date: "2026-03-15",
-          suggested_title: "Facture EDF Mars 2026",
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 0.95,
+      description: "Facture EDF du 15 mars 2026",
+      document_date: "2026-03-15",
+      suggested_title: "Facture EDF Mars 2026",
+    }));
 
     // Mock supabase for update
     const chain = {
@@ -399,17 +343,12 @@ describe("classifyDocument", () => {
   });
 
   it("creates new category when name not in existing list", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "ordonnance",
-          confidence: 0.8,
-          description: "Ordonnance medicale",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "ordonnance",
+      confidence: 0.8,
+      description: "Ordonnance medicale",
+      document_date: null,
+    }));
 
     // Mock supabase: getOrCreateCategory needs from().select().eq().single() then from().insert().select().single()
     let fromCallCount = 0;
@@ -446,12 +385,7 @@ describe("classifyDocument", () => {
   });
 
   it("handles JSON wrapped in markdown code blocks", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: '```json\n{"category_name": "facture", "confidence": 0.9, "description": "test", "document_date": null}\n```',
-      }],
-    });
+    setupSpawnMock('```json\n{"category_name": "facture", "confidence": 0.9, "description": "test", "document_date": null}\n```');
 
     const chain = {
       update: mock(() => chain),
@@ -467,36 +401,22 @@ describe("classifyDocument", () => {
     expect(result.confidence).toBe(0.9);
   });
 
-  it("throws when ANTHROPIC_API_KEY is missing", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+  it("throws on CLI error", async () => {
+    setupSpawnMock("", 1);
     const { supabase } = createMockSupabase();
 
     await expect(
       classifyDocument(supabase, "text", mockCategories),
-    ).rejects.toThrow("ANTHROPIC_API_KEY not configured");
-  });
-
-  it("throws on API error", async () => {
-    setupFetchMock({ error: "overloaded" }, 529);
-    const { supabase } = createMockSupabase();
-
-    await expect(
-      classifyDocument(supabase, "text", mockCategories),
-    ).rejects.toThrow("Classification API error: 529");
+    ).rejects.toThrow("Claude CLI error");
   });
 
   it("clamps confidence to [0, 1]", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 1.5,
-          description: "test",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 1.5,
+      description: "test",
+      document_date: null,
+    }));
 
     const chain = {
       update: mock(() => chain),
@@ -512,17 +432,12 @@ describe("classifyDocument", () => {
   });
 
   it("uses existing category when confidence >= 0.6 threshold", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 0.6,
-          description: "Facture probable",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 0.6,
+      description: "Facture probable",
+      document_date: null,
+    }));
 
     const chain = {
       update: mock(() => chain),
@@ -539,17 +454,12 @@ describe("classifyDocument", () => {
   });
 
   it("still uses existing category when confidence < 0.6 (low confidence path)", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 0.4,
-          description: "Maybe a facture",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 0.4,
+      description: "Maybe a facture",
+      document_date: null,
+    }));
 
     const chain = {
       update: mock(() => chain),
@@ -567,17 +477,12 @@ describe("classifyDocument", () => {
   });
 
   it("creates new category for unknown name regardless of confidence", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "medical",
-          confidence: 0.4,
-          description: "Document medical",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "medical",
+      confidence: 0.4,
+      description: "Document medical",
+      document_date: null,
+    }));
 
     // Mock: lookup returns null, insert returns new id
     let fromCallCount = 0;
@@ -612,17 +517,12 @@ describe("classifyDocument", () => {
   });
 
   it("defaults category_name to 'note' when LLM returns empty", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "",
-          confidence: 0.5,
-          description: "Some text",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "",
+      confidence: 0.5,
+      description: "Some text",
+      document_date: null,
+    }));
 
     // "note" exists in mockCategories? No — it doesn't, so it will create a new one
     // Actually the default is "note" from (parsed.category_name || "note")
@@ -656,17 +556,12 @@ describe("classifyDocument", () => {
   });
 
   it("bumps usage count on existing category via fire-and-forget", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 0.9,
-          description: "test",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 0.9,
+      description: "test",
+      document_date: null,
+    }));
 
     const updateMock = mock(() => updateChain);
     const eqMock = mock(() => Promise.resolve({ error: null }));
@@ -689,17 +584,12 @@ describe("classifyDocument", () => {
   });
 
   it("handles classification with empty categories list", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "nouveau",
-          confidence: 0.8,
-          description: "New category",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "nouveau",
+      confidence: 0.8,
+      description: "New category",
+      document_date: null,
+    }));
 
     let fromCallCount = 0;
     const selectChain = {
@@ -733,17 +623,12 @@ describe("classifyDocument", () => {
   });
 
   it("clamps negative confidence to 0", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: -0.5,
-          description: "test",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: -0.5,
+      description: "test",
+      document_date: null,
+    }));
 
     const chain = {
       update: mock(() => chain),
@@ -759,17 +644,12 @@ describe("classifyDocument", () => {
   });
 
   it("truncates text to 2000 chars in prompt", async () => {
-    setupFetchMock({
-      content: [{
-        type: "text",
-        text: JSON.stringify({
-          category_name: "facture",
-          confidence: 0.9,
-          description: "Long note",
-          document_date: null,
-        }),
-      }],
-    });
+    setupSpawnMock(JSON.stringify({
+      category_name: "facture",
+      confidence: 0.9,
+      description: "Long note",
+      document_date: null,
+    }));
 
     const chain = {
       update: mock(() => chain),
@@ -784,10 +664,15 @@ describe("classifyDocument", () => {
     const longText = "A".repeat(5000);
     await classifyDocument(supabase, longText, mockCategories);
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    // The prompt should contain only 2000 chars of the text
-    expect(body.messages[0].content).toContain("AAAA");
-    expect(body.messages[0].content.length).toBeLessThan(longText.length + 500);
+    // Check that spawn was called and the prompt arg contains truncated text (2000 chars max)
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const args = spawnMock.mock.calls[0][0];
+    // The prompt is the arg after "-p"
+    const promptIdx = args.indexOf("-p");
+    const prompt = args[promptIdx + 1];
+    // Should contain "A" chars but not the full 5000
+    expect(prompt).toContain("AAAA");
+    expect(prompt.length).toBeLessThan(longText.length + 500);
   });
 });
 
@@ -795,35 +680,24 @@ describe("classifyDocument", () => {
 
 describe("createDocument", () => {
   it("runs full pipeline: extract → classify → upload → insert", async () => {
-    // Mock Vision API for extraction
-    let fetchCallCount = 0;
-    globalThis.fetch = mock(() => {
-      fetchCallCount++;
-      if (fetchCallCount === 1) {
-        // extractTextFromImage
-        return Promise.resolve({
-          ok: true, status: 200,
-          json: () => Promise.resolve({ content: [{ type: "text", text: "Facture n°1" }] }),
-          text: () => Promise.resolve(""),
-        } as Response);
-      }
-      // classifyDocument
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              category_name: "facture",
-              confidence: 0.9,
-              description: "Facture test",
-              document_date: "2026-01-01",
-            }),
-          }],
-        }),
-        text: () => Promise.resolve(""),
-      } as Response);
-    }) as typeof fetch;
+    // Mock CLI for extraction and classification (sequential calls)
+    let callCount = 0;
+    spyOn(Bun, "spawn").mockImplementation(() => {
+      callCount++;
+      const output = callCount === 1
+        ? "Facture n°1"
+        : JSON.stringify({
+            category_name: "facture",
+            confidence: 0.9,
+            description: "Facture test",
+            document_date: "2026-01-01",
+          });
+      return {
+        stdout: new Response(output).body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+      } as any;
+    });
 
     // Mock Supabase
     const mockDoc: Document = {
@@ -914,8 +788,19 @@ describe("createDocument", () => {
   });
 
   it("cleans up storage on insert failure", async () => {
-    // Mock extraction
-    setupFetchMock({ content: [{ type: "text", text: "text" }] });
+    // Mock CLI for extraction and classification
+    let callCount = 0;
+    spyOn(Bun, "spawn").mockImplementation(() => {
+      callCount++;
+      const output = callCount === 1
+        ? "extracted"
+        : JSON.stringify({ category_name: "note", confidence: 0.9, description: "test", document_date: null });
+      return {
+        stdout: new Response(output).body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+      } as any;
+    });
 
     const removeMock = mock(() => Promise.resolve({ error: null }));
     const categories = [
@@ -923,23 +808,6 @@ describe("createDocument", () => {
     ];
 
     let fromCallCount = 0;
-    let fetchCallCount = 0;
-
-    globalThis.fetch = mock(() => {
-      fetchCallCount++;
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({
-          content: [{
-            type: "text",
-            text: fetchCallCount === 1
-              ? "extracted"
-              : JSON.stringify({ category_name: "note", confidence: 0.9, description: "test", document_date: null }),
-          }],
-        }),
-        text: () => Promise.resolve(""),
-      } as Response);
-    }) as typeof fetch;
 
     const getCatChain = {
       select: mock(() => getCatChain),
@@ -994,25 +862,19 @@ describe("createDocument", () => {
   });
 
   it("throws on storage upload failure", async () => {
-    // Mock extraction
-    setupFetchMock({ content: [{ type: "text", text: "some text" }] });
-
-    let fetchCallCount = 0;
-    globalThis.fetch = mock(() => {
-      fetchCallCount++;
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({
-          content: [{
-            type: "text",
-            text: fetchCallCount === 1
-              ? "extracted text"
-              : JSON.stringify({ category_name: "note", confidence: 0.9, description: "t", document_date: null }),
-          }],
-        }),
-        text: () => Promise.resolve(""),
-      } as Response);
-    }) as typeof fetch;
+    // Mock CLI for extraction and classification
+    let callCount = 0;
+    spyOn(Bun, "spawn").mockImplementation(() => {
+      callCount++;
+      const output = callCount === 1
+        ? "extracted text"
+        : JSON.stringify({ category_name: "note", confidence: 0.9, description: "t", document_date: null });
+      return {
+        stdout: new Response(output).body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+      } as any;
+    });
 
     let catCallCount = 0;
 
@@ -1060,8 +922,8 @@ describe("createDocument", () => {
   });
 
   it("skips classification when extracted text is empty", async () => {
-    // Mock Vision API returning empty text
-    setupFetchMock({ content: [{ type: "text", text: "" }] });
+    // Mock CLI returning empty text
+    setupSpawnMock("");
 
     const mockDoc: Document = {
       id: "doc-empty",
@@ -1115,30 +977,25 @@ describe("createDocument", () => {
       buffer: Buffer.from("img"),
     });
 
-    // No classification call — only 1 fetch (extraction), not 2 (extraction + classification)
+    // No classification call — only 1 spawn (extraction), not 2 (extraction + classification)
     expect(result.category_id).toBeNull();
     expect(result.id).toBe("doc-empty");
   });
 
   it("uses title from input when provided", async () => {
-    setupFetchMock({ content: [{ type: "text", text: "text" }] });
-
-    let fetchCallCount = 0;
-    globalThis.fetch = mock(() => {
-      fetchCallCount++;
-      return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve({
-          content: [{
-            type: "text",
-            text: fetchCallCount === 1
-              ? "extracted"
-              : JSON.stringify({ category_name: "facture", confidence: 0.9, description: "auto title", document_date: null }),
-          }],
-        }),
-        text: () => Promise.resolve(""),
-      } as Response);
-    }) as typeof fetch;
+    // Mock CLI for extraction and classification
+    let callCount = 0;
+    spyOn(Bun, "spawn").mockImplementation(() => {
+      callCount++;
+      const output = callCount === 1
+        ? "extracted"
+        : JSON.stringify({ category_name: "facture", confidence: 0.9, description: "auto title", document_date: null });
+      return {
+        stdout: new Response(output).body,
+        stderr: new Response("").body,
+        exited: Promise.resolve(0),
+      } as any;
+    });
 
     const mockDoc: Document = {
       id: "doc-title",

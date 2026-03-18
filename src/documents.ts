@@ -1,11 +1,14 @@
 /**
  * @module documents
- * @description Document management: text extraction (Claude Vision + pdf-parse),
- * LLM classification (Haiku) with dynamic categories, CRUD with Supabase Storage,
+ * @description Document management: text extraction (Claude CLI + pdf-parse),
+ * LLM classification (Claude CLI) with dynamic categories, CRUD with Supabase Storage,
  * semantic search via Edge Function. S45-T2.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { writeFile, unlink } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -72,65 +75,61 @@ export interface ListDocumentsOptions {
 
 // ── Constants ────────────────────────────────────────────────
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const VISION_MODEL = "claude-haiku-4-5-20251001";
-const CLASSIFICATION_MODEL = "claude-haiku-4-5-20251001";
-const VISION_MAX_TOKENS = 2048;
-const CLASSIFICATION_MAX_TOKENS = 512;
+const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const NEW_CATEGORY_CONFIDENCE_THRESHOLD = 0.6;
 const STORAGE_BUCKET = "documents";
+
+// ── CLI Helper ───────────────────────────────────────────────
+
+/**
+ * Call Claude CLI with a prompt. Uses Max subscription (no API key needed).
+ */
+async function callClaudeCLI(prompt: string): Promise<string> {
+  const args = [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"];
+
+  const cleanEnv = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([k]) => !["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"].includes(k),
+    ),
+  );
+
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: cleanEnv });
+  const output = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    throw new Error(`Claude CLI error: ${stderr || "exit code " + exitCode}`);
+  }
+
+  return output.trim();
+}
 
 // ── Text Extraction ──────────────────────────────────────────
 
 /**
- * Extract text from an image using Claude Vision API.
+ * Extract text from an image using Claude CLI (reads the file via its Read tool).
  */
 export async function extractTextFromImage(
   buffer: Buffer,
   fileType: string,
 ): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+  const ext = fileType === "image/png" ? "png"
+    : fileType === "image/webp" ? "webp"
+    : fileType === "image/gif" ? "gif"
+    : fileType === "application/pdf" ? "pdf"
+    : "jpg";
+  const tmpPath = join(tmpdir(), `doc-extract-${Date.now()}.${ext}`);
 
-  const base64 = buffer.toString("base64");
-  const mediaType = fileType === "image/webp" ? "image/webp"
-    : fileType === "image/png" ? "image/png"
-    : fileType === "image/gif" ? "image/gif"
-    : "image/jpeg";
-
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: VISION_MODEL,
-      max_tokens: VISION_MAX_TOKENS,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: mediaType, data: base64 },
-          },
-          {
-            type: "text",
-            text: "Extract ALL text visible in this document image. Return only the raw extracted text, no commentary. If there is no text, return an empty string.",
-          },
-        ],
-      }],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Vision API error: ${response.status} ${err}`);
+  try {
+    await writeFile(tmpPath, buffer);
+    const result = await callClaudeCLI(
+      `Read the file at ${tmpPath} and extract ALL text visible in it. Return ONLY the raw extracted text, no commentary. If there is no text, return an empty string.`,
+    );
+    return result;
+  } finally {
+    await unlink(tmpPath).catch(() => {});
   }
-
-  const data = await response.json() as { content: Array<{ type: string; text: string }> };
-  return data.content?.[0]?.text?.trim() || "";
 }
 
 /**
@@ -141,7 +140,8 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse(new Uint8Array(buffer));
     await parser.load();
-    const text = (await parser.getText())?.trim() || "";
+    const result = await parser.getText();
+    const text = (typeof result === "string" ? result : result?.text ?? "").trim();
     if (text.length > 0) return text;
   } catch (e) {
     console.error("pdf-parse error, falling back to Vision:", e);
@@ -225,7 +225,7 @@ export async function getOrCreateCategory(
 // ── Classification ───────────────────────────────────────────
 
 /**
- * Classify a document using Haiku LLM with dynamic categories.
+ * Classify a document using Claude CLI with dynamic categories.
  * If confidence < 0.6, creates a new category.
  */
 export async function classifyDocument(
@@ -233,9 +233,6 @@ export async function classifyDocument(
   text: string,
   categories: DocumentCategory[],
 ): Promise<ClassificationResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-
   const categoryList = categories
     .map((c) => `- ${c.name}: ${c.description || "pas de description"}`)
     .join("\n");
@@ -248,7 +245,7 @@ ${categoryList}
 TEXTE DU DOCUMENT (premiers 2000 caracteres):
 ${text.substring(0, 2000)}
 
-Reponds UNIQUEMENT en JSON:
+Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
 {
   "category_name": "nom de la categorie (existante ou nouvelle)",
   "confidence": 0.0 a 1.0,
@@ -257,27 +254,7 @@ Reponds UNIQUEMENT en JSON:
   "suggested_title": "titre suggere pour le document"
 }`;
 
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: CLASSIFICATION_MODEL,
-      max_tokens: CLASSIFICATION_MAX_TOKENS,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Classification API error: ${response.status} ${err}`);
-  }
-
-  const data = await response.json() as { content: Array<{ type: string; text: string }> };
-  const rawText = data.content?.[0]?.text || "{}";
+  const rawText = await callClaudeCLI(prompt);
 
   // Parse JSON from response (handle markdown code blocks)
   const jsonMatch = rawText.match(/\{[\s\S]*\}/);
