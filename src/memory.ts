@@ -25,6 +25,104 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enqueue } from "./notification-queue.ts";
 
+// ── Interfaces ───────────────────────────────────────────────
+
+/** Full memory table row */
+export interface MemoryRecord {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  type: "fact" | "goal" | "completed_goal" | "preference" | "idea";
+  content: string;
+  deadline: string | null;
+  completed_at: string | null;
+  priority: number;
+  importance_score: number;
+  last_accessed_at: string | null;
+  access_count: number;
+  idea_status: "new" | "reviewed" | "promoted" | "archived" | null;
+  metadata: Record<string, unknown>;
+}
+
+/** memory_links table row */
+export interface MemoryLink {
+  id: string;
+  source_id: string;
+  target_id: string;
+  similarity: number;
+  link_type: "related" | "extends" | "supports" | "contradicts";
+  created_at: string;
+}
+
+/** Result from match_memory RPC / search Edge Function */
+export interface MemorySearchResult {
+  id: string;
+  content: string;
+  type: string;
+  created_at: string;
+  similarity: number;
+}
+
+/** Result count from archive_old_memories RPC (returns integer) */
+export type MemoryArchiveResult = number;
+
+/** A fact from get_facts RPC */
+export interface FactRecord {
+  id: string;
+  content: string;
+  importance_score: number;
+  access_count: number;
+}
+
+/** A goal from get_active_goals RPC */
+export interface GoalRecord {
+  id: string;
+  content: string;
+  deadline: string | null;
+  priority: number;
+  importance_score: number;
+}
+
+/** An idea from memory (alias for the Idea interface with all fields) */
+export interface IdeaRecord {
+  id: string;
+  content: string;
+  type: string;
+  idea_status: "new" | "reviewed" | "promoted" | "archived";
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+/** A cluster of semantically related memories */
+export interface MemoryCluster {
+  id: number;
+  label: string;
+  memories: Array<{ id: string; content: string; type: string }>;
+  size: number;
+}
+
+/** A node in a multi-hop memory chain (from getMemoryChain) */
+export interface MemoryChain {
+  id: string;
+  content: string;
+  type: string;
+  depth: number;
+  links: Array<{
+    targetId: string;
+    similarity: number;
+    linkType: string;
+  }>;
+}
+
+/** Memory statistics summary */
+export interface MemoryStats {
+  totalFacts: number;
+  totalGoals: number;
+  totalIdeas: number;
+  totalLinks: number;
+  avgImportanceScore: number;
+}
+
 // ── Memory Importance & Decay (S23-02) ───────────────────────
 
 /** Half-life in days for exponential decay */
@@ -225,18 +323,18 @@ export async function getMemoryContext(
     const parts: string[] = [];
     const servedIds: string[] = [];
 
-    const topFacts = (factsResult.data || []).slice(0, MAX_FACTS_IN_CONTEXT);
-    const topGoals = (goalsResult.data || []).slice(0, MAX_GOALS_IN_CONTEXT);
+    const topFacts = ((factsResult.data || []) as FactRecord[]).slice(0, MAX_FACTS_IN_CONTEXT);
+    const topGoals = ((goalsResult.data || []) as GoalRecord[]).slice(0, MAX_GOALS_IN_CONTEXT);
 
     // Batch fetch linked memories for all served facts/goals (S36-02)
     const allIds = [
-      ...topFacts.map((f: any) => f.id).filter(Boolean),
-      ...topGoals.map((g: any) => g.id).filter(Boolean),
+      ...topFacts.map((f) => f.id).filter(Boolean),
+      ...topGoals.map((g) => g.id).filter(Boolean),
     ];
     const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
 
     if (topFacts.length) {
-      const factLines = topFacts.map((f: any) => {
+      const factLines = topFacts.map((f) => {
         const links = linkedMap.get(f.id) || [];
         const linkLines = links.map(
           (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
@@ -244,11 +342,11 @@ export async function getMemoryContext(
         return [`- ${f.content}`, ...linkLines].join("\n");
       });
       parts.push("FACTS:\n" + factLines.join("\n"));
-      servedIds.push(...topFacts.map((f: any) => f.id).filter(Boolean));
+      servedIds.push(...topFacts.map((f) => f.id).filter(Boolean));
     }
 
     if (topGoals.length) {
-      const goalLines = topGoals.map((g: any) => {
+      const goalLines = topGoals.map((g) => {
         const deadline = g.deadline
           ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
           : "";
@@ -259,7 +357,7 @@ export async function getMemoryContext(
         return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
       });
       parts.push("GOALS:\n" + goalLines.join("\n"));
-      servedIds.push(...topGoals.map((g: any) => g.id).filter(Boolean));
+      servedIds.push(...topGoals.map((g) => g.id).filter(Boolean));
     }
 
     // Bump access stats asynchronously (fire and forget)
@@ -294,7 +392,7 @@ export async function getRecentMessages(
 
     const messages = data
       .reverse()
-      .map((m: any) => `[${m.role}]: ${m.content}`)
+      .map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`)
       .join("\n");
 
     return "RECENT CONVERSATION:\n" + messages;
@@ -324,7 +422,7 @@ export async function getRelevantContext(
     return (
       "RELEVANT PAST MESSAGES:\n" +
       data
-        .map((m: any) => `[${m.role}]: ${m.content}`)
+        .map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`)
         .join("\n")
     );
   } catch {
@@ -503,7 +601,7 @@ export async function findDuplicateIdea(
     if (error || !data?.length) return null;
 
     // Only consider ideas as duplicates
-    const match = data.find((m: any) => m.type === "idea");
+    const match = (data as MemorySearchResult[]).find((m) => m.type === "idea");
     return match ? match.content : null;
   } catch {
     // Search not available — skip deduplication, allow insert
@@ -529,7 +627,7 @@ export async function linkMemories(
   if (!supabase || !memoryId) return 0;
 
   try {
-    const params: Record<string, any> = { p_memory_id: memoryId };
+    const params: Record<string, string | number> = { p_memory_id: memoryId };
     if (threshold !== undefined) params.p_threshold = threshold;
     if (maxLinks !== undefined) params.p_max_links = maxLinks;
 
@@ -664,7 +762,7 @@ export async function findSimilarFact(
 
     if (error || !data?.length) return null;
 
-    const match = data.find((m: any) => m.type === "fact");
+    const match = (data as MemorySearchResult[]).find((m) => m.type === "fact");
     if (!match) return null;
 
     return {
@@ -739,7 +837,7 @@ export async function updateMemoryWithRevision(
 
     if (fetchError || !existing) return false;
 
-    const metadata = (existing.metadata || {}) as Record<string, any>;
+    const metadata = (existing.metadata || {}) as Record<string, unknown>;
     const previousVersions = Array.isArray(metadata.previous_versions)
       ? [...metadata.previous_versions]
       : [];
@@ -756,7 +854,7 @@ export async function updateMemoryWithRevision(
         metadata: {
           ...metadata,
           previous_versions: previousVersions,
-          revision_count: (metadata.revision_count || 0) + 1,
+          revision_count: (Number(metadata.revision_count) || 0) + 1,
           last_revised_at: new Date().toISOString(),
         },
         embedding: null, // Clear to trigger regeneration via webhook
@@ -871,8 +969,8 @@ export async function findContradiction(
 
     // Look for facts that are semantically very similar but might contradict
     // (same topic, different assertion)
-    const match = data.find(
-      (m: any) => m.type === "fact" && m.similarity >= threshold
+    const match = (data as MemorySearchResult[]).find(
+      (m) => m.type === "fact" && m.similarity >= threshold
     );
     return match ? { id: match.id, content: match.content, similarity: match.similarity } : null;
   } catch {
@@ -1164,18 +1262,8 @@ export function classifyLinkContent(sourceContent: string, targetContent: string
 
 // ── Memory Chains (S41-01) ──────────────────────────────────
 
-/** A node in a multi-hop memory chain */
-export interface MemoryChainNode {
-  id: string;
-  content: string;
-  type: string;
-  depth: number;
-  links: Array<{
-    targetId: string;
-    similarity: number;
-    linkType: string;
-  }>;
-}
+/** A node in a multi-hop memory chain (alias for MemoryChain) */
+export type MemoryChainNode = MemoryChain;
 
 /** Max nodes in a chain traversal */
 const MAX_CHAIN_NODES = 50;
@@ -1265,14 +1353,6 @@ export async function getMemoryChain(
 
 // ── Memory Clustering (S41-03) ──────────────────────────────
 
-/** A cluster of semantically related memories */
-export interface MemoryCluster {
-  id: number;
-  label: string;
-  memories: Array<{ id: string; content: string; type: string }>;
-  size: number;
-}
-
 /**
  * Find connected components in the memory link graph.
  * Fetches top facts and their links, groups into clusters.
@@ -1289,8 +1369,8 @@ export async function clusterMemories(
     const { data: facts } = await supabase.rpc("get_facts");
     if (!facts?.length) return [];
 
-    const topFacts = facts.slice(0, maxFacts);
-    const factIds = topFacts.map((f: any) => f.id).filter(Boolean);
+    const topFacts = (facts as FactRecord[]).slice(0, maxFacts);
+    const factIds = topFacts.map((f) => f.id).filter(Boolean);
 
     // Fetch all links (use RPC directly to avoid 3-link cap)
     const { data: allLinks } = await supabase.rpc("get_linked_memories", {
@@ -1409,15 +1489,15 @@ export async function buildMemoryChains(
       supabase.rpc("get_active_goals"),
     ]);
 
-    const facts = (factsResult.data || []).slice(0, MAX_FACTS_IN_CONTEXT);
-    const goals = (goalsResult.data || []).slice(0, MAX_GOALS_IN_CONTEXT);
+    const facts = ((factsResult.data || []) as FactRecord[]).slice(0, MAX_FACTS_IN_CONTEXT);
+    const goals = ((goalsResult.data || []) as GoalRecord[]).slice(0, MAX_GOALS_IN_CONTEXT);
 
     if (facts.length === 0 && goals.length === 0) return "";
 
     // Fetch links for all memories
     const allIds = [
-      ...facts.map((f: any) => f.id),
-      ...goals.map((g: any) => g.id),
+      ...facts.map((f) => f.id),
+      ...goals.map((g) => g.id),
     ].filter(Boolean);
 
     const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
@@ -1431,20 +1511,20 @@ export async function buildMemoryChains(
           "Faits cles:\n" +
             facts
               .slice(0, 10)
-              .map((f: any) => `- ${f.content}`)
+              .map((f) => `- ${f.content}`)
               .join("\n")
         );
-        servedIds.push(...facts.slice(0, 10).map((f: any) => f.id));
+        servedIds.push(...facts.slice(0, 10).map((f) => f.id));
       }
       if (goals.length) {
         parts.push(
           "Objectifs:\n" +
             goals
               .slice(0, 5)
-              .map((g: any) => `- ${g.content}`)
+              .map((g) => `- ${g.content}`)
               .join("\n")
         );
-        servedIds.push(...goals.slice(0, 5).map((g: any) => g.id));
+        servedIds.push(...goals.slice(0, 5).map((g) => g.id));
       }
     } else {
       // Strategic roles: structured chains
@@ -1476,7 +1556,7 @@ export async function buildMemoryChains(
 
       // Goals with linked context
       if (goals.length) {
-        const goalLines = goals.map((g: any) => {
+        const goalLines = goals.map((g) => {
           const deadline = g.deadline
             ? ` (echeance: ${new Date(g.deadline).toLocaleDateString("fr-FR")})`
             : "";
@@ -1554,7 +1634,7 @@ export async function findSimilarPastTasks(
 
     if (error || !data?.length) return [];
 
-    return data.map((t: any) => ({
+    return data.map((t: { id: string; title: string; estimated_hours: number | null; actual_hours: number | null; sprint: string | null; tags: string[] | null }) => ({
       id: t.id,
       title: t.title,
       estimatedHours: t.estimated_hours,

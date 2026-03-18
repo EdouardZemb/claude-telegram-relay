@@ -67,8 +67,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
 | `autonomy-scanner.ts` | Proactive task creation: scans codebase for improvements, creates auto-generated tasks |
-| `autonomy-cron.ts` | Scheduled autonomy runner: daily scan trigger via PM2 cron |
-| `alert-cron.ts` | Hourly scheduled alert runner + memory archival + morning digest flush |
 | `job-manager.ts` | Background job manager: fire-and-forget launch, semaphore concurrency (max 3), JSON persistence, completion notifications, timeout/cancel support |
 | `feature-flags.ts` | Feature flags: file-based toggle system, hot-reload, /feature command |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets and historical data |

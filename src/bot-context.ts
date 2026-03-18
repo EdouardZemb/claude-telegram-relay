@@ -522,6 +522,8 @@ function sendResponse(ctx: Context, response: string): Promise<void> {
   const MAX_LENGTH = 4000;
   const opts = threadOpts(ctx);
 
+  if (!response || !response.trim()) return Promise.resolve();
+
   if (response.length <= MAX_LENGTH) {
     return ctx.reply(response, opts).then(() => {});
   }
