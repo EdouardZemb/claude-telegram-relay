@@ -219,6 +219,29 @@ describe("bot-context", () => {
       }
       // The prompt builder checks USER_NAME — always passes since it is conditional
     });
+
+    it("includes document context and system instruction when documentContext is non-empty", () => {
+      const docCtx = "DOCUMENTS PERTINENTS:\n- Facture EDF (facture, 0.85)";
+      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, docCtx);
+      expect(prompt).toContain(docCtx);
+      expect(prompt).toContain("Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.");
+      // Instruction appears before MEMORY MANAGEMENT
+      const instrIdx = prompt.indexOf("Ne force pas leur mention");
+      const memMgmtIdx = prompt.indexOf("MEMORY MANAGEMENT");
+      expect(instrIdx).toBeLessThan(memMgmtIdx);
+    });
+
+    it("excludes document section and instruction when documentContext is undefined", () => {
+      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, undefined);
+      expect(prompt).not.toContain("DOCUMENTS PERTINENTS");
+      expect(prompt).not.toContain("Ne force pas leur mention");
+    });
+
+    it("excludes document section and instruction when documentContext is empty string", () => {
+      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, "");
+      expect(prompt).not.toContain("DOCUMENTS PERTINENTS");
+      expect(prompt).not.toContain("Ne force pas leur mention");
+    });
   });
 
   // ── sendResponse ───────────────────────────────────────

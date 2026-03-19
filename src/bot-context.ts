@@ -523,7 +523,10 @@ function buildPrompt(
   if (profileContext) parts.push(`\nProfile:\n${profileContext}`);
   if (dynamicProfile) parts.push(dynamicProfile);
   if (memoryContext) parts.push(`\n${memoryContext}`);
-  if (documentContext) parts.push(`\n${documentContext}`);
+  if (documentContext) {
+    parts.push(`\n${documentContext}`);
+    parts.push("Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.");
+  }
   if (relevantContext) parts.push(`\n${relevantContext}`);
 
   parts.push(
