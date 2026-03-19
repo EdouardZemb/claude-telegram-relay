@@ -19,6 +19,15 @@ import {
   formatFeatures,
 } from "../../src/feature-flags";
 
+describe("auto_document_search flag (AC-1, AC-2)", () => {
+  it("exists in config/features.json set to false and isFeatureEnabled returns false", () => {
+    const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+    expect(raw).toHaveProperty("auto_document_search");
+    expect(raw.auto_document_search).toBe(false);
+    expect(isFeatureEnabled("auto_document_search")).toBe(false);
+  });
+});
+
 describe("feature-flags", () => {
   let originalContent: string;
 
