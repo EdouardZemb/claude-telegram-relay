@@ -19,8 +19,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { readSection, writeSection, type BlackboardSections, type SectionName } from "./blackboard.ts";
 import { spawnClaude } from "./agent.ts";
 import { spawnSync } from "bun";
-import { updateTrustScore, shouldAutoApprove } from "./trust-scores.ts";
+import { updateTrustScore, shouldAutoApprove, getCachedTrustScore } from "./trust-scores.ts";
 import { persistGateEvaluation, runDoubleLoopAnalysis } from "./gate-persistence.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
 const DETERMINISTIC_CHECK_TIMEOUT = 30_000; // 30s per check (S34 EC-001)
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -630,6 +631,16 @@ export async function evaluateAndRework(
       passedAtIteration = i;
       const hadRework = i > 0;
 
+      // Notify gate result if prd_to_deploy workflow is active
+      if (isFeatureEnabled("prd_to_deploy")) {
+        const { notifyGateResult } = await import("./prd-workflow.ts");
+        const trustScore = getCachedTrustScore(agentRole).score;
+        notifyGateResult(
+          gateName, true, evaluation.score, evaluation.autoApproved || false,
+          agentRole, trustScore, i,
+        ).catch((err) => console.error("Gate notification error:", err));
+      }
+
       // S35: Update trust score
       updateTrustScore(supabase, agentRole, { passed: true, hadRework })
         .catch((err) => console.error("Trust score update error:", err));
@@ -653,6 +664,13 @@ export async function evaluateAndRework(
         description: `Gate "${gateName}" did not pass after ${maxIterations} rework iterations`,
         suggestion: "Manual review recommended",
       });
+
+      // Notify gate failure if prd_to_deploy workflow is active
+      if (isFeatureEnabled("prd_to_deploy")) {
+        const { notifyGateResult } = await import("./prd-workflow.ts");
+        notifyGateResult(gateName, false, evaluation.score, false, agentRole, undefined, i)
+          .catch((err) => console.error("Gate notification error:", err));
+      }
 
       // S35: Update trust score (failure)
       updateTrustScore(supabase, agentRole, { passed: false, hadRework: true })

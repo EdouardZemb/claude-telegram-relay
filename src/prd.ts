@@ -82,19 +82,53 @@ Description detaillee du comportement attendu.
 
 // ── Queries ──────────────────────────────────────────────────
 
+/** Session constraints to inject into PRD generation */
+export interface PRDSessionConstraints {
+  speed?: string;
+  quality?: string;
+  budget?: string;
+  scope?: string;
+  deadline?: string;
+}
+
 export async function generatePRD(
   description: string,
-  project: string = "telegram-relay"
+  project: string = "telegram-relay",
+  sessionConstraints?: PRDSessionConstraints,
 ): Promise<{ title: string; summary: string; content: string } | null> {
   // Use BMad PM agent (John) persona
   const pmAgent = getAgent("pm");
   const agentPrefix = pmAgent ? buildAgentSystemPrompt(pmAgent) + "\n\n---\n\n" : "";
+
+  // Build constraint instructions
+  const constraintLines: string[] = [];
+  if (sessionConstraints) {
+    if (sessionConstraints.speed === "fast") {
+      constraintLines.push("- CONTRAINTE VITESSE: privilegie un scope minimal et un pipeline rapide (QUICK ou SOLO)");
+    }
+    if (sessionConstraints.quality === "high") {
+      constraintLines.push("- CONTRAINTE QUALITE: inclus des criteres de test plus stricts et une couverture exhaustive");
+    }
+    if (sessionConstraints.budget === "low") {
+      constraintLines.push("- CONTRAINTE BUDGET: note l'estimation de cout et privilegie les pipelines economiques");
+    }
+    if (sessionConstraints.scope === "minimal") {
+      constraintLines.push("- CONTRAINTE PERIMETRE: scope strictement minimal, pas de nice-to-have");
+    }
+    if (sessionConstraints.deadline) {
+      constraintLines.push(`- CONTRAINTE ECHEANCE: ${sessionConstraints.deadline}`);
+    }
+  }
+  const constraintBlock = constraintLines.length > 0
+    ? `\nCONTRAINTES UTILISATEUR:\n${constraintLines.join("\n")}\n`
+    : "";
+
   const prompt = [
     agentPrefix + "Genere un PRD (Product Requirements Document) structure a partir de la description suivante.",
     "",
     `DESCRIPTION: ${description}`,
     `PROJET: ${project}`,
-    "",
+    constraintBlock,
     "Utilise exactement ce template et remplis chaque section avec du contenu pertinent et concret :",
     "",
     PRD_TEMPLATE,
@@ -238,6 +272,29 @@ export async function updatePRDStatus(
 
   if (error) {
     console.error("updatePRDStatus error:", error);
+    return null;
+  }
+  return data as PRD;
+}
+
+export async function updatePRDContent(
+  supabase: SupabaseClient,
+  prdId: string,
+  content: string,
+  metadata?: Record<string, unknown>,
+): Promise<PRD | null> {
+  const updates: Record<string, unknown> = { content };
+  if (metadata) updates.metadata = metadata;
+
+  const { data, error } = await supabase
+    .from("prds")
+    .update(updates)
+    .eq("id", prdId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("updatePRDContent error:", error);
     return null;
   }
   return data as PRD;

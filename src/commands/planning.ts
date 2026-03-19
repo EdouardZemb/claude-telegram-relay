@@ -3,7 +3,8 @@
  * @description Grammy Composer module for planning commands:
  * /plan (decompose request into subtasks), /prd (PRD management),
  * /planify (proactive backlog analysis). Also handles PRD-related
- * callback queries (prd_approve, prd_reject, prd_revise).
+ * callback queries (prd_approve, prd_reject, prd_revise) and
+ * PRD-to-Deploy workflow callbacks (prdwf_*).
  */
 
 import { Composer, Context, InlineKeyboard } from "grammy";
@@ -28,6 +29,28 @@ import {
   formatPlannerResult as formatPlannerResultTg,
 } from "../proactive-planner.ts";
 import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
+import {
+  isPrdWorkflowEnabled,
+  triageDescription,
+  buildTriageResponse,
+  extractSessionConstraints,
+  generateAndSavePRD,
+  decomposePRDIntoTasks,
+  buildRevisionKeyboard,
+  canRevise,
+  getRevisionCount,
+  revisePRD,
+  buildLaunchConfirmation,
+  storePendingDescription,
+  getPendingDescription,
+  clearPendingDescription,
+  storePendingRevision,
+  getPendingRevision,
+  clearPendingRevision,
+  chatKey,
+} from "../prd-workflow.ts";
+import { getSession } from "../conversation-session.ts";
+import { explainPipelineChoice } from "../pipeline-selection.ts";
 
 export default function planningCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -156,11 +179,13 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       const detail = formatPRDDetail(prd);
       // Send with validation buttons if still draft
       if (prd.status === "draft") {
-        const keyboard = new InlineKeyboard()
-          .text("Approuver", `prd_approve:${prd.id}`)
-          .text("Rejeter", `prd_reject:${prd.id}`)
-          .row()
-          .text("Modifier", `prd_revise:${prd.id}`);
+        const keyboard = isPrdWorkflowEnabled()
+          ? buildRevisionKeyboard(prd)
+          : new InlineKeyboard()
+              .text("Approuver", `prd_approve:${prd.id}`)
+              .text("Rejeter", `prd_reject:${prd.id}`)
+              .row()
+              .text("Modifier", `prd_revise:${prd.id}`);
         // Split if too long for a single message with keyboard
         if (detail.length > 4000) {
           await bctx.sendResponse(ctx, detail);
@@ -262,10 +287,214 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     }
   });
 
-  // PRD callback query handler (approve, reject, revise)
+  // ── PRD Workflow Callbacks (prdwf_*) ────────────────────────
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
+    // Handle PRD workflow callbacks
+    if (data.startsWith("prdwf_")) {
+      if (!bctx.supabase) {
+        await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+        return;
+      }
+
+      const cId = ctx.chat?.id || 0;
+      const tId = ctx.callbackQuery.message?.message_thread_id;
+      const ck = chatKey(cId, tId);
+
+      if (data === "prdwf_create") {
+        // F1 -> F2: User chose "Creer le PRD"
+        await ctx.answerCallbackQuery({ text: "Generation du PRD..." });
+        const description = getPendingDescription(ck);
+        if (!description) {
+          await ctx.editMessageText("Description expirée. Renvoie ta demande.");
+          return;
+        }
+
+        const currentProject = await resolveProjectContext(bctx.supabase, tId);
+        const projectSlug = currentProject?.slug || "telegram-relay";
+        const session = getSession(cId, tId);
+        const constraints = extractSessionConstraints(session.constraints);
+
+        const prdCreateFn = async (): Promise<string> => {
+          const prd = await generateAndSavePRD(
+            bctx.supabase!,
+            description,
+            projectSlug,
+            ctx.from?.first_name || "unknown",
+            constraints,
+            tId,
+          );
+          if (!prd) throw new Error("Impossible de generer le PRD.");
+          return `PRD_CREATED:${prd.id}|${prd.title}`;
+        };
+
+        if (isJobManagerEnabled()) {
+          const jobId = await launchJob("prd", cId, prdCreateFn, { messageThreadId: tId });
+          await ctx.editMessageText(`Generation du PRD en cours... (job: ${jobId})`);
+        } else {
+          await ctx.editMessageText("Generation du PRD en cours...");
+          try {
+            const resultTag = await prdCreateFn();
+            const prdId = resultTag.replace("PRD_CREATED:", "").split("|")[0];
+            const prd = await getPRD(bctx.supabase, prdId);
+            if (prd) {
+              const detail = formatPRDDetail(prd);
+              const keyboard = buildRevisionKeyboard(prd);
+              if (detail.length > 4000) {
+                await bctx.sendResponse(ctx, detail);
+                await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+              } else {
+                await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+              }
+              // Update session
+              session.activePrdId = prd.id;
+              session.prdWorkflowStep = "generation";
+            }
+          } catch (error: any) {
+            await ctx.reply(error.message || "Erreur lors de la generation.", bctx.threadOpts(ctx));
+          }
+        }
+        clearPendingDescription(ck);
+        return;
+      }
+
+      if (data === "prdwf_task") {
+        // F1: User chose "Juste une tache" — create task directly
+        await ctx.answerCallbackQuery({ text: "Creation de la tache..." });
+        const description = getPendingDescription(ck);
+        if (!description) {
+          await ctx.editMessageText("Description expiree. Renvoie ta demande.");
+          return;
+        }
+
+        const currentProject = await resolveProjectContext(bctx.supabase, tId);
+        const projectSlug = currentProject?.slug || "telegram-relay";
+        const title = description.length > 100 ? description.substring(0, 97) + "..." : description;
+
+        const task = await addTask(bctx.supabase, title, {
+          description,
+          priority: 3,
+          project: projectSlug,
+          project_id: currentProject?.id,
+        });
+
+        if (task) {
+          await ctx.editMessageText(
+            `Tache creee : ${task.title} [${task.id.substring(0, 8)}]\n\nUtilise /exec ${task.id.substring(0, 8)} pour lancer l'implementation.`
+          );
+        } else {
+          await ctx.editMessageText("Erreur lors de la creation de la tache.");
+        }
+        clearPendingDescription(ck);
+        return;
+      }
+
+      if (data === "prdwf_cancel") {
+        await ctx.answerCallbackQuery({ text: "Annule." });
+        await ctx.editMessageText("Workflow annule.");
+        clearPendingDescription(ck);
+        clearPendingRevision(ck);
+        return;
+      }
+
+      if (data.startsWith("prdwf_revise:")) {
+        // F3: User wants revision
+        const prdId = data.replace("prdwf_revise:", "");
+        const prd = await getPRD(bctx.supabase, prdId);
+        if (!prd) {
+          await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+          return;
+        }
+        if (!canRevise(prd)) {
+          await ctx.answerCallbackQuery({ text: "Nombre max de revisions atteint." });
+          return;
+        }
+        const revCount = getRevisionCount(prd);
+        const session = getSession(cId, tId);
+        const constraints = extractSessionConstraints(session.constraints);
+        storePendingRevision(ck, prd.id, constraints);
+
+        await ctx.answerCallbackQuery({ text: "Envoie tes modifications." });
+        await ctx.editMessageText(
+          `PRD en revision [${prdId.substring(0, 8)}] (${revCount + 1}/${3})\n\nDecris les modifications souhaitees. Je regenererai le PRD.`
+        );
+        return;
+      }
+
+      if (data.startsWith("prdwf_launch:")) {
+        // F5: User confirms implementation launch
+        const prdPrefix = data.replace("prdwf_launch:", "");
+        const prd = await getPRD(bctx.supabase, prdPrefix);
+        if (!prd) {
+          await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+          return;
+        }
+        await ctx.answerCallbackQuery({ text: "Lancement..." });
+
+        // Get tasks from the PRD's project backlog
+        const { data: tasks } = await bctx.supabase.from("tasks")
+          .select("id, title, priority")
+          .eq("project", prd.project)
+          .eq("status", "backlog")
+          .order("priority", { ascending: true })
+          .limit(20);
+
+        if (!tasks || tasks.length === 0) {
+          await ctx.editMessageText("Aucune tache en backlog a executer. Lance /backlog pour verifier.");
+          return;
+        }
+
+        // Launch autopipeline for the first task via job manager
+        if (isJobManagerEnabled()) {
+          const { runAutoPipeline } = await import("../auto-pipeline.ts");
+          const firstTask = tasks[0];
+          const launchFn = async (): Promise<string> => {
+            const result = await runAutoPipeline(bctx.supabase!, firstTask.id, { autoPipeline: true });
+            return result || "Implementation terminee.";
+          };
+          const jobId = await launchJob("autopipeline", cId, launchFn, {
+            messageThreadId: tId,
+            taskId: firstTask.id,
+          });
+          await ctx.editMessageText(
+            `Implementation lancee en arriere-plan (job: ${jobId})\nTache : ${firstTask.title} [${firstTask.id.substring(0, 8)}]`
+          );
+        } else {
+          await ctx.editMessageText("Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.");
+        }
+        return;
+      }
+
+      if (data.startsWith("prdwf_merge:")) {
+        // F7: User wants to merge PR
+        const prNumber = data.replace("prdwf_merge:", "");
+        await ctx.answerCallbackQuery({ text: "Merge en cours..." });
+
+        try {
+          const { spawnSync } = await import("bun");
+          const result = spawnSync(["gh", "pr", "merge", prNumber, "--merge", "--delete-branch"], {
+            cwd: process.env.PROJECT_DIR || process.cwd(),
+            timeout: 30_000,
+          });
+          const success = result.exitCode === 0;
+          await ctx.editMessageText(
+            success
+              ? `PR #${prNumber} mergee avec succes !`
+              : `Erreur lors du merge de la PR #${prNumber}. Verifie sur GitHub.`
+          );
+        } catch {
+          await ctx.editMessageText(`Erreur lors du merge de la PR #${prNumber}.`);
+        }
+        return;
+      }
+
+      // Not a prdwf_ callback we handle
+      await next();
+      return;
+    }
+
+    // Handle existing PRD callbacks
     if (!data.startsWith("prd_")) {
       await next();
       return;
@@ -291,11 +520,13 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       await ctx.answerCallbackQuery();
       const detail = formatPRDDetail(prd);
       if (prd.status === "draft") {
-        const actionKeyboard = new InlineKeyboard()
-          .text("Approuver", `prd_approve:${prd.id}`)
-          .text("Rejeter", `prd_reject:${prd.id}`)
-          .row()
-          .text("Modifier", `prd_revise:${prd.id}`);
+        const actionKeyboard = isPrdWorkflowEnabled()
+          ? buildRevisionKeyboard(prd)
+          : new InlineKeyboard()
+              .text("Approuver", `prd_approve:${prd.id}`)
+              .text("Rejeter", `prd_reject:${prd.id}`)
+              .row()
+              .text("Modifier", `prd_revise:${prd.id}`);
         if (detail.length > 4000) {
           await bctx.sendResponse(ctx, detail);
           await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: actionKeyboard });
@@ -319,48 +550,66 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             const threadId = ctx.callbackQuery.message?.message_thread_id;
             const currentProject = await resolveProjectContext(bctx.supabase, threadId);
 
-            const decomposeFn = async (): Promise<string> => {
-              const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
-              const subtasks = await decomposeTask(prdDescription);
+            if (isPrdWorkflowEnabled()) {
+              // PRD-to-Deploy workflow: decompose then offer launch
+              const decomposeFn = async (): Promise<string> => {
+                const result = await decomposePRDIntoTasks(
+                  bctx.supabase!, prd, projectSlug, currentProject?.id,
+                );
+                return `PRDWF_DECOMPOSED:${prd.id}|${result.tasks.length}|${result.message}`;
+              };
 
-              if (subtasks.length === 0) {
-                throw new Error("Aucune sous-tache generee depuis le PRD.");
-              }
+              const chatId = ctx.chat?.id || 0;
+              const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
+              const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
+              await ctx.editMessageText(
+                `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee (job: ${jobId}). Tu recevras une notification avec les taches et l'option de lancer l'implementation.`
+              );
+            } else {
+              // Legacy flow
+              const decomposeFn = async (): Promise<string> => {
+                const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
+                const subtasks = await decomposeTask(prdDescription);
 
-              const added = [];
-              for (const st of subtasks) {
-                const task = await addTask(bctx.supabase!, st.title, {
-                  description: st.description,
-                  priority: st.priority,
-                  project: projectSlug,
-                  project_id: currentProject?.id,
-                });
-                if (task) {
-                  if (st.acceptance_criteria) {
-                    await bctx.supabase!.from("tasks").update({
-                      acceptance_criteria: st.acceptance_criteria,
-                    }).eq("id", task.id);
-                    task.acceptance_criteria = st.acceptance_criteria;
-                  }
-                  const story = buildStoryFile(task);
-                  await enrichTaskWithStory(bctx.supabase!, task.id, story);
-                  added.push(task);
+                if (subtasks.length === 0) {
+                  throw new Error("Aucune sous-tache generee depuis le PRD.");
                 }
-              }
 
-              const lines = added.map((t, i) => {
-                const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
-                return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
-              });
-              return `${added.length} taches creees depuis le PRD "${prd.title}":\n${lines.join("\n")}`;
-            };
+                const added = [];
+                for (const st of subtasks) {
+                  const task = await addTask(bctx.supabase!, st.title, {
+                    description: st.description,
+                    priority: st.priority,
+                    project: projectSlug,
+                    project_id: currentProject?.id,
+                  });
+                  if (task) {
+                    if (st.acceptance_criteria) {
+                      await bctx.supabase!.from("tasks").update({
+                        acceptance_criteria: st.acceptance_criteria,
+                      }).eq("id", task.id);
+                      task.acceptance_criteria = st.acceptance_criteria;
+                    }
+                    const story = buildStoryFile(task);
+                    await enrichTaskWithStory(bctx.supabase!, task.id, story);
+                    added.push(task);
+                  }
+                }
 
-            const chatId = ctx.chat?.id || 0;
-            const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
-            const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
-            await ctx.editMessageText(
-              `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`
-            );
+                const lines = added.map((t, i) => {
+                  const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+                  return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
+                });
+                return `${added.length} taches creees depuis le PRD "${prd.title}":\n${lines.join("\n")}`;
+              };
+
+              const chatId = ctx.chat?.id || 0;
+              const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
+              const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
+              await ctx.editMessageText(
+                `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`
+              );
+            }
           } else {
             await ctx.editMessageText(
               `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`

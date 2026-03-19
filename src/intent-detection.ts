@@ -245,6 +245,30 @@ const INTENT_PATTERNS: IntentPattern[] = [
     },
   },
   {
+    intent: "suggest_prd",
+    command: "prd_workflow",
+    patterns: [
+      /\b(je\s+voudrais|j'?aimerais|il\s+faudrait|on\s+devrait|on\s+pourrait)\s+(ajouter|creer|implementer|developper|faire|mettre\s+en\s+place)\s+/i,
+      /\b(il\s+faudrait\s+que\s+le\s+bot|le\s+bot\s+devrait|le\s+systeme\s+devrait)\s+/i,
+      /\b(on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)/i,
+      /\b(nouvelle\s+fonctionnalite|nouvelle\s+feature|nouveau\s+module|nouvelle\s+commande)\b/i,
+      /\b(implemente|developpe|code|lance\s+l'?implementation\s+de?)\s+/i,
+    ],
+    argExtractor: (text) => {
+      const patterns = [
+        /(?:je\s+voudrais|j'?aimerais|il\s+faudrait|on\s+devrait|on\s+pourrait)\s+(?:ajouter|creer|implementer|developper|faire|mettre\s+en\s+place)\s+(.+)/i,
+        /(?:il\s+faudrait\s+que\s+le\s+bot|le\s+bot\s+devrait|le\s+systeme\s+devrait)\s+(.+)/i,
+        /(?:on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)(.+)/i,
+        /(?:implemente|developpe|code|lance\s+l'?implementation\s+de?)\s+(.+)/i,
+      ];
+      for (const p of patterns) {
+        const m = text.match(p);
+        if (m?.[1]) return m[1].replace(/\s*[?!.]\s*$/, "").trim();
+      }
+      return text;
+    },
+  },
+  {
     intent: "view_jobs",
     command: "jobs",
     patterns: [

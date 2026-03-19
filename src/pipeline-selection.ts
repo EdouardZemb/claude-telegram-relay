@@ -173,6 +173,45 @@ export function classifyPipeline(task: Task): PipelineType {
  * Classify a task using difficulty scoring (S44 T8).
  * Returns SOLO/LIGHT/DEFAULT based on computed difficulty.
  */
+/**
+ * Explain why a specific pipeline was chosen.
+ * Returns a short French text suitable for Telegram display.
+ */
+export function explainPipelineChoice(pipeline: AgentRole[], difficultyScore?: number): string {
+  const pipelineNames = pipeline.map((r) => r).join(" -> ");
+  const type = identifyPipelineType(pipeline);
+
+  const explanations: Record<string, string> = {
+    SOLO: "Tache simple : un seul agent dev suffit.",
+    LIGHT: "Complexite moyenne : planification legere puis dev + QA.",
+    QUICK: "Correction ou tache simple : dev + QA directement.",
+    DEFAULT: "Tache complexe : analyse complete avec tous les agents.",
+    REVIEW: "Revue de code : QA + architecte.",
+    RESEARCH: "Recherche necessaire : exploration puis dev.",
+  };
+
+  const explanation = explanations[type] || "Pipeline personnalise.";
+  const scoreText = difficultyScore !== undefined ? ` (difficulte: ${Math.round(difficultyScore * 100)}%)` : "";
+
+  return `Pipeline : ${pipelineNames}${scoreText}\n${explanation}`;
+}
+
+/**
+ * Identify pipeline type from an AgentRole array.
+ */
+function identifyPipelineType(pipeline: AgentRole[]): string {
+  const key = pipeline.join(",");
+  const mapping: Record<string, string> = {
+    "dev": "SOLO",
+    "planner,dev,qa": "LIGHT",
+    "dev,qa": "QUICK",
+    "analyst,pm,architect,dev,qa": "DEFAULT",
+    "qa,architect": "REVIEW",
+    "explorer,planner,dev,qa": "RESEARCH",
+  };
+  return mapping[key] || "DEFAULT";
+}
+
 export async function classifyAdaptivePipeline(
   task: Task,
   supabase?: any,

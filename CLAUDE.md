@@ -54,6 +54,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
+| `prd-workflow.ts` | Conversational PRD-to-Deploy workflow: triage, generation with session constraints, bounded revision (max 3), auto-decomposition, implementation launch, gate notifications, PR merge |
 | `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
 | `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment, effectiveness tracking, rule promotion/archival |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |

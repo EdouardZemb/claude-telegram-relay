@@ -236,6 +236,16 @@ const ACTIONS: ActionDefinition[] = [
     backgroundEligible: true,
   },
   {
+    command: "prd_workflow",
+    description: "Workflow conversationnel PRD-to-Deploy",
+    usage: "(detecte automatiquement depuis le langage naturel)",
+    params: [{ name: "description", required: true, description: "Description du besoin fonctionnel" }],
+    risk: "medium",
+    module: "planning",
+    requiresSupabase: true,
+    aliases: ["je voudrais ajouter", "il faudrait", "on a besoin", "nouvelle fonctionnalite", "lance l'implementation"],
+  },
+  {
     command: "planify",
     description: "Analyse proactive du backlog et recommandations",
     usage: "/planify [sprint]",

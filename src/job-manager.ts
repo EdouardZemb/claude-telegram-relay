@@ -203,6 +203,14 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
     case "plan":
       kb.text("Voir le backlog", "jc_backlog");
       hasButtons = true;
+      // PRD workflow: if result contains task count, add launch button
+      if (job.result?.startsWith("PRDWF_DECOMPOSED:")) {
+        const parts = job.result.replace("PRDWF_DECOMPOSED:", "").split("|");
+        const prdId = parts[0];
+        if (prdId) {
+          kb.row().text("Lancer l'implementation", `prdwf_launch:${prdId.substring(0, 8)}`);
+        }
+      }
       break;
     case "prd":
       // result format: PRD_CREATED:<id>|<title>
@@ -239,6 +247,11 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       const parts = job.result.replace("PRD_CREATED:", "").split("|");
       const prdTitle = parts[1] || "";
       message = `PRD créé avec succès (${elapsed})${prdTitle ? `\n${prdTitle}` : ""}`;
+    } else if (job.type === "prd-decompose" && job.result?.startsWith("PRDWF_DECOMPOSED:")) {
+      const parts = job.result.replace("PRDWF_DECOMPOSED:", "").split("|");
+      const taskCount = parts[1] || "?";
+      const details = parts.slice(2).join("|");
+      message = `Decomposition terminée (${elapsed})\n${taskCount} taches creees\n\n${details}`;
     } else {
       message = `Job ${job.type} terminé (${elapsed})\n${job.result || ""}`;
     }

@@ -48,6 +48,10 @@ export interface ConversationSession {
   recentMessages: string[];
   /** Task ID if a task was referenced or created */
   activeTaskId?: string;
+  /** PRD ID when in a PRD-to-deploy workflow */
+  activePrdId?: string;
+  /** Current PRD workflow step */
+  prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "implementation" | "done";
 }
 
 // ── Session Store ────────────────────────────────────────────

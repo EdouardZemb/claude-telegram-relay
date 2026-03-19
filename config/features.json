@@ -3,5 +3,6 @@
   "heartbeat": true,
   "explore_mode": true,
   "job_manager": true,
-  "auto_document_search": false
+  "auto_document_search": false,
+  "prd_to_deploy": false
 }

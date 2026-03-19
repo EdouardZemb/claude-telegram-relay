@@ -39,6 +39,18 @@ import {
   buildClassificationKeyboard,
   registerPendingClassification,
 } from "./documents.ts";
+import {
+  isPrdWorkflowEnabled,
+  triageDescription,
+  buildTriageResponse,
+  storePendingDescription,
+  getPendingRevision,
+  clearPendingRevision,
+  revisePRD,
+  buildRevisionKeyboard,
+  chatKey as prdChatKey,
+} from "../prd-workflow.ts";
+import { getPRD, formatPRDDetail } from "../prd.ts";
 
 // ── Document detection constants ──────────────────────────────
 
@@ -164,6 +176,40 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         return;
       }
 
+      // PRD Workflow: Check if this is a revision response
+      if (isPrdWorkflowEnabled() && bctx.supabase) {
+        const ck = prdChatKey(chatId, threadId);
+        const pendingRev = getPendingRevision(ck);
+        if (pendingRev) {
+          clearPendingRevision(ck);
+          await ctx.replyWithChatAction("typing");
+          try {
+            const prd = await getPRD(bctx.supabase, pendingRev.prdId);
+            if (prd) {
+              const revised = await revisePRD(bctx.supabase, prd, text, pendingRev.constraints);
+              if (revised) {
+                const detail = formatPRDDetail(revised);
+                const keyboard = buildRevisionKeyboard(revised);
+                if (detail.length > 4000) {
+                  await bctx.sendResponse(ctx, detail);
+                  await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+                } else {
+                  await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+                }
+              } else {
+                await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
+              }
+            } else {
+              await ctx.reply("PRD introuvable.", bctx.threadOpts(ctx));
+            }
+          } catch (error) {
+            console.error("PRD revision error:", error);
+            await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
+          }
+          return;
+        }
+      }
+
       const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
       const [relevantContext, memoryContext, recentMessages, dynProfile, classification, docResults] = await Promise.all([
         getRelevantContext(bctx.supabase, text),
@@ -198,6 +244,17 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       };
 
       if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
+        // PRD Workflow: intercept suggest_prd intent
+        if (regexResult.detected.intent === "suggest_prd" && isPrdWorkflowEnabled() && bctx.supabase) {
+          addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+          const description = regexResult.detected.args || text;
+          const triage = await triageDescription(description, bctx.supabase);
+          const { message, keyboard } = buildTriageResponse(description, triage);
+          const ck = prdChatKey(chatId, threadId);
+          storePendingDescription(ck, description);
+          await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+          return;
+        }
         // High-confidence regex match — route to command
         addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
         const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
@@ -212,6 +269,17 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           sessionContext: sessionCtx,
         });
         if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
+          // PRD Workflow: intercept suggest_prd from LLM
+          if (llmResult.detected.command === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
+            addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+            const description = llmResult.detected.args || text;
+            const triage = await triageDescription(description, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(description, triage);
+            const ck = prdChatKey(chatId, threadId);
+            storePendingDescription(ck, description);
+            await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+            return;
+          }
           addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
           const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
           if (routeResult.handled) return;
