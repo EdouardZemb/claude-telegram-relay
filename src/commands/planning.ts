@@ -126,8 +126,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
     const projectSlug = currentProject?.slug || "telegram-relay";
 
-    // /prd without args → list PRDs for current project
-    if (!input) {
+    // /prd without args or /prd list → list PRDs for current project
+    if (!input || /^(list|lister)$/i.test(input)) {
       const prds = await getPRDs(bctx.supabase, { project: projectSlug });
       await bctx.sendResponse(ctx, formatPRDList(prds));
       return;

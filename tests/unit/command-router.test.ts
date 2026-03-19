@@ -58,13 +58,20 @@ const fakeSupa = {
 } as any;
 
 function createRouterCtx(supabase: any = fakeSupa) {
+  const dispatched: string[] = [];
   return {
-    supabase,
-    getThreadId: (ctx: any) => ctx.message?.message_thread_id,
-    threadOpts: (ctx: any) => {
-      const threadId = ctx.message?.message_thread_id;
-      return threadId ? { message_thread_id: threadId } : {};
+    rctx: {
+      supabase,
+      getThreadId: (ctx: any) => ctx.message?.message_thread_id,
+      threadOpts: (ctx: any) => {
+        const threadId = ctx.message?.message_thread_id;
+        return threadId ? { message_thread_id: threadId } : {};
+      },
+      dispatchCommand: async (_ctx: any, command: string) => {
+        dispatched.push(command);
+      },
     },
+    dispatched,
   };
 }
 
@@ -72,7 +79,7 @@ function createRouterCtx(supabase: any = fakeSupa) {
 
 describe("command-router", () => {
   describe("routeIntent — low risk (no supabase needed)", () => {
-    it("routes low-risk action without confirmation", async () => {
+    it("routes low-risk action via dispatchCommand", async () => {
       const { ctx, replies } = createMockCtx();
       const intent: DetectedIntent = {
         intent: "get_help",
@@ -82,10 +89,11 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
-      // Low risk with no required params: should emit command and return handled=false
-      expect(result.handled).toBe(false);
+      const { rctx, dispatched } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
+      expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("/help"))).toBe(true);
+      expect(dispatched).toContain("/help");
     });
 
     it("routes low-risk action (backlog) with supabase", async () => {
@@ -98,9 +106,11 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
-      expect(result.handled).toBe(false);
+      const { rctx, dispatched } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
+      expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("/backlog"))).toBe(true);
+      expect(dispatched).toContain("/backlog");
     });
   });
 
@@ -116,7 +126,8 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
       expect(result.handled).toBe(true);
       expect(result.pendingAction).toBe("exec");
       expect(replies.some((r) => r.includes("Confirmer"))).toBe(true);
@@ -133,8 +144,8 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      // rollback doesn't require supabase and has no required params
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
       expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("/rollback"))).toBe(true);
     });
@@ -152,7 +163,8 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
       expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("tache"))).toBe(true);
     });
@@ -167,14 +179,15 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
       expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("titre"))).toBe(true);
     });
   });
 
   describe("routeIntent — medium risk with args", () => {
-    it("routes medium-risk action with args directly", async () => {
+    it("dispatches medium-risk action with args", async () => {
       const { ctx, replies } = createMockCtx();
       const intent: DetectedIntent = {
         intent: "create_task",
@@ -185,9 +198,11 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx());
-      expect(result.handled).toBe(false);
+      const { rctx, dispatched } = createRouterCtx();
+      const result = await routeIntent(ctx as any, intent, rctx);
+      expect(result.handled).toBe(true);
       expect(replies.some((r) => r.includes("/task Refactorer le module"))).toBe(true);
+      expect(dispatched).toContain("/task Refactorer le module");
     });
   });
 
@@ -202,7 +217,8 @@ describe("command-router", () => {
         source: "regex",
       };
 
-      const result = await routeIntent(ctx as any, intent, createRouterCtx(null));
+      const { rctx } = createRouterCtx(null);
+      const result = await routeIntent(ctx as any, intent, rctx);
       expect(result.handled).toBe(false);
     });
   });
@@ -222,7 +238,8 @@ describe("command-router", () => {
         action: getAction("exec"),
         source: "regex",
       };
-      await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx } = createRouterCtx();
+      await routeIntent(ctx as any, intent, rctx);
 
       const cmd = checkPendingClarification(ctx as any, "abc123");
       expect(cmd).toBe("/exec abc123");
@@ -237,7 +254,8 @@ describe("command-router", () => {
         action: getAction("task"),
         source: "regex",
       };
-      await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx: rctx2 } = createRouterCtx();
+      await routeIntent(ctx as any, intent, rctx2);
 
       const cmd = checkPendingClarification(ctx as any, "mon titre");
       expect(cmd).toBe("/task mon titre");
@@ -277,7 +295,8 @@ describe("command-router", () => {
         action: getAction("exec"),
         source: "regex",
       };
-      await routeIntent(ctx as any, intent, createRouterCtx());
+      const { rctx: rctx3 } = createRouterCtx();
+      await routeIntent(ctx as any, intent, rctx3);
 
       // Now simulate callback from same chat
       const cbCtx = createMockCtx({

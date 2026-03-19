@@ -23,6 +23,8 @@ export interface RouterContext {
   supabase: SupabaseClient | null;
   getThreadId: (ctx: Context) => number | undefined;
   threadOpts: (ctx: Context) => { message_thread_id?: number };
+  /** Dispatch a synthetic command through the bot's handler pipeline */
+  dispatchCommand: (ctx: Context, command: string) => Promise<void>;
 }
 
 // ── Pending Confirmations (per chat) ─────────────────────────
@@ -191,12 +193,11 @@ export async function routeIntent(
     return { handled: true, pendingAction: action.command };
   }
 
-  // Safe or medium risk — execute directly by emitting a synthetic update
-  // We use ctx.api.sendMessage to simulate a command, but actually we just
-  // directly reply with the command text so the user sees what's happening
+  // Safe or medium risk — dispatch command through bot handler pipeline
   const cmdStr = args ? `/${action.command} ${args}` : `/${action.command}`;
-  await ctx.reply(`${cmdStr}`, rctx.threadOpts(ctx));
-  return { handled: false }; // Let Grammy handle the re-sent command naturally
+  await ctx.reply(cmdStr, rctx.threadOpts(ctx));
+  await rctx.dispatchCommand(ctx, cmdStr);
+  return { handled: true };
 }
 
 /**
@@ -283,4 +284,47 @@ function actionVerb(command: string): string {
     case "autopipeline": return "lancer en autopipeline";
     default: return "traiter";
   }
+}
+
+// ── Synthetic Update Builder ────────────────────────────────
+
+let _syntheticUpdateCounter = 0;
+
+/**
+ * Build a synthetic Telegram Update object that Grammy can process
+ * as if the user had typed a command. Preserves the original user's
+ * identity so auth middleware passes.
+ */
+export function buildSyntheticUpdate(ctx: Context, command: string): Record<string, unknown> {
+  const slashEnd = command.indexOf(" ");
+  const cmdLength = slashEnd !== -1 ? slashEnd : command.length;
+
+  // Handle both message and callback query contexts
+  const chat = ctx.chat || ctx.callbackQuery?.message?.chat;
+  const from = ctx.from || ctx.callbackQuery?.from;
+  const threadId =
+    (ctx.message as any)?.message_thread_id ||
+    (ctx.callbackQuery?.message as any)?.message_thread_id;
+
+  _syntheticUpdateCounter++;
+  const update: Record<string, unknown> = {
+    update_id: Date.now() + _syntheticUpdateCounter,
+    message: {
+      message_id: Date.now() + _syntheticUpdateCounter,
+      from,
+      chat,
+      date: Math.floor(Date.now() / 1000),
+      text: command,
+      entities: [
+        {
+          type: "bot_command",
+          offset: 0,
+          length: cmdLength,
+        },
+      ],
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    },
+  };
+
+  return update;
 }

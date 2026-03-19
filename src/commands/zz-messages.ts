@@ -22,7 +22,7 @@ import {
 } from "../memory.ts";
 import { recordResponseTime } from "../alerts.ts";
 import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
-import { routeIntent, checkPendingClarification, handleConfirmationCallback } from "../command-router.ts";
+import { routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate } from "../command-router.ts";
 import { formatActionsForLLM } from "../action-registry.ts";
 import {
   getSession,
@@ -110,14 +110,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     if (command) {
       await ctx.answerCallbackQuery({ text: "Execution..." });
       await ctx.editMessageText(`Execution : ${command}`);
-      // Send the resolved command as a message for Grammy to route
-      const chatId = ctx.callbackQuery.message?.chat?.id;
-      const threadId = (ctx.callbackQuery.message as any)?.message_thread_id;
-      if (chatId) {
-        const opts: Record<string, unknown> = {};
-        if (threadId) opts.message_thread_id = threadId;
-        await bctx.bot.api.sendMessage(chatId, command, opts);
-      }
+      // Dispatch the command through the bot's handler pipeline
+      const update = buildSyntheticUpdate(ctx, command);
+      await bctx.bot.handleUpdate(update);
     } else if (data === "intent_cancel") {
       await ctx.answerCallbackQuery({ text: "Annule." });
       await ctx.editMessageText("Action annulee.");
@@ -161,13 +156,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       // S37: Check if this is a response to a pending clarification
       const clarificationCmd = checkPendingClarification(ctx, text);
       if (clarificationCmd) {
-        // Send the resolved command for Grammy to route
-        const chatId2 = ctx.chat?.id;
-        if (chatId2) {
-          const opts: Record<string, unknown> = {};
-          if (threadId) opts.message_thread_id = threadId;
-          await bctx.bot.api.sendMessage(chatId2, clarificationCmd, opts);
-        }
+        // Dispatch the command through the bot's handler pipeline
+        const update = buildSyntheticUpdate(ctx, clarificationCmd);
+        await bctx.bot.handleUpdate(update);
         return;
       }
 
@@ -187,14 +178,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       // Two-tier: regex fast path, then LLM fallback for ambiguous
       const regexResult = detectIntent(text);
 
+      const routerCtx = {
+        supabase: bctx.supabase,
+        getThreadId: bctx.getThreadId,
+        threadOpts: bctx.threadOpts,
+        dispatchCommand: async (sourceCtx: Context, command: string) => {
+          const update = buildSyntheticUpdate(sourceCtx, command);
+          await bctx.bot.handleUpdate(update);
+        },
+      };
+
       if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
         // High-confidence regex match — route to command
         addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
-        const routeResult = await routeIntent(ctx, regexResult.detected, {
-          supabase: bctx.supabase,
-          getThreadId: bctx.getThreadId,
-          threadOpts: bctx.threadOpts,
-        });
+        const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
         if (routeResult.handled) return;
       } else {
         // LLM fallback for ambiguous messages — S43: with session context
@@ -207,11 +204,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         });
         if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
           addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
-          const routeResult = await routeIntent(ctx, llmResult.detected, {
-            supabase: bctx.supabase,
-            getThreadId: bctx.getThreadId,
-            threadOpts: bctx.threadOpts,
-          });
+          const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
           if (routeResult.handled) return;
         }
       }
