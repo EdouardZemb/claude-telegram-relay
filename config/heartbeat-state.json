@@ -1,22 +1,12 @@
 {
-  "lastPulseAt": "2026-03-19T10:50:00.125Z",
-  "lastCommitSha": "7cc5802f2e5f417b7f963ffb7d4b85a659bbdc7d",
+  "lastPulseAt": "2026-03-19T11:10:00.120Z",
+  "lastCommitSha": "34ce5514a64c0d649f50c1a83a5672fcd4c4ecc5",
   "lastSprintSnapshot": {
     "sprint": null,
     "done": 0,
     "total": 0
   },
   "recentActions": [
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T09:20:16.017Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T09:30:13.385Z"
-    },
     {
       "type": "none",
       "summary": "Rien a signaler",
@@ -56,9 +46,21 @@
       "type": "none",
       "summary": "Rien a signaler",
       "timestamp": "2026-03-19T10:50:17.083Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T11:00:12.933Z"
+    },
+    {
+      "type": "notify",
+      "summary": "⚠️ PR #13 (path traversal fix) est ouvert depuis longtemps. C'est une faille sécu — à fusionner en priorité?",
+      "timestamp": "2026-03-19T11:10:14.437Z"
     }
   ],
-  "cooldowns": {},
+  "cooldowns": {
+    "⚠️ PR #13 (path traversal fix) est ouvert depuis l": 1773920414440
+  },
   "lastAlertCheckAt": "2026-03-19T10:40:00.126Z",
   "lastArchivalAt": "2026-03-19T10:40:00.126Z",
   "lastAutonomyScanAt": "2026-03-18T18:30:00.124Z"
