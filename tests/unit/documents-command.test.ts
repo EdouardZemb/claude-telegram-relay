@@ -498,3 +498,43 @@ describe("edge cases", () => {
     expect(truncated.length).toBe(60);
   });
 });
+
+// ── Duplicate Detection Helpers ─────────────────────────────
+
+describe("buildDuplicateKeyboard", () => {
+  it("builds keyboard with add and cancel buttons", () => {
+    const { buildDuplicateKeyboard } = require("../../src/commands/documents.ts");
+    const keyboard = buildDuplicateKeyboard("123_1234567890");
+    const data = keyboard.inline_keyboard;
+    expect(data.length).toBeGreaterThanOrEqual(1);
+    const allButtons = data.flat();
+    const texts = allButtons.map((b: { text: string }) => b.text);
+    expect(texts).toContain("Ajouter quand meme");
+    expect(texts).toContain("Annuler");
+  });
+
+  it("includes upload key in callback data", () => {
+    const { buildDuplicateKeyboard } = require("../../src/commands/documents.ts");
+    const keyboard = buildDuplicateKeyboard("mykey");
+    const allButtons = keyboard.inline_keyboard.flat();
+    const addBtn = allButtons.find((b: { text: string }) => b.text === "Ajouter quand meme");
+    expect(addBtn.callback_data).toBe("doc_dup_add:mykey");
+    const cancelBtn = allButtons.find((b: { text: string }) => b.text === "Annuler");
+    expect(cancelBtn.callback_data).toBe("doc_dup_cancel:mykey");
+  });
+});
+
+describe("storePendingUpload", () => {
+  it("stores and returns a key", () => {
+    const { storePendingUpload } = require("../../src/commands/documents.ts");
+    const input = {
+      userId: "user1",
+      filePath: "test.pdf",
+      fileType: "application/pdf",
+      buffer: Buffer.from("test"),
+    };
+    const key = storePendingUpload(12345, input);
+    expect(typeof key).toBe("string");
+    expect(key).toContain("12345_");
+  });
+});

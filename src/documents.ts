@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createHash } from "crypto";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -372,6 +373,60 @@ Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
   };
 }
 
+// ── Duplicate Detection ─────────────────────────────────────
+
+/**
+ * Compute SHA-256 hash of a file buffer.
+ */
+export function computeFileHash(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+export interface DuplicateCheckResult {
+  found: boolean;
+  matchType: "filename" | "content" | null;
+  existingDocument: Document | null;
+}
+
+/**
+ * Check if a document already exists for this user by filename or content hash.
+ * Returns the existing document and match type if found.
+ */
+export async function checkDuplicate(
+  supabase: SupabaseClient,
+  userId: string,
+  filename: string,
+  contentHash: string,
+): Promise<DuplicateCheckResult> {
+  // Check by content hash first (strongest signal)
+  const { data: hashMatch } = await supabase
+    .from("documents")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("metadata->>content_hash", contentHash)
+    .limit(1)
+    .single();
+
+  if (hashMatch) {
+    return { found: true, matchType: "content", existingDocument: hashMatch as Document };
+  }
+
+  // Check by original filename
+  const { data: nameMatch } = await supabase
+    .from("documents")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("metadata->>original_filename", filename)
+    .limit(1)
+    .single();
+
+  if (nameMatch) {
+    return { found: true, matchType: "filename", existingDocument: nameMatch as Document };
+  }
+
+  return { found: false, matchType: null, existingDocument: null };
+}
+
 // ── CRUD ─────────────────────────────────────────────────────
 
 /**
@@ -436,6 +491,7 @@ export async function createDocument(
     file_size: input.fileSize || input.buffer.length,
     metadata: {
       original_filename: input.filePath.split("/").pop(),
+      content_hash: computeFileHash(input.buffer),
       classification_confidence: classification?.confidence || null,
       is_new_category: classification?.is_new_category || false,
       extraction_failed: extractionFailed,

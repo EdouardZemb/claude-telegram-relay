@@ -32,12 +32,15 @@ import {
   addConstraint,
   formatSessionForIntent,
 } from "../conversation-session.ts";
-import { createDocument, searchDocuments } from "../documents.ts";
+import { createDocument, searchDocuments, checkDuplicate, computeFileHash } from "../documents.ts";
+import type { DocumentCreateInput } from "../documents.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { formatDocumentContext } from "../bot-context.ts";
 import {
   buildClassificationKeyboard,
   registerPendingClassification,
+  buildDuplicateKeyboard,
+  storePendingUpload,
 } from "./documents.ts";
 import {
   isPrdWorkflowEnabled,
@@ -408,11 +411,35 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         const response = await fetch(url);
         const buffer = Buffer.from(await response.arrayBuffer());
         const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
+        const fileName = `photo_${Date.now()}.jpg`;
 
         try {
+          // Duplicate detection
+          const contentHash = computeFileHash(buffer);
+          const dupCheck = await checkDuplicate(bctx.supabase, userId, fileName, contentHash);
+          if (dupCheck.found && dupCheck.existingDocument) {
+            const existing = dupCheck.existingDocument;
+            const matchLabel = dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
+            const existingDate = new Date(existing.created_at).toLocaleDateString("fr-FR");
+            const uploadInput: DocumentCreateInput = { userId, filePath: fileName, fileType: "image/jpeg", fileSize, buffer };
+            const uploadKey = storePendingUpload(ctx.chat?.id || 0, uploadInput);
+            const keyboard = buildDuplicateKeyboard(uploadKey);
+
+            await bctx.saveMessage("user", `[Document photo]: ${caption || "photo"}`, meta);
+            await ctx.reply(
+              `Doublon detecte (${matchLabel}) :\n`
+              + `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n`
+              + `Ajoute le : ${existingDate}\n\n`
+              + `Veux-tu quand meme l'ajouter ?`,
+              { ...bctx.threadOpts(ctx), reply_markup: keyboard },
+            );
+            bctx.clearError(messageId);
+            return;
+          }
+
           const doc = await createDocument(bctx.supabase, {
             userId,
-            filePath: `photo_${Date.now()}.jpg`,
+            filePath: fileName,
             fileType: "image/jpeg",
             fileSize,
             buffer,
@@ -516,6 +543,36 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
 
         try {
+          // Duplicate detection
+          const contentHash = computeFileHash(buffer);
+          const dupCheck = await checkDuplicate(bctx.supabase, userId, fileName, contentHash);
+          if (dupCheck.found && dupCheck.existingDocument) {
+            const existing = dupCheck.existingDocument;
+            const matchLabel = dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
+            const existingDate = new Date(existing.created_at).toLocaleDateString("fr-FR");
+            const uploadInput: DocumentCreateInput = {
+              userId,
+              title: ctx.message.caption || undefined,
+              filePath: fileName,
+              fileType: mimeType,
+              fileSize: doc.file_size || buffer.length,
+              buffer,
+            };
+            const uploadKey = storePendingUpload(ctx.chat?.id || 0, uploadInput);
+            const keyboard = buildDuplicateKeyboard(uploadKey);
+
+            await bctx.saveMessage("user", `[Document: ${fileName}]: ${ctx.message.caption || "fichier"}`, meta);
+            await ctx.reply(
+              `Doublon detecte (${matchLabel}) :\n`
+              + `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n`
+              + `Ajoute le : ${existingDate}\n\n`
+              + `Veux-tu quand meme l'ajouter ?`,
+              { ...bctx.threadOpts(ctx), reply_markup: keyboard },
+            );
+            bctx.clearError(messageId);
+            return;
+          }
+
           const createdDoc = await createDocument(bctx.supabase, {
             userId,
             title: ctx.message.caption || undefined,

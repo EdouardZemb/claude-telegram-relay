@@ -17,8 +17,9 @@ import {
   getDocumentStats,
   getCategories,
   createSignedUrls,
+  createDocument,
 } from "../documents.ts";
-import type { Document, DocumentCategory } from "../documents.ts";
+import type { Document, DocumentCategory, DocumentCreateInput } from "../documents.ts";
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -46,6 +47,24 @@ function schedulePendingTimeout(chatId: number, supabase: NonNullable<BotContext
     pendingClassifications.delete(chatId);
     console.log(`Auto-confirmed classification for document ${pending.documentId} after timeout`);
   }, CLASSIFICATION_TIMEOUT_MS);
+}
+
+// ── Pending upload state (for duplicate confirmation) ────────
+
+interface PendingUpload {
+  input: DocumentCreateInput;
+  chatId: number;
+  threadId?: number;
+  createdAt: number;
+}
+
+const PENDING_UPLOAD_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+
+// In-memory map: key -> pending upload
+const pendingUploads = new Map<string, PendingUpload>();
+
+function pendingUploadKey(chatId: number, timestamp: number): string {
+  return `${chatId}_${timestamp}`;
 }
 
 // ── Formatters ───────────────────────────────────────────────
@@ -468,6 +487,65 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       return;
     }
 
+    // ── doc_dup_add:<key> — add despite duplicate ─────────
+    if (data.startsWith("doc_dup_add:")) {
+      const key = data.split(":")[1];
+      if (!key) {
+        await ctx.answerCallbackQuery({ text: "Donnees manquantes." });
+        return;
+      }
+
+      const pending = pendingUploads.get(key);
+      if (!pending) {
+        await ctx.answerCallbackQuery({ text: "Upload expire. Renvoie le document." });
+        return;
+      }
+      pendingUploads.delete(key);
+
+      await ctx.answerCallbackQuery({ text: "Ajout en cours..." });
+      await ctx.editMessageText("Ajout du document en cours...");
+
+      try {
+        const createdDoc = await createDocument(bctx.supabase, pending.input);
+        const catName = createdDoc.description || "non classifie";
+        const keyboard = buildClassificationKeyboard(createdDoc.id, catName);
+
+        if (createdDoc.category_id) {
+          registerPendingClassification(
+            pending.chatId,
+            createdDoc.id,
+            createdDoc.category_id,
+            catName,
+            bctx.supabase,
+          );
+        }
+
+        const extractionFailed = (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
+        const resultText = [
+          `Document enregistre [${createdDoc.id.substring(0, 8)}]`,
+          createdDoc.title ? `Titre: ${createdDoc.title}` : "",
+          createdDoc.description ? `Description: ${createdDoc.description}` : "",
+          createdDoc.document_date ? `Date: ${createdDoc.document_date}` : "",
+          extractionFailed ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
+        ].filter(Boolean).join("\n");
+
+        await ctx.editMessageText(resultText, { reply_markup: keyboard });
+      } catch (err) {
+        console.error("doc_dup_add createDocument error:", err);
+        await ctx.editMessageText("Erreur lors de l'ajout du document.");
+      }
+      return;
+    }
+
+    // ── doc_dup_cancel:<key> — cancel duplicate upload ───
+    if (data.startsWith("doc_dup_cancel:")) {
+      const key = data.split(":")[1];
+      if (key) pendingUploads.delete(key);
+      await ctx.answerCallbackQuery({ text: "Upload annule." });
+      await ctx.editMessageText("Upload annule.");
+      return;
+    }
+
     // Not a recognized doc_ prefix — pass to next handler
     await next();
   });
@@ -523,4 +601,37 @@ export function getPendingClassification(chatId: number): PendingClassification 
  */
 export function clearPendingClassification(chatId: number): void {
   pendingClassifications.delete(chatId);
+}
+
+/**
+ * Build inline keyboard for duplicate confirmation.
+ */
+export function buildDuplicateKeyboard(uploadKey: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Ajouter quand meme", `doc_dup_add:${uploadKey}`)
+    .text("Annuler", `doc_dup_cancel:${uploadKey}`);
+}
+
+/**
+ * Store a pending upload for duplicate confirmation.
+ * Returns the upload key.
+ */
+export function storePendingUpload(
+  chatId: number,
+  input: DocumentCreateInput,
+  threadId?: number,
+): string {
+  const ts = Date.now();
+  const key = pendingUploadKey(chatId, ts);
+  pendingUploads.set(key, {
+    input,
+    chatId,
+    threadId,
+    createdAt: ts,
+  });
+  // Auto-cleanup after timeout
+  setTimeout(() => {
+    pendingUploads.delete(key);
+  }, PENDING_UPLOAD_TIMEOUT_MS);
+  return key;
 }

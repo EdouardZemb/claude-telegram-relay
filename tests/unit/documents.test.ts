@@ -113,12 +113,15 @@ import {
   searchDocuments,
   getDocumentStats,
   createSignedUrls,
+  computeFileHash,
+  checkDuplicate,
   type DocumentCategory,
   type Document,
   type DocumentCreateInput,
   type ClassificationResult,
   type DocumentSearchResult,
   type ListDocumentsOptions,
+  type DuplicateCheckResult,
 } from "../../src/documents.ts";
 
 // ── Setup ────────────────────────────────────────────────────
@@ -1609,5 +1612,103 @@ describe("function exports", () => {
     expect(typeof searchDocuments).toBe("function");
     expect(typeof getDocumentStats).toBe("function");
     expect(typeof createSignedUrls).toBe("function");
+    expect(typeof computeFileHash).toBe("function");
+    expect(typeof checkDuplicate).toBe("function");
+  });
+});
+
+// ── Duplicate Detection Tests ────────────────────────────────
+
+describe("computeFileHash", () => {
+  it("returns a SHA-256 hex string", () => {
+    const hash = computeFileHash(Buffer.from("hello world"));
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("returns same hash for identical content", () => {
+    const h1 = computeFileHash(Buffer.from("test content"));
+    const h2 = computeFileHash(Buffer.from("test content"));
+    expect(h1).toBe(h2);
+  });
+
+  it("returns different hash for different content", () => {
+    const h1 = computeFileHash(Buffer.from("content A"));
+    const h2 = computeFileHash(Buffer.from("content B"));
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe("checkDuplicate", () => {
+  it("returns found=false when no duplicate", async () => {
+    function buildNoMatchChain() {
+      const chain: Record<string, unknown> = {};
+      chain.select = mock(() => chain);
+      chain.eq = mock(() => chain);
+      chain.limit = mock(() => chain);
+      chain.single = mock(() => Promise.resolve({ data: null, error: { code: "PGRST116" } }));
+      return chain;
+    }
+
+    const supabase = {
+      from: mock(() => buildNoMatchChain()),
+    } as unknown as SupabaseClient;
+
+    const result = await checkDuplicate(supabase, "user1", "file.pdf", "abc123");
+    expect(result.found).toBe(false);
+    expect(result.matchType).toBeNull();
+    expect(result.existingDocument).toBeNull();
+  });
+
+  it("detects content hash duplicate", async () => {
+    const existingDoc = { id: "doc-123", title: "Facture EDF", created_at: "2026-03-01" };
+
+    function buildMatchChain() {
+      const chain: Record<string, unknown> = {};
+      chain.select = mock(() => chain);
+      chain.eq = mock(() => chain);
+      chain.limit = mock(() => chain);
+      chain.single = mock(() => Promise.resolve({ data: existingDoc, error: null }));
+      return chain;
+    }
+
+    const supabase = {
+      from: mock(() => buildMatchChain()),
+    } as unknown as SupabaseClient;
+
+    const result = await checkDuplicate(supabase, "user1", "file.pdf", "abc123");
+    expect(result.found).toBe(true);
+    expect(result.matchType).toBe("content");
+    expect(result.existingDocument).toEqual(existingDoc);
+  });
+
+  it("detects filename duplicate when no hash match", async () => {
+    const existingDoc = { id: "doc-456", title: "Contrat", created_at: "2026-03-10" };
+    let queryCount = 0;
+
+    function buildChain(data: unknown, error: unknown) {
+      const chain: Record<string, unknown> = {};
+      chain.select = mock(() => chain);
+      chain.eq = mock(() => chain);
+      chain.limit = mock(() => chain);
+      chain.single = mock(() => Promise.resolve({ data, error }));
+      return chain;
+    }
+
+    const supabase = {
+      from: mock(() => {
+        queryCount++;
+        if (queryCount === 1) {
+          // First call: hash check → no match
+          return buildChain(null, { code: "PGRST116" });
+        }
+        // Second call: filename check → match
+        return buildChain(existingDoc, null);
+      }),
+    } as unknown as SupabaseClient;
+
+    const result = await checkDuplicate(supabase, "user1", "file.pdf", "no-match-hash");
+    expect(result.found).toBe(true);
+    expect(result.matchType).toBe("filename");
+    expect(result.existingDocument).toEqual(existingDoc);
   });
 });
