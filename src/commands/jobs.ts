@@ -122,18 +122,48 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
           `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}] (${t.status})`
         );
         const text = `Backlog (${backlog.length} taches):\n\n${lines.join("\n")}`;
-        await ctx.reply(text);
+        await ctx.reply(text, bctx.threadOpts(ctx));
       }
       return;
     }
 
     if (action === "jc_prd" && param && bctx.supabase) {
-      const prd = await getPRD(bctx.supabase, param);
-      if (prd) {
-        await ctx.answerCallbackQuery();
-        await ctx.reply(formatPRDDetail(prd));
-      } else {
-        await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+      let callbackAnswered = false;
+      try {
+        const prd = await getPRD(bctx.supabase, param);
+        if (prd) {
+          await ctx.answerCallbackQuery();
+          callbackAnswered = true;
+          const detail = formatPRDDetail(prd);
+          const shortId = prd.id.substring(0, 8);
+
+          // Truncate if too long for Telegram (4096 char limit)
+          const MAX_DISPLAY = 3800;
+          const displayText = detail.length > MAX_DISPLAY
+            ? detail.substring(0, MAX_DISPLAY) + `\n\n... (tronque, utilise /prd ${shortId} pour le texte complet)`
+            : detail;
+
+          // Add action buttons for draft PRDs (same as /prd command)
+          if (prd.status === "draft") {
+            const { InlineKeyboard } = await import("grammy");
+            const keyboard = new InlineKeyboard()
+              .text("Approuver", `prd_approve:${prd.id}`)
+              .text("Rejeter", `prd_reject:${prd.id}`)
+              .row()
+              .text("Modifier", `prd_revise:${prd.id}`);
+            await ctx.reply(displayText, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+          } else {
+            await ctx.reply(displayText, bctx.threadOpts(ctx));
+          }
+        } else {
+          await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+          callbackAnswered = true;
+        }
+      } catch (err) {
+        console.error("[jobs] jc_prd callback error:", err);
+        if (!callbackAnswered) {
+          try { await ctx.answerCallbackQuery({ text: "Erreur lors de l'affichage du PRD." }); } catch { /* already answered */ }
+        }
       }
       return;
     }

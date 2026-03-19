@@ -356,7 +356,8 @@ let session = await loadSession();
 const TOPIC_NAMES: Record<number, string> = {};
 
 function getThreadId(ctx: Context): number | undefined {
-  return (ctx.message as any)?.message_thread_id;
+  return (ctx.message as any)?.message_thread_id
+    || (ctx.callbackQuery?.message as any)?.message_thread_id;
 }
 
 function threadOpts(ctx: Context): { message_thread_id?: number } {

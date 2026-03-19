@@ -1,6 +1,6 @@
 {
-  "lastPulseAt": "2026-03-19T11:10:00.120Z",
-  "lastCommitSha": "34ce5514a64c0d649f50c1a83a5672fcd4c4ecc5",
+  "lastPulseAt": "2026-03-19T12:40:00.120Z",
+  "lastCommitSha": "4add62658bea84b4ed76c5c881045aaf19e34f33",
   "lastSprintSnapshot": {
     "sprint": null,
     "done": 0,
@@ -10,58 +10,56 @@
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T09:40:10.565Z"
+      "timestamp": "2026-03-18T21:30:11.390Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T09:50:09.879Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T10:00:13.690Z"
-    },
-    {
-      "type": "task_create",
-      "summary": "Investigate PR #13 estimate and status",
-      "timestamp": "2026-03-19T10:10:13.858Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T10:20:13.326Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T10:30:17.341Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T10:40:16.975Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T10:50:17.083Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-19T11:00:12.933Z"
+      "timestamp": "2026-03-18T21:40:12.186Z"
     },
     {
       "type": "notify",
-      "summary": "⚠️ PR #13 (path traversal fix) est ouvert depuis longtemps. C'est une faille sécu — à fusionner en priorité?",
-      "timestamp": "2026-03-19T11:10:14.437Z"
+      "summary": "⚠️ PR #13 (path traversal in documents) bloquee depuis 23 jours. Securite — a investiguer ou fermer.",
+      "timestamp": "2026-03-18T21:50:15.832Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-18T22:00:10.438Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T11:50:19.932Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T12:00:10.593Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T12:10:14.795Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T12:20:10.862Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T12:30:17.005Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T12:40:19.597Z"
     }
   ],
-  "cooldowns": {
-    "⚠️ PR #13 (path traversal fix) est ouvert depuis l": 1773920414440
-  },
-  "lastAlertCheckAt": "2026-03-19T10:40:00.126Z",
-  "lastArchivalAt": "2026-03-19T10:40:00.126Z",
+  "cooldowns": {},
+  "lastAlertCheckAt": "2026-03-19T11:50:00.119Z",
+  "lastArchivalAt": "2026-03-19T11:50:00.119Z",
   "lastAutonomyScanAt": "2026-03-18T18:30:00.124Z"
 }

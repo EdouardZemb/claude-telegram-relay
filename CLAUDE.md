@@ -351,6 +351,7 @@ claude mcp add supabase -- npx -y @supabase/mcp-server-supabase@latest --access-
    - Name: `embed_messages`, Table: `messages`, Events: INSERT
    - Type: Supabase Edge Function, Function: `embed`
    - Create a second webhook: `embed_memory`, Table: `memory`, Events: INSERT, Function: `embed`
+   - Create a third webhook: `embed_documents`, Table: `documents`, Events: INSERT, Function: `embed`
 
 #### Step 5: Verify
 
