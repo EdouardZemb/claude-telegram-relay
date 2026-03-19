@@ -15,6 +15,7 @@ import { synthesize } from "./tts.ts";
 import { analyzeProfile } from "./profile-evolution.ts";
 import { getTopicConfig as getTopicConfigHelper, type TopicConfig } from "./topic-config.ts";
 import { getIdea } from "./memory.ts";
+import type { DocumentSearchResult } from "./documents.ts";
 
 // ============================================================
 // CONFIG CONSTANTS
@@ -83,6 +84,7 @@ export interface BotContext {
     recentMessages?: string,
     topicName?: string,
     dynamicProfile?: string,
+    documentContext?: string,
   ) => string;
   saveMessage: (role: string, content: string, metadata?: Record<string, unknown>) => Promise<void>;
   getDynamicProfile: () => Promise<string>;
@@ -441,6 +443,42 @@ async function getDynamicProfile(): Promise<string> {
 }
 
 // ============================================================
+// DOCUMENT CONTEXT FORMATTER
+// ============================================================
+
+/**
+ * Formats an array of DocumentSearchResult into a string for prompt injection.
+ * Pure function — no side effects, no network calls.
+ */
+export function formatDocumentContext(results: DocumentSearchResult[]): string {
+  if (results.length === 0) return "";
+
+  const lines: string[] = ["--- DOCUMENTS PERTINENTS ---"];
+
+  for (let i = 0; i < results.length; i++) {
+    const doc = results[i];
+    const title = doc.title || "Document sans titre";
+    const category = doc.category_id ? `cat: ${doc.category_id}` : "";
+    const date = doc.document_date || "date inconnue";
+    const score = Math.round(doc.similarity * 100);
+
+    let summary = "";
+    if (doc.extracted_text) {
+      summary =
+        doc.extracted_text.length > 200
+          ? doc.extracted_text.substring(0, 200) + "..."
+          : doc.extracted_text;
+    }
+
+    const meta = [category, date, `pertinence: ${score}%`].filter(Boolean).join(", ");
+    lines.push(`[${i + 1}] ${title} (${meta})`);
+    if (summary) lines.push(`    ${summary}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ============================================================
 // PROMPT BUILDER
 // ============================================================
 
@@ -451,6 +489,7 @@ function buildPrompt(
   recentMessages?: string,
   topicName?: string,
   dynamicProfile?: string,
+  documentContext?: string,
 ): string {
   const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
@@ -484,6 +523,7 @@ function buildPrompt(
   if (profileContext) parts.push(`\nProfile:\n${profileContext}`);
   if (dynamicProfile) parts.push(dynamicProfile);
   if (memoryContext) parts.push(`\n${memoryContext}`);
+  if (documentContext) parts.push(`\n${documentContext}`);
   if (relevantContext) parts.push(`\n${relevantContext}`);
 
   parts.push(
