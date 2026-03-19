@@ -2,5 +2,6 @@
   "model_cascade": false,
   "heartbeat": true,
   "explore_mode": true,
-  "job_manager": true
+  "job_manager": true,
+  "auto_document_search": false
 }

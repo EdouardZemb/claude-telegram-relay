@@ -1,6 +1,6 @@
 {
-  "lastPulseAt": "2026-03-18T22:00:00.135Z",
-  "lastCommitSha": "6f44633c4ddf7a96b803094c00c33d54321ca46f",
+  "lastPulseAt": "2026-03-19T10:10:00.118Z",
+  "lastCommitSha": "4add62658bea84b4ed76c5c881045aaf19e34f33",
   "lastSprintSnapshot": {
     "sprint": null,
     "done": 0,
@@ -8,60 +8,58 @@
   },
   "recentActions": [
     {
-      "type": "notify",
-      "summary": "⚠️ PR #13 (path traversal fix) bloquée depuis 23j. Sécurité critique — vérifier CI ou décider du statut.",
-      "timestamp": "2026-03-18T20:30:14.121Z"
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T08:40:13.620Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T20:40:11.394Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T20:50:10.916Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T21:00:14.968Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T21:10:12.792Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T21:20:09.340Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T21:30:11.390Z"
-    },
-    {
-      "type": "none",
-      "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T21:40:12.186Z"
+      "timestamp": "2026-03-19T08:50:18.405Z"
     },
     {
       "type": "notify",
-      "summary": "⚠️ PR #13 (path traversal in documents) bloquee depuis 23 jours. Securite — a investiguer ou fermer.",
-      "timestamp": "2026-03-18T21:50:15.832Z"
+      "summary": "⚠️ PR #13 (Fix path traversal in document handler) bloquée depuis 24 jours. C'est une fix de sécurité — à merger ou à archiver ?",
+      "timestamp": "2026-03-19T09:00:22.392Z"
     },
     {
       "type": "none",
       "summary": "Rien a signaler",
-      "timestamp": "2026-03-18T22:00:10.438Z"
+      "timestamp": "2026-03-19T09:10:14.699Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T09:20:16.017Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T09:30:13.385Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T09:40:10.565Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T09:50:09.879Z"
+    },
+    {
+      "type": "none",
+      "summary": "Rien a signaler",
+      "timestamp": "2026-03-19T10:00:13.690Z"
+    },
+    {
+      "type": "task_create",
+      "summary": "Investigate PR #13 estimate and status",
+      "timestamp": "2026-03-19T10:10:13.858Z"
     }
   ],
-  "cooldowns": {
-    "⚠️ PR #13 (path traversal in documents) bloquee de": 1773872415834
-  },
-  "lastAlertCheckAt": "2026-03-18T21:40:00.120Z",
-  "lastArchivalAt": "2026-03-18T21:40:00.120Z",
+  "cooldowns": {},
+  "lastAlertCheckAt": "2026-03-19T09:40:00.117Z",
+  "lastArchivalAt": "2026-03-19T09:40:00.117Z",
   "lastAutonomyScanAt": "2026-03-18T18:30:00.124Z"
 }
