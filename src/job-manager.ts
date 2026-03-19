@@ -205,10 +205,10 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
       hasButtons = true;
       break;
     case "prd":
-      // result format: PRD_CREATED:<id>
+      // result format: PRD_CREATED:<id>|<title>
       if (job.result?.startsWith("PRD_CREATED:")) {
-        const prdId = job.result.replace("PRD_CREATED:", "").trim();
-        kb.text("Voir le PRD", `jc_prd:${prdId.substring(0, 8)}`);
+        const prdId = job.result.replace("PRD_CREATED:", "").split("|")[0].trim();
+        kb.text("Visualiser le PRD", `jc_prd:${prdId.substring(0, 8)}`);
         kb.text("Approuver", `prd_approve:${prdId}`);
         hasButtons = true;
       }
@@ -235,9 +235,15 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
 
   let message: string;
   if (job.status === "completed") {
-    message = `Job ${job.type} termine (${elapsed})\n${job.result || ""}`;
+    if (job.type === "prd" && job.result?.startsWith("PRD_CREATED:")) {
+      const parts = job.result.replace("PRD_CREATED:", "").split("|");
+      const prdTitle = parts[1] || "";
+      message = `PRD créé avec succès (${elapsed})${prdTitle ? `\n${prdTitle}` : ""}`;
+    } else {
+      message = `Job ${job.type} terminé (${elapsed})\n${job.result || ""}`;
+    }
   } else {
-    message = `Job ${job.type} echoue (${elapsed})\n${job.error || "Erreur inconnue"}`;
+    message = `Job ${job.type} échoué (${elapsed})\n${job.error || "Erreur inconnue"}`;
   }
 
   // Try direct notification to originating chat

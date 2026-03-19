@@ -514,7 +514,7 @@ describe("job-manager", () => {
 
       expect(sentMessage).not.toBeNull();
       expect(sentMessage.chatId).toBe(12345);
-      expect(sentMessage.text).toContain("plan termine");
+      expect(sentMessage.text).toContain("plan terminé");
       expect(sentMessage.text).toContain("3 taches creees");
       expect(sentMessage.opts?.message_thread_id).toBe(678);
       expect(sentMessage.opts?.reply_markup).toBeDefined();
@@ -540,7 +540,7 @@ describe("job-manager", () => {
 
       expect(sentMessage).not.toBeNull();
       expect(sentMessage.chatId).toBe(999);
-      expect(sentMessage.text).toContain("echoue");
+      expect(sentMessage.text).toContain("échoué");
       expect(sentMessage.text).toContain("agent crashed");
       expect(sentMessage.opts?.message_thread_id).toBe(111);
     });

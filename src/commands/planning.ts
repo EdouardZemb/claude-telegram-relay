@@ -130,7 +130,17 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     // /prd without args or /prd list → list PRDs for current project
     if (!input || /^(list|lister)$/i.test(input)) {
       const prds = await getPRDs(bctx.supabase, { project: projectSlug });
-      await bctx.sendResponse(ctx, formatPRDList(prds));
+      if (prds.length === 0) {
+        await ctx.reply("Aucun PRD. Utilise /prd <description> pour en créer un.", bctx.threadOpts(ctx));
+        return;
+      }
+      const text = formatPRDList(prds);
+      const keyboard = new InlineKeyboard();
+      for (const prd of prds) {
+        const label = prd.title.length > 40 ? prd.title.substring(0, 37) + "..." : prd.title;
+        keyboard.text(label, `prd_view:${prd.id}`).row();
+      }
+      await ctx.reply(text, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
       return;
     }
 
@@ -189,7 +199,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         project_id: currentProjectForShard?.id,
       });
 
-      return `PRD_CREATED:${prd.id}`;
+      return `PRD_CREATED:${prd.id}|${prd.title}`;
     };
 
     if (isJobManagerEnabled()) {
@@ -272,7 +282,31 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    if (action === "prd_approve") {
+    if (action === "prd_view") {
+      const prd = await getPRD(bctx.supabase, prdId);
+      if (!prd) {
+        await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+        return;
+      }
+      await ctx.answerCallbackQuery();
+      const detail = formatPRDDetail(prd);
+      if (prd.status === "draft") {
+        const actionKeyboard = new InlineKeyboard()
+          .text("Approuver", `prd_approve:${prd.id}`)
+          .text("Rejeter", `prd_reject:${prd.id}`)
+          .row()
+          .text("Modifier", `prd_revise:${prd.id}`);
+        if (detail.length > 4000) {
+          await bctx.sendResponse(ctx, detail);
+          await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: actionKeyboard });
+        } else {
+          await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: actionKeyboard });
+        }
+      } else {
+        await bctx.sendResponse(ctx, detail);
+      }
+      return;
+    } else if (action === "prd_approve") {
       const updated = await updatePRDStatus(bctx.supabase, prdId, "approved");
       if (updated) {
         await ctx.answerCallbackQuery({ text: "PRD approuve !" });
