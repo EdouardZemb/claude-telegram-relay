@@ -7,6 +7,8 @@ import {
   cleanup,
   formatJobList,
   getCapacity,
+  getCompletionKeyboard,
+  initJobManager,
   isJobManagerEnabled,
   _resetForTests,
   type Job,
@@ -350,6 +352,197 @@ describe("job-manager", () => {
     it("returns a boolean", () => {
       const result = isJobManagerEnabled();
       expect(typeof result).toBe("boolean");
+    });
+  });
+
+  describe("initJobManager", () => {
+    it("accepts a bot instance without error", () => {
+      const fakeBotInstance = { api: { sendMessage: async () => {} } } as any;
+      expect(() => initJobManager(fakeBotInstance)).not.toThrow();
+    });
+  });
+
+  describe("messageThreadId", () => {
+    it("stores messageThreadId from launch options", async () => {
+      const id = await launch("test", 123, async () => "ok", {
+        messageThreadId: 456,
+      });
+
+      const job = await get(id);
+      expect(job!.messageThreadId).toBe(456);
+    });
+
+    it("messageThreadId is undefined when not provided", async () => {
+      const id = await launch("test", 123, async () => "ok");
+
+      const job = await get(id);
+      expect(job!.messageThreadId).toBeUndefined();
+    });
+  });
+
+  describe("getCompletionKeyboard", () => {
+    const baseJob: Job = {
+      id: "abc12345",
+      type: "exec",
+      status: "completed",
+      chatId: 123,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      result: "done",
+      error: null,
+    };
+
+    it("returns undefined for failed jobs", () => {
+      const kb = getCompletionKeyboard({ ...baseJob, status: "failed" });
+      expect(kb).toBeUndefined();
+    });
+
+    it("returns keyboard with PR button for exec with PR URL", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "exec",
+        taskId: "task-uuid-1234",
+        result: "PR created: https://github.com/user/repo/pull/42",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns keyboard with task done button for exec with taskId", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "exec",
+        taskId: "task-uuid-1234",
+        result: "completed without PR",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns backlog button for prd-decompose", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "prd-decompose",
+        result: "5 taches creees",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns backlog button for plan", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "plan",
+        result: "3 taches ajoutees",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns PRD buttons for prd with PRD_CREATED result", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "prd",
+        result: "PRD_CREATED:c495951a-full-uuid",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns undefined for prd without PRD_CREATED result", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "prd",
+        result: "some other result",
+      });
+      expect(kb).toBeUndefined();
+    });
+
+    it("returns explore button for explore", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "explore",
+        result: "analysis complete",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns undefined for unknown job type", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "rollback",
+        result: "rolled back",
+      });
+      expect(kb).toBeUndefined();
+    });
+
+    it("returns keyboard for orchestrate with PR and taskId", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "orchestrate",
+        taskId: "task-uuid-5678",
+        result: "ORCHESTRATION OK\nhttps://github.com/user/repo/pull/99",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("returns keyboard for autopipeline", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "autopipeline",
+        taskId: "task-uuid-9999",
+        result: "PIPELINE OK",
+      });
+      expect(kb).toBeDefined();
+    });
+  });
+
+  describe("direct notification", () => {
+    it("sends to originating chat on completion when bot is initialized", async () => {
+      let sentMessage: any = null;
+      const fakeBotInstance = {
+        api: {
+          sendMessage: async (chatId: any, text: string, opts?: any) => {
+            sentMessage = { chatId, text, opts };
+          },
+        },
+      } as any;
+
+      initJobManager(fakeBotInstance);
+
+      const id = await launch("plan", 12345, async () => "3 taches creees", {
+        messageThreadId: 678,
+      });
+
+      // Wait for job to complete and notification to send
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(sentMessage).not.toBeNull();
+      expect(sentMessage.chatId).toBe(12345);
+      expect(sentMessage.text).toContain("plan termine");
+      expect(sentMessage.text).toContain("3 taches creees");
+      expect(sentMessage.opts?.message_thread_id).toBe(678);
+      expect(sentMessage.opts?.reply_markup).toBeDefined();
+    });
+
+    it("sends error notification for failed jobs", async () => {
+      let sentMessage: any = null;
+      const fakeBotInstance = {
+        api: {
+          sendMessage: async (chatId: any, text: string, opts?: any) => {
+            sentMessage = { chatId, text, opts };
+          },
+        },
+      } as any;
+
+      initJobManager(fakeBotInstance);
+
+      await launch("exec", 999, async () => {
+        throw new Error("agent crashed");
+      }, { messageThreadId: 111 });
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      expect(sentMessage).not.toBeNull();
+      expect(sentMessage.chatId).toBe(999);
+      expect(sentMessage.text).toContain("echoue");
+      expect(sentMessage.text).toContain("agent crashed");
+      expect(sentMessage.opts?.message_thread_id).toBe(111);
     });
   });
 });

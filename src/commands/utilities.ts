@@ -180,7 +180,8 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("rollback", chatId, rollbackFn);
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("rollback", chatId, rollbackFn, { messageThreadId: threadId });
       await ctx.reply(`Job lance rollback (id: ${jobId})`, bctx.threadOpts(ctx));
     } else {
       await ctx.reply("Rollback en cours...", bctx.threadOpts(ctx));

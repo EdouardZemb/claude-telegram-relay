@@ -179,7 +179,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("exec", chatId, () => execFn(async () => {}), { taskId: task.id });
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("exec", chatId, () => execFn(async () => {}), { taskId: task.id, messageThreadId: threadId });
       await ctx.reply(`Job lance exec (id: ${jobId})\nTache: ${task.title}`, bctx.threadOpts(ctx));
     } else {
       await ctx.reply(`Lancement de l'agent pour: ${task.title}\nCa peut prendre quelques minutes...`, bctx.threadOpts(ctx));
@@ -339,7 +340,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
     };
 
     if (isJobManagerEnabled()) {
-      const jobId = await launchJob("orchestrate", chatId, () => orchestrateFn(async () => {}), { taskId: task.id });
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("orchestrate", chatId, () => orchestrateFn(async () => {}), { taskId: task.id, messageThreadId: threadId });
       await ctx.reply(
         `Job lance orchestrate (id: ${jobId})\nTache: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}`,
         bctx.threadOpts(ctx)
@@ -414,7 +416,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("autopipeline", chatId, () => autoPipelineFn(async () => {}), { taskId: task.id });
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("autopipeline", chatId, () => autoPipelineFn(async () => {}), { taskId: task.id, messageThreadId: threadId });
       await ctx.reply(
         `Job lance autopipeline (id: ${jobId})\nTache: ${task.title}\nMode: ${mode}`,
         bctx.threadOpts(ctx)

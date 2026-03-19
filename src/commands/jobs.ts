@@ -7,6 +7,8 @@
 import { Composer, Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { list, get, cancel, formatJobList, isJobManagerEnabled } from "../job-manager.ts";
+import { updateTaskStatus, getCurrentSprint, getBacklog } from "../tasks.ts";
+import { getPRD, formatPRDDetail } from "../prd.ts";
 
 export default function jobsCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -66,22 +68,82 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
   // Callback query for job status check from inline buttons
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("job_")) { await next(); return; }
 
-    const [action, jobId] = data.split(":");
-    if (action === "job_status" && jobId) {
-      const job = await get(jobId);
-      if (job) {
-        await ctx.answerCallbackQuery({
-          text: `${job.type}: ${job.status}${job.result ? " — " + job.result.substring(0, 100) : ""}`,
-          show_alert: true,
-        });
+    // job_ prefix: existing status check
+    if (data.startsWith("job_")) {
+      const [action, jobId] = data.split(":");
+      if (action === "job_status" && jobId) {
+        const job = await get(jobId);
+        if (job) {
+          await ctx.answerCallbackQuery({
+            text: `${job.type}: ${job.status}${job.result ? " — " + job.result.substring(0, 100) : ""}`,
+            show_alert: true,
+          });
+        } else {
+          await ctx.answerCallbackQuery({ text: "Job introuvable." });
+        }
       } else {
-        await ctx.answerCallbackQuery({ text: "Job introuvable." });
+        await next();
       }
-    } else {
-      await next();
+      return;
     }
+
+    // jc_ prefix: job completion action buttons
+    if (!data.startsWith("jc_")) { await next(); return; }
+
+    const [action, param] = data.split(":");
+
+    if (action === "jc_done" && param && bctx.supabase) {
+      // Mark task as done
+      const { data: tasks } = await bctx.supabase
+        .from("tasks")
+        .select("id, title")
+        .ilike("id", `${param}%`)
+        .limit(1);
+      const task = tasks?.[0];
+      if (task) {
+        await updateTaskStatus(bctx.supabase, task.id, "done");
+        await ctx.answerCallbackQuery({ text: `Tache "${task.title}" terminee !` });
+        await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      } else {
+        await ctx.answerCallbackQuery({ text: "Tache introuvable." });
+      }
+      return;
+    }
+
+    if (action === "jc_backlog" && bctx.supabase) {
+      const sprint = await getCurrentSprint(bctx.supabase);
+      const backlog = await getBacklog(bctx.supabase, sprint ? { sprint } : undefined);
+      if (backlog.length === 0) {
+        await ctx.answerCallbackQuery({ text: "Backlog vide." });
+      } else {
+        await ctx.answerCallbackQuery();
+        const lines = backlog.slice(0, 10).map((t: any, i: number) =>
+          `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}] (${t.status})`
+        );
+        const text = `Backlog (${backlog.length} taches):\n\n${lines.join("\n")}`;
+        await ctx.reply(text);
+      }
+      return;
+    }
+
+    if (action === "jc_prd" && param && bctx.supabase) {
+      const prd = await getPRD(bctx.supabase, param);
+      if (prd) {
+        await ctx.answerCallbackQuery();
+        await ctx.reply(formatPRDDetail(prd));
+      } else {
+        await ctx.answerCallbackQuery({ text: "PRD introuvable." });
+      }
+      return;
+    }
+
+    if (action === "jc_task_from_explore") {
+      await ctx.answerCallbackQuery({ text: "Utilise /task <titre> pour creer une tache." });
+      return;
+    }
+
+    await next();
   });
 
   return composer;

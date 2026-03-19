@@ -160,7 +160,8 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     // ── Background job or blocking (S46) ────────────────────────
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("explore", chatId, exploreFn);
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("explore", chatId, exploreFn, { messageThreadId: threadId });
       await ctx.reply(`Job lance explore (id: ${jobId})\nQuery: ${query}`, bctx.threadOpts(ctx));
     } else {
       const statusMsg = isWebResearch

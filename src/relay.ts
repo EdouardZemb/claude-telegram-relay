@@ -34,6 +34,7 @@ import {
 } from "./bot-context.ts";
 import { loadComposers } from "./loader.ts";
 import { startQueue } from "./notification-queue.ts";
+import { initJobManager } from "./job-manager.ts";
 import { loadFeedbackRules } from "./feedback-loop.ts";
 import { loadPrefs } from "./notification-prefs.ts";
 
@@ -141,6 +142,7 @@ if (import.meta.main) {
   // Create and configure bot
   const mainBot = await createBot(BOT_TOKEN);
   await startQueue(mainBot);
+  initJobManager(mainBot);
   await loadPrefs();
 
   // Graceful shutdown

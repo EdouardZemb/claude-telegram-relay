@@ -7,6 +7,8 @@
 
 import { readFile, writeFile, rename, mkdir } from "fs/promises";
 import { join } from "path";
+import { InlineKeyboard } from "grammy";
+import type { Bot } from "grammy";
 import { Semaphore } from "./semaphore.ts";
 import { enqueue } from "./notification-queue.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
@@ -25,6 +27,7 @@ export interface Job {
   type: string;
   status: JobStatus;
   chatId: number | string;
+  messageThreadId?: number;
   taskId?: string;
   startedAt: string;
   completedAt: string | null;
@@ -35,6 +38,7 @@ export interface Job {
 export interface LaunchOptions {
   taskId?: string;
   timeoutMs?: number;
+  messageThreadId?: number;
 }
 
 // ── State ──────────────────────────────────────────────────────
@@ -42,6 +46,17 @@ export interface LaunchOptions {
 const registry = new Map<string, Job>();
 const semaphore = new Semaphore(3);
 let loaded = false;
+let botInstance: Bot | null = null;
+
+// ── Bot Injection ─────────────────────────────────────────────
+
+/**
+ * Initialize the job manager with a bot instance for direct notifications.
+ * Call this once at startup after creating the bot.
+ */
+export function initJobManager(bot: Bot): void {
+  botInstance = bot;
+}
 
 // ── Persistence ────────────────────────────────────────────────
 
@@ -101,6 +116,7 @@ export async function launch(
     type,
     status: "pending",
     chatId,
+    messageThreadId: options?.messageThreadId,
     taskId: options?.taskId,
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -145,29 +161,107 @@ export async function launch(
       await saveJobs();
     }
 
-    // Send completion notification
+    // Send completion notification directly to originating chat
     try {
-      if (job.status === "completed") {
-        await enqueue({
-          type: "task",
-          severity: "normal",
-          message: `Job ${job.type} termine (${job.id})\n${job.result || ""}`,
-          data: job.taskId ? { taskId: job.taskId } : undefined,
-        });
-      } else {
-        await enqueue({
-          type: "alert",
-          severity: "normal",
-          message: `Job ${job.type} echoue (${job.id})\n${job.error || "Erreur inconnue"}`,
-          data: job.taskId ? { taskId: job.taskId } : undefined,
-        });
-      }
+      await sendJobCompletionNotification(job);
     } catch (notifError) {
       console.error("Job notification error:", notifError);
     }
   })();
 
   return id;
+}
+
+// ── Completion Notifications ──────────────────────────────────
+
+/**
+ * Extract a GitHub PR URL from a result string.
+ */
+function extractPrUrl(text: string): string | undefined {
+  const match = text.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/);
+  return match?.[0];
+}
+
+/**
+ * Build contextual inline keyboard for a completed job.
+ */
+export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
+  if (job.status === "failed") return undefined;
+
+  const kb = new InlineKeyboard();
+  const prUrl = job.result ? extractPrUrl(job.result) : undefined;
+  let hasButtons = false;
+
+  switch (job.type) {
+    case "exec":
+    case "orchestrate":
+    case "autopipeline":
+      if (prUrl) { kb.url("Voir la PR", prUrl); hasButtons = true; }
+      if (job.taskId) { kb.text("Terminer la tache", `jc_done:${job.taskId.substring(0, 8)}`); hasButtons = true; }
+      break;
+    case "prd-decompose":
+    case "plan":
+      kb.text("Voir le backlog", "jc_backlog");
+      hasButtons = true;
+      break;
+    case "prd":
+      // result format: PRD_CREATED:<id>
+      if (job.result?.startsWith("PRD_CREATED:")) {
+        const prdId = job.result.replace("PRD_CREATED:", "").trim();
+        kb.text("Voir le PRD", `jc_prd:${prdId.substring(0, 8)}`);
+        kb.text("Approuver", `prd_approve:${prdId}`);
+        hasButtons = true;
+      }
+      break;
+    case "explore":
+      kb.text("Creer une tache", "jc_task_from_explore");
+      hasButtons = true;
+      break;
+    default:
+      return undefined;
+  }
+
+  return hasButtons ? kb : undefined;
+}
+
+/**
+ * Send job completion notification directly to the originating chat.
+ * Falls back to notification queue if bot is not available.
+ */
+async function sendJobCompletionNotification(job: Job): Promise<void> {
+  const elapsed = job.completedAt
+    ? formatDuration(new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime())
+    : "?";
+
+  let message: string;
+  if (job.status === "completed") {
+    message = `Job ${job.type} termine (${elapsed})\n${job.result || ""}`;
+  } else {
+    message = `Job ${job.type} echoue (${elapsed})\n${job.error || "Erreur inconnue"}`;
+  }
+
+  // Try direct notification to originating chat
+  if (botInstance && job.chatId) {
+    try {
+      const opts: Record<string, unknown> = {};
+      if (job.messageThreadId) opts.message_thread_id = job.messageThreadId;
+      const keyboard = getCompletionKeyboard(job);
+      if (keyboard) opts.reply_markup = keyboard;
+
+      await botInstance.api.sendMessage(job.chatId, message, opts);
+      return;
+    } catch (error) {
+      console.error("Direct job notification failed, falling back to queue:", error);
+    }
+  }
+
+  // Fallback to notification queue
+  await enqueue({
+    type: job.status === "completed" ? "task" : "alert",
+    severity: "normal",
+    message: `Job ${job.type} termine (${job.id})\n${job.status === "completed" ? job.result || "" : job.error || "Erreur inconnue"}`,
+    data: job.taskId ? { taskId: job.taskId } : undefined,
+  });
 }
 
 /**
@@ -320,4 +414,5 @@ export function isJobManagerEnabled(): boolean {
 export function _resetForTests(): void {
   registry.clear();
   loaded = false;
+  botInstance = null;
 }

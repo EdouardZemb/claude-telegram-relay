@@ -99,7 +99,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("plan", chatId, planFn);
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("plan", chatId, planFn, { messageThreadId: threadId });
       await ctx.reply(`Job lance plan (id: ${jobId})\nRequete: ${request.substring(0, 100)}`, bctx.threadOpts(ctx));
     } else {
       await ctx.reply("Decomposition en cours...", bctx.threadOpts(ctx));
@@ -193,7 +194,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("prd", chatId, prdCreateFn);
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("prd", chatId, prdCreateFn, { messageThreadId: threadId });
       await ctx.reply(`Job lance prd (id: ${jobId})\nDescription: ${input!.substring(0, 100)}`, bctx.threadOpts(ctx));
     } else {
       await ctx.reply("Generation du PRD en cours...", bctx.threadOpts(ctx));
@@ -240,7 +242,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
-      const jobId = await launchJob("planify", chatId, planifyFn);
+      const threadId = bctx.getThreadId(ctx);
+      const jobId = await launchJob("planify", chatId, planifyFn, { messageThreadId: threadId });
       await ctx.reply(`Job lance planify (id: ${jobId})`, bctx.threadOpts(ctx));
     } else {
       await ctx.replyWithChatAction("typing");
@@ -319,7 +322,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             };
 
             const chatId = ctx.chat?.id || 0;
-            const jobId = await launchJob("prd-decompose", chatId, decomposeFn);
+            const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
+            const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
             await ctx.editMessageText(
               `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`
             );
