@@ -247,8 +247,8 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       };
 
       if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
-        // PRD Workflow: intercept suggest_prd intent
-        if (regexResult.detected.intent === "suggest_prd" && isPrdWorkflowEnabled() && bctx.supabase) {
+        // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
+        if ((regexResult.detected.intent === "suggest_prd" || regexResult.detected.intent === "create_prd") && isPrdWorkflowEnabled() && bctx.supabase) {
           addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
           const description = regexResult.detected.args || text;
           const triage = await triageDescription(description, bctx.supabase);
@@ -272,8 +272,8 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           sessionContext: sessionCtx,
         });
         if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
-          // PRD Workflow: intercept suggest_prd from LLM
-          if (llmResult.detected.command === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
+          // PRD Workflow: intercept suggest_prd or create_prd from LLM
+          if ((llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") && isPrdWorkflowEnabled() && bctx.supabase) {
             addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
             const description = llmResult.detected.args || text;
             const triage = await triageDescription(description, bctx.supabase);

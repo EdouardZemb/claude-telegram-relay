@@ -55,6 +55,31 @@ import { explainPipelineChoice } from "../pipeline-selection.ts";
 export default function planningCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
+  // /prd_workflow — conversational PRD-to-Deploy workflow entry point
+  composer.command("prd_workflow", async (ctx) => {
+    if (!isPrdWorkflowEnabled()) {
+      await ctx.reply("Le workflow PRD-to-Deploy n'est pas active. Utilisez /feature enable prd_to_deploy", bctx.threadOpts(ctx));
+      return;
+    }
+    if (!bctx.supabase) {
+      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
+      return;
+    }
+    const description = ctx.match?.trim();
+    if (!description) {
+      await ctx.reply("Usage: /prd_workflow description de la fonctionnalite", bctx.threadOpts(ctx));
+      return;
+    }
+    await ctx.replyWithChatAction("typing");
+    const triage = await triageDescription(description, bctx.supabase);
+    const { message, keyboard } = buildTriageResponse(description, triage);
+    const cId = ctx.chat?.id || 0;
+    const tId = bctx.getThreadId(ctx);
+    const ck = chatKey(cId, tId);
+    storePendingDescription(ck, description);
+    await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+  });
+
   // /plan — decompose a request into subtasks
   composer.command("plan", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "plan");

@@ -253,9 +253,12 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /\b(on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)/i,
       /\b(nouvelle\s+fonctionnalite|nouvelle\s+feature|nouveau\s+module|nouvelle\s+commande)\b/i,
       /\b(implemente|developpe|code|lance\s+l'?implementation\s+de?)\s+/i,
+      /\b(lance|lancer|cree|creer|genere|generer|fais|faire)\s+(?:le|un)\s+prd\s+(pour|de|sur)\s+/i,
+      /\b(lance|lancer)\s+(?:le|un)\s+prd\b/i,
     ],
     argExtractor: (text) => {
       const patterns = [
+        /(?:lance|lancer|cree|creer|genere|generer|fais|faire)\s+(?:le|un)\s+prd\s+(?:pour|de|sur)\s+(.+)/i,
         /(?:je\s+voudrais|j'?aimerais|il\s+faudrait|on\s+devrait|on\s+pourrait)\s+(?:ajouter|creer|implementer|developper|faire|mettre\s+en\s+place)\s+(.+)/i,
         /(?:il\s+faudrait\s+que\s+le\s+bot|le\s+bot\s+devrait|le\s+systeme\s+devrait)\s+(.+)/i,
         /(?:on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)(.+)/i,
