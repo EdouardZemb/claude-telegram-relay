@@ -54,6 +54,64 @@ import {
   chatKey as prdChatKey,
 } from "../prd-workflow.ts";
 import { getPRD, formatPRDDetail } from "../prd.ts";
+import type { PendingProposal } from "../conversation-session.ts";
+
+// ── Proposal detection ───────────────────────────────────────
+
+const PROPOSAL_PATTERNS: Array<{ regex: RegExp; actionExtractor: (m: RegExpMatchArray) => string | null }> = [
+  {
+    regex: /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+    actionExtractor: (m) => mapProposalAction(m[1]),
+  },
+  {
+    regex: /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+    actionExtractor: (m) => mapProposalAction(m[1]),
+  },
+  {
+    regex: /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i,
+    actionExtractor: (m) => mapProposalAction(m[1]),
+  },
+];
+
+function mapProposalAction(keyword: string | undefined): string | null {
+  if (!keyword) return null;
+  const map: Record<string, string> = {
+    prd: "prd_workflow",
+    sprint: "sprint",
+    tache: "task",
+    plan: "plan",
+    implementation: "exec",
+    backlog: "backlog",
+    retro: "retro",
+  };
+  return map[keyword.toLowerCase()] || null;
+}
+
+/**
+ * Detect if Claude's response contains a proposal for an action.
+ * Returns a PendingProposal if found, null otherwise.
+ */
+function detectProposalInResponse(response: string): PendingProposal | null {
+  const normalized = response.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const { regex, actionExtractor } of PROPOSAL_PATTERNS) {
+    const m = normalized.match(regex) || response.match(regex);
+    if (m) {
+      const action = actionExtractor(m);
+      if (action) {
+        // Try to extract args (text after the action keyword)
+        const afterMatch = response.substring((m.index || 0) + m[0].length).trim();
+        const argsMatch = afterMatch.match(/(?:pour|de|sur)\s+(.+?)(?:\s*[?!.]|$)/i);
+        return {
+          action,
+          args: argsMatch?.[1]?.trim(),
+          timestamp: Date.now(),
+          sourceMessage: response.substring(0, 200),
+        };
+      }
+    }
+  }
+  return null;
+}
 
 // ── Document detection constants ──────────────────────────────
 
@@ -213,6 +271,26 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         }
       }
 
+      // Check pending proposal confirmation
+      if (session.pendingProposal && Date.now() - session.pendingProposal.timestamp < 5 * 60 * 1000) {
+        const trimmed = text.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const isConfirm = /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/.test(trimmed);
+        const isReject = /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/.test(trimmed);
+
+        if (isConfirm) {
+          const proposal = session.pendingProposal;
+          session.pendingProposal = undefined;
+          const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
+          const update = buildSyntheticUpdate(ctx, cmdStr);
+          await bctx.bot.handleUpdate(update);
+          return;
+        }
+        if (isReject) {
+          session.pendingProposal = undefined;
+          // Fall through to normal conversation
+        }
+      }
+
       const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
       const [relevantContext, memoryContext, recentMessages, dynProfile, classification, docResults] = await Promise.all([
         getRelevantContext(bctx.supabase, text),
@@ -298,6 +376,12 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       const response = await processMemoryIntents(bctx.supabase, rawResponse);
 
+      // Detect proposals in Claude's response for future confirmation
+      const proposal = detectProposalInResponse(response);
+      if (proposal) {
+        session.pendingProposal = proposal;
+      }
+
       await bctx.saveMessage("assistant", response, meta);
       await bctx.sendResponse(ctx, response);
       recordResponseTime(Date.now() - handlerStart);
@@ -310,10 +394,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     }
   });
 
-  // Voice messages
+  // Voice messages — with full intent detection (same chain as text handler)
   composer.on("message:voice", async (ctx) => {
     const voice = ctx.message.voice;
     const messageId = ctx.message.message_id;
+    const handlerStart = Date.now();
     const threadId = bctx.getThreadId(ctx);
     const topicName = bctx.getTopicName(ctx);
     console.log(`Voice message: ${voice.duration}s${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
@@ -349,6 +434,79 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       await bctx.saveMessage("user", `[Voice ${voice.duration}s]: ${transcription}`, meta);
 
+      // S43: Track conversation session
+      const chatId = ctx.chat?.id || 0;
+      const session = getSession(chatId, threadId);
+      addSessionMessage(session, transcription);
+
+      // Extract user constraints from the transcription
+      const constraints = extractConstraints(transcription);
+      for (const c of constraints) {
+        addConstraint(session, c.type, c.value, c.source);
+      }
+
+      // Check if this is a response to a pending clarification
+      const clarificationCmd = checkPendingClarification(ctx, transcription);
+      if (clarificationCmd) {
+        const update = buildSyntheticUpdate(ctx, clarificationCmd);
+        await bctx.bot.handleUpdate(update);
+        return;
+      }
+
+      // PRD Workflow: Check if this is a revision response
+      if (isPrdWorkflowEnabled() && bctx.supabase) {
+        const ck = prdChatKey(chatId, threadId);
+        const pendingRev = getPendingRevision(ck);
+        if (pendingRev) {
+          clearPendingRevision(ck);
+          await ctx.replyWithChatAction("typing");
+          try {
+            const prd = await getPRD(bctx.supabase, pendingRev.prdId);
+            if (prd) {
+              const revised = await revisePRD(bctx.supabase, prd, transcription, pendingRev.constraints);
+              if (revised) {
+                const detail = formatPRDDetail(revised);
+                const keyboard = buildRevisionKeyboard(revised);
+                if (detail.length > 4000) {
+                  await bctx.sendResponse(ctx, detail);
+                  await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+                } else {
+                  await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+                }
+              } else {
+                await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
+              }
+            } else {
+              await ctx.reply("PRD introuvable.", bctx.threadOpts(ctx));
+            }
+          } catch (error) {
+            console.error("PRD revision error:", error);
+            await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
+          }
+          return;
+        }
+      }
+
+      // Check pending proposal confirmation
+      if (session.pendingProposal && Date.now() - session.pendingProposal.timestamp < 5 * 60 * 1000) {
+        const trimmed = transcription.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const isConfirm = /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/.test(trimmed);
+        const isReject = /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/.test(trimmed);
+
+        if (isConfirm) {
+          const proposal = session.pendingProposal;
+          session.pendingProposal = undefined;
+          const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
+          const update = buildSyntheticUpdate(ctx, cmdStr);
+          await bctx.bot.handleUpdate(update);
+          return;
+        }
+        if (isReject) {
+          session.pendingProposal = undefined;
+          // Fall through to normal conversation
+        }
+      }
+
       const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
         getRelevantContext(bctx.supabase, transcription),
         getMemoryContext(bctx.supabase),
@@ -361,10 +519,69 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         autoRemember(bctx.supabase, transcription, classification).catch(() => {});
       }
 
+      // Intent detection + routing (same chain as text handler)
+      const regexResult = detectIntent(transcription);
+
+      const routerCtx = {
+        supabase: bctx.supabase,
+        getThreadId: bctx.getThreadId,
+        threadOpts: bctx.threadOpts,
+        dispatchCommand: async (sourceCtx: Context, command: string) => {
+          const update = buildSyntheticUpdate(sourceCtx, command);
+          await bctx.bot.handleUpdate(update);
+        },
+      };
+
+      if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
+        // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
+        if ((regexResult.detected.intent === "suggest_prd" || regexResult.detected.intent === "create_prd") && isPrdWorkflowEnabled() && bctx.supabase) {
+          addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+          const description = regexResult.detected.args || transcription;
+          const triage = await triageDescription(description, bctx.supabase);
+          const { message, keyboard } = buildTriageResponse(description, triage);
+          const ck = prdChatKey(chatId, threadId);
+          storePendingDescription(ck, description);
+          await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+          return;
+        }
+        // High-confidence regex match — route to command
+        addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+        const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
+        if (routeResult.handled) return;
+      } else {
+        // LLM fallback for ambiguous messages — with session context
+        const sessionCtx = formatSessionForIntent(session);
+        const llmResult = await detectIntentWithLLM(transcription, {
+          callLLM: (prompt) => bctx.callClaude(prompt),
+          recentMessages,
+          timeoutMs: 15000,
+          sessionContext: sessionCtx,
+        });
+        if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
+          // PRD Workflow: intercept suggest_prd or create_prd from LLM
+          if ((llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") && isPrdWorkflowEnabled() && bctx.supabase) {
+            addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+            const description = llmResult.detected.args || transcription;
+            const triage = await triageDescription(description, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(description, triage);
+            const ck = prdChatKey(chatId, threadId);
+            storePendingDescription(ck, description);
+            await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+            return;
+          }
+          addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+          const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
+          if (routeResult.handled) return;
+        }
+      }
+
+      // Conversation fallback with action awareness
+      const actionContext = `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`;
+
       const enrichedPrompt = bctx.buildPrompt(
         `[Voice message transcribed]: ${transcription}`,
         relevantContext,
-        memoryContext,
+        memoryContext + actionContext,
         recentMessages,
         topicName,
         dynProfile,
@@ -372,8 +589,15 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       const rawResponse = await bctx.callClaude(enrichedPrompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
       const claudeResponse = await processMemoryIntents(bctx.supabase, rawResponse);
 
+      // Detect proposals in Claude's response for future confirmation
+      const proposal = detectProposalInResponse(claudeResponse);
+      if (proposal) {
+        session.pendingProposal = proposal;
+      }
+
       await bctx.saveMessage("assistant", claudeResponse, meta);
       await bctx.sendVoiceResponse(ctx, claudeResponse);
+      recordResponseTime(Date.now() - handlerStart);
       bctx.clearError(messageId);
     } catch (error) {
       console.error("Voice error:", error);

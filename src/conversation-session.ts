@@ -31,6 +31,17 @@ export interface IntentEntry {
   executed: boolean;
 }
 
+export interface PendingProposal {
+  /** The command to execute (e.g., "prd_workflow", "exec") */
+  action: string;
+  /** Optional args for the command */
+  args?: string;
+  /** When the proposal was made */
+  timestamp: number;
+  /** The bot message that contained the proposal (truncated) */
+  sourceMessage: string;
+}
+
 export interface ConversationSession {
   id: string;
   chatId: number;
@@ -52,6 +63,8 @@ export interface ConversationSession {
   activePrdId?: string;
   /** Current PRD workflow step */
   prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "implementation" | "done";
+  /** Pending action proposal from the bot, awaiting user confirmation */
+  pendingProposal?: PendingProposal;
 }
 
 // ── Session Store ────────────────────────────────────────────
