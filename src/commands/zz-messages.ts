@@ -32,7 +32,9 @@ import {
   addConstraint,
   formatSessionForIntent,
 } from "../conversation-session.ts";
-import { createDocument } from "../documents.ts";
+import { createDocument, searchDocuments } from "../documents.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
+import { formatDocumentContext } from "../bot-context.ts";
 import {
   buildClassificationKeyboard,
   registerPendingClassification,
@@ -162,12 +164,19 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         return;
       }
 
-      const [relevantContext, memoryContext, recentMessages, dynProfile, classification] = await Promise.all([
+      const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
+      const [relevantContext, memoryContext, recentMessages, dynProfile, classification, docResults] = await Promise.all([
         getRelevantContext(bctx.supabase, text),
         getMemoryContext(bctx.supabase),
         getRecentMessages(bctx.supabase),
         bctx.getDynamicProfile(),
         classifyMessage(bctx.supabase, text, "user"),
+        isFeatureEnabled("auto_document_search")
+          ? Promise.race([
+              searchDocuments(bctx.supabase, text, userId, { matchCount: 3, matchThreshold: 0.5 }),
+              new Promise<never[]>(resolve => setTimeout(() => resolve([]), 5000)),
+            ])
+          : Promise.resolve([]),
       ]);
 
       if (classification?.is_memorable) {
@@ -212,7 +221,8 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       // S37-07: Conversation fallback with action awareness
       const actionContext = `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`;
 
-      const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext + actionContext, recentMessages, topicName, dynProfile);
+      const documentContext = formatDocumentContext(docResults) || undefined;
+      const enrichedPrompt = bctx.buildPrompt(text, relevantContext, memoryContext + actionContext, recentMessages, topicName, dynProfile, documentContext);
       const rawResponse = await bctx.callClaude(enrichedPrompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
 
       const response = await processMemoryIntents(bctx.supabase, rawResponse);
