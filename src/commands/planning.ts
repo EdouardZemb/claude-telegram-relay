@@ -134,10 +134,12 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     }
 
     // /prd <id> (8 chars or less, looks like a UUID prefix) → show detail
-    if (input.length <= 8 && /^[a-f0-9]+$/.test(input)) {
-      const prd = await getPRD(bctx.supabase, input);
+    // Also extract hex ID from longer text (e.g. "le PRD c495951a")
+    const hexIdMatch = /^[a-f0-9]{4,8}$/.test(input) ? input : input.match(/\b([a-f0-9]{4,8})\b/)?.[1];
+    if (hexIdMatch) {
+      const prd = await getPRD(bctx.supabase, hexIdMatch);
       if (!prd) {
-        await ctx.reply(`Aucun PRD trouve avec l'ID "${input}".`, bctx.threadOpts(ctx));
+        await ctx.reply(`Aucun PRD trouve avec l'ID "${hexIdMatch}".`, bctx.threadOpts(ctx));
         return;
       }
       const detail = formatPRDDetail(prd);

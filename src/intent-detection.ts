@@ -209,6 +209,42 @@ const INTENT_PATTERNS: IntentPattern[] = [
     },
   },
   {
+    intent: "view_prd",
+    command: "prd",
+    patterns: [
+      // "montre-moi le PRD", "affiche le PRD", "voir le PRD"
+      /\b(montre|affiche|voir|show)\s+(?:moi\s+)?(?:le\s+)?prd\b/i,
+      // "le PRD c495", "prd c495951a"
+      /\bprd\s+[a-f0-9]{4,8}\b/i,
+      // "liste les PRDs", "quels PRDs", "les PRDs"
+      /\b(list[ée]?r?|voir)\s+(?:les?\s+)?prds?\b/i,
+      /\b(quels?|combien\s+de)\s+prds?\b/i,
+    ],
+    argExtractor: (text) => {
+      // Extract hex ID if present
+      const idMatch = text.match(/\b([a-f0-9]{4,8})\b/i);
+      if (idMatch) return idMatch[1];
+      // Check if listing
+      if (/\b(list[ée]?r?|quels?|combien)\b/i.test(text)) return "list";
+      return undefined;
+    },
+  },
+  {
+    intent: "create_prd",
+    command: "prd",
+    patterns: [
+      /\b(cree|creer|genere|generer|redige|rediger)\s+(?:un\s+)?prd\b/i,
+      /\bprd\s+(pour|sur|de)\s+/i,
+    ],
+    argExtractor: (text) => {
+      const match = text.match(/(?:prd|PRD)\s+(?:pour|sur|de)\s+(.+)/i);
+      if (match) return match[1].replace(/\s*[?!.]\s*$/, "").trim();
+      const match2 = text.match(/(?:cree|genere|redige)\s+(?:un\s+)?prd\s*:?\s+(.+)/i);
+      if (match2) return match2[1].replace(/\s*[?!.]\s*$/, "").trim();
+      return undefined;
+    },
+  },
+  {
     intent: "view_jobs",
     command: "jobs",
     patterns: [
