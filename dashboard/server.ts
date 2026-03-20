@@ -305,11 +305,11 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
     return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
   }
 
-  // Query orchestration logs from workflow_logs
+  // Query orchestration logs from workflow_logs (filter via metadata->>type)
   const { data: logs, error } = await supabase
     .from("workflow_logs")
-    .select("step, metadata, created_at, duration_seconds, checkpoint_result")
-    .or("step.like.orchestration_%,step.eq.orchestration,step.eq.code_review")
+    .select("metadata, created_at, duration_seconds, checkpoint_result")
+    .not("metadata", "is", null)
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -330,24 +330,28 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
   }> = {};
 
   for (const log of logs || []) {
+    const metadataType = log.metadata?.type;
+
     // Orchestration logs have metadata.results array
-    const results = log.metadata?.results;
-    if (Array.isArray(results)) {
-      for (const r of results) {
-        if (!r.agent) continue;
-        if (!agentStats[r.agent]) {
-          agentStats[r.agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+    if (metadataType === "orchestration") {
+      const results = log.metadata?.results;
+      if (Array.isArray(results)) {
+        for (const r of results) {
+          if (!r.agent) continue;
+          if (!agentStats[r.agent]) {
+            agentStats[r.agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+          }
+          const stats = agentStats[r.agent];
+          stats.runs++;
+          if (r.success) stats.successes++;
+          stats.totalDurationMs += r.durationMs || 0;
+          if (!stats.lastRun) stats.lastRun = log.created_at;
         }
-        const stats = agentStats[r.agent];
-        stats.runs++;
-        if (r.success) stats.successes++;
-        stats.totalDurationMs += r.durationMs || 0;
-        if (!stats.lastRun) stats.lastRun = log.created_at;
       }
     }
 
     // Code review logs
-    if (log.step === "code_review" && log.metadata) {
+    if (metadataType === "code_review" && log.metadata) {
       const agent = "qa";
       if (!agentStats[agent]) {
         agentStats[agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
@@ -366,8 +370,8 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
   // Gate pass rates
   const { data: gateLogs } = await supabase
     .from("workflow_logs")
-    .select("step, checkpoint_result, metadata")
-    .eq("step", "code_review")
+    .select("checkpoint_result, metadata")
+    .eq("metadata->>type", "code_review")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -386,7 +390,7 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
   const response = {
     agents: agentStats,
     gates: gateStats,
-    totalOrchestrations: logs?.filter((l: any) => l.step === "orchestration").length || 0,
+    totalOrchestrations: logs?.filter((l: any) => l.metadata?.type === "orchestration").length || 0,
   };
 
   return new Response(JSON.stringify(response, null, 2), {
@@ -499,7 +503,7 @@ async function handleCodeReviews(): Promise<Response> {
   const { data, error } = await supabase
     .from("workflow_logs")
     .select("task_id, metadata, created_at, duration_seconds")
-    .eq("step", "code_review")
+    .eq("metadata->>type", "code_review")
     .order("created_at", { ascending: false })
     .limit(50);
 

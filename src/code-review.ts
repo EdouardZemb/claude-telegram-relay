@@ -189,10 +189,10 @@ export async function saveReviewResult(
 ): Promise<void> {
   const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
-    step: "code_review",
-    from_step: "execution",
-    to_step: "review",
+    step_from: "execution",
+    step_to: "review",
     metadata: {
+      type: "code_review",
       branch: branchName,
       score: result.score,
       findings_count: result.findings.length,

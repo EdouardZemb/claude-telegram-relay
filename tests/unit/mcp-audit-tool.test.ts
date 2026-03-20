@@ -29,15 +29,15 @@ describe("MCP audit_codebase tool", () => {
     expect(serverCode).toContain("order=created_at.desc&limit=1");
   });
 
-  it("returns score, axis_scores, gaps, created_at when no axis filter", () => {
+  it("returns global_score, axis_scores, findings, created_at when no axis filter", () => {
     // The full-result return block
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
       serverCode.indexOf('"audit_codebase"') + 3000
     );
-    expect(auditSection).toContain("score: row.score");
+    expect(auditSection).toContain("score: row.global_score");
     expect(auditSection).toContain("axis_scores: row.axis_scores");
-    expect(auditSection).toContain("gaps: row.gaps");
+    expect(auditSection).toContain("findings: row.findings");
     expect(auditSection).toContain("created_at: row.created_at");
   });
 
@@ -67,10 +67,10 @@ describe("MCP audit_codebase tool", () => {
       serverCode.indexOf('"audit_codebase"') + 3000
     );
     expect(auditSection).toContain("score: axisScore");
-    expect(auditSection).toContain("globalScore: row.score");
+    expect(auditSection).toContain("globalScore: row.global_score");
   });
 
-  it("filters gaps by axis when axis parameter is provided", () => {
+  it("filters findings by axis when axis parameter is provided", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
       serverCode.indexOf('"audit_codebase"') + 3000

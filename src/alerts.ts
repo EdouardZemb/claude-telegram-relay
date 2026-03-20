@@ -165,7 +165,7 @@ export async function checkReviewScoreDrop(
   const { data: reviews } = await supabase
     .from("workflow_logs")
     .select("metadata, created_at")
-    .eq("step", "code_review")
+    .eq("metadata->>type", "code_review")
     .not("metadata", "is", null)
     .order("created_at", { ascending: false })
     .limit(windowSize * 2);
@@ -218,7 +218,7 @@ export async function checkAgentFailurePatterns(
   const { data: logs } = await supabase
     .from("workflow_logs")
     .select("metadata, created_at")
-    .eq("step", "orchestration")
+    .eq("metadata->>type", "orchestration")
     .not("metadata", "is", null)
     .order("created_at", { ascending: false })
     .limit(20);

@@ -1206,10 +1206,10 @@ async function logOrchestrationResult(
   const totalRetries = steps.reduce((sum, s) => sum + (s.retryCount || 0), 0);
   const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
-    step: "orchestration",
-    from_step: "orchestration_start",
-    to_step: "orchestration_end",
+    step_from: "orchestration_start",
+    step_to: "orchestration_end",
     metadata: {
+      type: "orchestration",
       pipeline: steps.map((s) => s.agentId),
       pipelineSelection: pipelineSelection || "manual",
       results: steps.map((s) => ({

@@ -384,9 +384,9 @@ describe("saveReviewResult", () => {
     expect(insertData).toHaveLength(1);
     expect(insertData[0].table).toBe("workflow_logs");
     expect(insertData[0].data.task_id).toBe("task-123");
-    expect(insertData[0].data.step).toBe("code_review");
-    expect(insertData[0].data.from_step).toBe("execution");
-    expect(insertData[0].data.to_step).toBe("review");
+    expect(insertData[0].data.step_from).toBe("execution");
+    expect(insertData[0].data.step_to).toBe("review");
+    expect(insertData[0].data.metadata.type).toBe("code_review");
     expect(insertData[0].data.metadata.branch).toBe("feature/test");
     expect(insertData[0].data.metadata.score).toBe(72);
     expect(insertData[0].data.metadata.findings_count).toBe(3);

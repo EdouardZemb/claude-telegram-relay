@@ -360,6 +360,7 @@ CREATE TABLE IF NOT EXISTS cost_tracking (
   tokens_output INTEGER DEFAULT 0,
   tokens_total INTEGER GENERATED ALWAYS AS (tokens_input + tokens_output) STORED,
   cost_usd NUMERIC DEFAULT 0,
+  model TEXT,
   duration_ms INTEGER DEFAULT 0,
   retry_attempt INTEGER DEFAULT 0,
   context TEXT,
@@ -799,6 +800,18 @@ CREATE POLICY "Allow all for authenticated" ON gate_evaluations FOR ALL USING (t
 ALTER TABLE trust_scores ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for authenticated" ON trust_scores FOR ALL USING (true);
 
+-- Pipeline runs: full access
+ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON pipeline_runs FOR ALL USING (true);
+
+-- Agent events: full access
+ALTER TABLE agent_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON agent_events FOR ALL USING (true);
+
+-- Audit results: full access
+ALTER TABLE audit_results ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON audit_results FOR ALL USING (true);
+
 -- Document categories: full access
 ALTER TABLE document_categories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for authenticated" ON document_categories FOR ALL USING (true);
@@ -1103,3 +1116,19 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_agent_events_role ON agent_events(session_id, agent_role);
 
 COMMENT ON TABLE agent_events IS 'Agent lifecycle events for inter-agent communication (S38).';
+
+-- ============================================================
+-- AUDIT RESULTS TABLE (Codebase audit results from heartbeat)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS audit_results (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  global_score INTEGER NOT NULL,
+  axis_scores JSONB NOT NULL DEFAULT '{}',
+  findings JSONB NOT NULL DEFAULT '[]',
+  task_ids_created TEXT[] DEFAULT '{}',
+  trigger_type TEXT NOT NULL,
+  project_id UUID REFERENCES projects(id)
+);
+
+COMMENT ON TABLE audit_results IS 'Codebase audit results with per-axis scores and findings. Populated by heartbeat audit engine.';

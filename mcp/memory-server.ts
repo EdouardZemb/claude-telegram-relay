@@ -1015,7 +1015,7 @@ server.tool(
   },
   async ({ axis }) => {
     try {
-      const url = "audit_results?select=id,score,axis_scores,gaps,created_at"
+      const url = "audit_results?select=id,global_score,axis_scores,findings,created_at"
         + "&order=created_at.desc&limit=1";
       const data = await callSupabaseRest(url) as any[];
 
@@ -1027,7 +1027,7 @@ server.tool(
               message: "No audit results found. The audit engine has not run yet.",
               score: null,
               axis_scores: {},
-              gaps: [],
+              findings: [],
             }, null, 2),
           }],
         };
@@ -1037,8 +1037,8 @@ server.tool(
 
       if (axis) {
         const axisScore = row.axis_scores?.[axis] ?? null;
-        const axisGaps = Array.isArray(row.gaps)
-          ? row.gaps.filter((g: any) => g.axis === axis || g.type?.toLowerCase().includes(axis.toLowerCase()))
+        const axisFindings = Array.isArray(row.findings)
+          ? row.findings.filter((g: any) => g.axis === axis || g.type?.toLowerCase().includes(axis.toLowerCase()))
           : [];
 
         return {
@@ -1047,8 +1047,8 @@ server.tool(
             text: JSON.stringify({
               axis,
               score: axisScore,
-              globalScore: row.score,
-              gaps: axisGaps,
+              globalScore: row.global_score,
+              findings: axisFindings,
               created_at: row.created_at,
             }, null, 2),
           }],
@@ -1059,9 +1059,9 @@ server.tool(
         content: [{
           type: "text" as const,
           text: JSON.stringify({
-            score: row.score,
+            score: row.global_score,
             axis_scores: row.axis_scores,
-            gaps: row.gaps,
+            findings: row.findings,
             created_at: row.created_at,
           }, null, 2),
         }],
