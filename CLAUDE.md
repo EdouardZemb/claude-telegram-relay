@@ -103,6 +103,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/plan <request>` | Decompose request into subtasks |
 | `/planify` | Proactive planner: backlog reordering, pacing |
 | `/prd` | PRD management (create, list, view, approve, reject) |
+| `/prd_workflow` | Conversational PRD-to-Deploy workflow |
 | `/project` | Project management (create, switch, archive, topic) |
 | `/projects` | List all projects |
 | `/profile` | User profile (view, update, insights) |
