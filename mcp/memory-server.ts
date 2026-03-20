@@ -999,6 +999,79 @@ server.tool(
   }
 );
 
+// ── Audit Tool ───────────────────────────────────────────────
+
+server.tool(
+  "audit_codebase",
+  "Get latest codebase audit results: global score, per-axis scores, and gaps/findings. " +
+    "The audit engine runs periodically via heartbeat and writes results to the audit_results table. " +
+    "If no audit has been run yet, returns an empty result. " +
+    "Preconditions: none (reads stored audit results). " +
+    "Suggested next: get_alerts (check anomalies), analyze_backlog (act on findings).",
+  {
+    axis: z.string().optional().describe("Filter by audit axis (e.g., 'security', 'tests', 'structure'). Omit for all axes."),
+  },
+  async ({ axis }) => {
+    try {
+      const rows = await callSupabaseRest(
+        "audit_results?select=id,score,axis_scores,gaps,created_at&order=created_at.desc&limit=1"
+      ) as any[];
+
+      if (!rows || rows.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              message: "No audit results found. The audit engine has not run yet.",
+              score: null,
+              axis_scores: {},
+              gaps: [],
+            }, null, 2),
+          }],
+        };
+      }
+
+      const row = rows[0];
+
+      if (axis) {
+        const axisScores = row.axis_scores || {};
+        const axisScore = axisScores[axis];
+        const allGaps = Array.isArray(row.gaps) ? row.gaps : [];
+        const filteredGaps = allGaps.filter(
+          (g: any) => g.axis === axis || (g.type && g.type.includes(axis))
+        );
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              axis,
+              score: axisScore ?? null,
+              globalScore: row.score,
+              gaps: filteredGaps,
+              created_at: row.created_at,
+            }, null, 2),
+          }],
+        };
+      }
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            score: row.score,
+            axis_scores: row.axis_scores,
+            gaps: row.gaps,
+            created_at: row.created_at,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+);
+
 // ── Orchestrate Tool ─────────────────────────────────────────
 
 const PIPELINE_MAP: Record<string, typeof DEFAULT_PIPELINE> = {
