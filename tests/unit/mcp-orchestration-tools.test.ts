@@ -460,9 +460,9 @@ describe("MCP Orchestration Tools — orchestrate_task", () => {
 });
 
 describe("MCP Orchestration Tools — Total Tool Count", () => {
-  it("has 27 total tools registered (4 memory + 3 project + 2 blackboard + 3 graph + 2 task + 5 prd + 7 orchestration + 1 orchestrate_task)", () => {
+  it("has 28 total tools registered", () => {
     const toolMatches = serverCode.match(/server\.tool\(\s*"/g);
     expect(toolMatches).not.toBeNull();
-    expect(toolMatches!.length).toBe(27);
+    expect(toolMatches!.length).toBe(28);
   });
 });
