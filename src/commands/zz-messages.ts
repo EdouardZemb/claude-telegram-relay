@@ -46,6 +46,7 @@ import {
   isPrdWorkflowEnabled,
   triageDescription,
   buildTriageResponse,
+  buildEnrichedDescription,
   storePendingDescription,
   getPendingRevision,
   clearPendingRevision,
@@ -280,6 +281,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         if (isConfirm) {
           const proposal = session.pendingProposal;
           session.pendingProposal = undefined;
+
+          // Fix #1: For prd_workflow, go directly to triage with enriched description
+          // instead of dispatching bare command (which fails when args is undefined)
+          if (proposal.action === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
+            const rawDescription = proposal.args || session.recentMessages.slice(-3).join("\n") || text;
+            const description = buildEnrichedDescription(rawDescription, session);
+            const triage = await triageDescription(description, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(rawDescription, triage);
+            const ck = prdChatKey(chatId, threadId);
+            storePendingDescription(ck, description);
+            await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+            return;
+          }
+
           const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
           const update = buildSyntheticUpdate(ctx, cmdStr);
           await bctx.bot.handleUpdate(update);
@@ -328,11 +343,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
         if ((regexResult.detected.intent === "suggest_prd" || regexResult.detected.intent === "create_prd") && isPrdWorkflowEnabled() && bctx.supabase) {
           addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
-          const description = regexResult.detected.args || text;
-          const triage = await triageDescription(description, bctx.supabase);
-          const { message, keyboard } = buildTriageResponse(description, triage);
+          const rawDescription = regexResult.detected.args || text;
+          // Fix #2: Enrich description with conversation context for PRD generation
+          const enrichedDescription = buildEnrichedDescription(rawDescription, session);
+          const triage = await triageDescription(enrichedDescription, bctx.supabase);
+          const { message, keyboard } = buildTriageResponse(rawDescription, triage);
           const ck = prdChatKey(chatId, threadId);
-          storePendingDescription(ck, description);
+          storePendingDescription(ck, enrichedDescription);
           await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
           return;
         }
@@ -353,11 +370,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           // PRD Workflow: intercept suggest_prd or create_prd from LLM
           if ((llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") && isPrdWorkflowEnabled() && bctx.supabase) {
             addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
-            const description = llmResult.detected.args || text;
-            const triage = await triageDescription(description, bctx.supabase);
-            const { message, keyboard } = buildTriageResponse(description, triage);
+            const rawDescription = llmResult.detected.args || text;
+            // Fix #2: Enrich description with conversation context for PRD generation
+            const enrichedDescription = buildEnrichedDescription(rawDescription, session);
+            const triage = await triageDescription(enrichedDescription, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(rawDescription, triage);
             const ck = prdChatKey(chatId, threadId);
-            storePendingDescription(ck, description);
+            storePendingDescription(ck, enrichedDescription);
             await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
             return;
           }
@@ -496,6 +515,19 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         if (isConfirm) {
           const proposal = session.pendingProposal;
           session.pendingProposal = undefined;
+
+          // Fix #1: For prd_workflow, go directly to triage with enriched description
+          if (proposal.action === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
+            const rawDescription = proposal.args || session.recentMessages.slice(-3).join("\n") || transcription;
+            const description = buildEnrichedDescription(rawDescription, session);
+            const triage = await triageDescription(description, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(rawDescription, triage);
+            const ck = prdChatKey(chatId, threadId);
+            storePendingDescription(ck, description);
+            await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+            return;
+          }
+
           const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
           const update = buildSyntheticUpdate(ctx, cmdStr);
           await bctx.bot.handleUpdate(update);
@@ -536,11 +568,12 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
         if ((regexResult.detected.intent === "suggest_prd" || regexResult.detected.intent === "create_prd") && isPrdWorkflowEnabled() && bctx.supabase) {
           addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
-          const description = regexResult.detected.args || transcription;
-          const triage = await triageDescription(description, bctx.supabase);
-          const { message, keyboard } = buildTriageResponse(description, triage);
+          const rawDescription = regexResult.detected.args || transcription;
+          const enrichedDescription = buildEnrichedDescription(rawDescription, session);
+          const triage = await triageDescription(enrichedDescription, bctx.supabase);
+          const { message, keyboard } = buildTriageResponse(rawDescription, triage);
           const ck = prdChatKey(chatId, threadId);
-          storePendingDescription(ck, description);
+          storePendingDescription(ck, enrichedDescription);
           await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
           return;
         }
@@ -561,11 +594,12 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           // PRD Workflow: intercept suggest_prd or create_prd from LLM
           if ((llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") && isPrdWorkflowEnabled() && bctx.supabase) {
             addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
-            const description = llmResult.detected.args || transcription;
-            const triage = await triageDescription(description, bctx.supabase);
-            const { message, keyboard } = buildTriageResponse(description, triage);
+            const rawDescription = llmResult.detected.args || transcription;
+            const enrichedDescription = buildEnrichedDescription(rawDescription, session);
+            const triage = await triageDescription(enrichedDescription, bctx.supabase);
+            const { message, keyboard } = buildTriageResponse(rawDescription, triage);
             const ck = prdChatKey(chatId, threadId);
-            storePendingDescription(ck, description);
+            storePendingDescription(ck, enrichedDescription);
             await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
             return;
           }

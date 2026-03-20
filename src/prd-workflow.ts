@@ -31,6 +31,7 @@ import { isFeatureEnabled } from "./feature-flags.ts";
 import {
   getSession,
   addDecision,
+  buildConversationContext,
   type ConversationSession,
   type DetectedConstraint,
 } from "./conversation-session.ts";
@@ -50,6 +51,30 @@ export interface TriageResult {
 
 export function isPrdWorkflowEnabled(): boolean {
   return isFeatureEnabled("prd_to_deploy");
+}
+
+// ── Description Enrichment ───────────────────────────────────
+
+/**
+ * Build an enriched description for PRD generation by combining
+ * the detected description with the full conversation context.
+ * Fixes the "PRD sans contexte" bug where only regex-captured args
+ * were passed to the PRD generator.
+ */
+export function buildEnrichedDescription(
+  detectedDescription: string,
+  session: ConversationSession,
+): string {
+  const conversationContext = buildConversationContext(session);
+  if (!conversationContext) return detectedDescription;
+
+  return [
+    "CONTEXTE DE LA DISCUSSION:",
+    conversationContext,
+    "",
+    "DEMANDE:",
+    detectedDescription,
+  ].join("\n");
 }
 
 // ── F1: Triage ───────────────────────────────────────────────

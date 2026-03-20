@@ -2,8 +2,15 @@
  * @module conversation-session
  * @description Conversation sessions: tracks conversation state per chat thread.
  * Sessions capture intent history, user constraints, and decisions for contextual
- * intent detection and agent context enrichment. TTL 30min. S43.
+ * intent detection and agent context enrichment. TTL 2h with JSON persistence.
+ * S43 + bugfix: sessions now persist to disk so PRD workflow data survives restarts.
  */
+
+import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { join } from "path";
+
+const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
+const SESSIONS_FILE = join(RELAY_DIR, "sessions.json");
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -69,14 +76,57 @@ export interface ConversationSession {
 
 // ── Session Store ────────────────────────────────────────────
 
-const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours (was 30min, extended for PRD workflow)
 const MAX_RECENT_MESSAGES = 5;
 const MAX_INTENTS = 20;
 
 const sessions = new Map<string, ConversationSession>();
+let persistLoaded = false;
+let persistDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function sessionKey(chatId: number, threadId?: number): string {
   return threadId ? `${chatId}:${threadId}` : `${chatId}`;
+}
+
+// ── Persistence ──────────────────────────────────────────────
+
+async function loadSessions(): Promise<void> {
+  if (persistLoaded) return;
+  try {
+    const content = await readFile(SESSIONS_FILE, "utf-8");
+    const entries: Array<{ key: string; session: ConversationSession }> = JSON.parse(content);
+    const now = Date.now();
+    for (const { key, session } of entries) {
+      // Only restore non-expired sessions
+      if (now - session.lastActivity < SESSION_TTL_MS) {
+        sessions.set(key, session);
+      }
+    }
+  } catch {
+    // File doesn't exist or parse error — start fresh
+  }
+  persistLoaded = true;
+}
+
+async function saveSessions(): Promise<void> {
+  try {
+    await mkdir(RELAY_DIR, { recursive: true });
+    const entries = Array.from(sessions.entries()).map(([key, session]) => ({ key, session }));
+    const tmp = SESSIONS_FILE + `.tmp.${Date.now()}`;
+    await writeFile(tmp, JSON.stringify(entries, null, 2));
+    await rename(tmp, SESSIONS_FILE);
+  } catch (error) {
+    console.error("Session persistence error:", error);
+  }
+}
+
+/** Debounced save: coalesces rapid writes into a single flush after 2s */
+function scheduleSave(): void {
+  if (persistDebounce) clearTimeout(persistDebounce);
+  persistDebounce = setTimeout(() => {
+    saveSessions().catch(() => {});
+    persistDebounce = null;
+  }, 2000);
 }
 
 /**
@@ -105,7 +155,15 @@ export function getSession(chatId: number, threadId?: number): ConversationSessi
     recentMessages: [],
   };
   sessions.set(key, session);
+  scheduleSave();
   return session;
+}
+
+/**
+ * Load persisted sessions from disk. Call once at startup.
+ */
+export async function initSessions(): Promise<void> {
+  await loadSessions();
 }
 
 /**
@@ -128,6 +186,7 @@ export function addMessage(session: ConversationSession, message: string): void 
     session.recentMessages.shift();
   }
   session.lastActivity = Date.now();
+  scheduleSave();
 }
 
 /**
@@ -154,6 +213,7 @@ export function addIntent(
   // Phase transitions based on intents
   updatePhase(session, command, executed);
   session.lastActivity = Date.now();
+  scheduleSave();
 }
 
 /**
@@ -169,6 +229,7 @@ export function addConstraint(
   session.constraints = session.constraints.filter((c) => c.type !== type);
   session.constraints.push({ type, value, source, detectedAt: Date.now() });
   session.lastActivity = Date.now();
+  scheduleSave();
 }
 
 /**
@@ -177,6 +238,7 @@ export function addConstraint(
 export function addDecision(session: ConversationSession, description: string): void {
   session.decisions.push({ description, timestamp: Date.now() });
   session.lastActivity = Date.now();
+  scheduleSave();
 }
 
 /**
@@ -185,6 +247,7 @@ export function addDecision(session: ConversationSession, description: string): 
 export function setActiveTask(session: ConversationSession, taskId: string): void {
   session.activeTaskId = taskId;
   session.lastActivity = Date.now();
+  scheduleSave();
 }
 
 // ── Phase Detection ──────────────────────────────────────────
@@ -400,4 +463,9 @@ export function getActiveSessionCount(): number {
 /** Reset all sessions (for testing). */
 export function _resetSessions(): void {
   sessions.clear();
+  persistLoaded = true; // Skip loading from disk in tests
+  if (persistDebounce) {
+    clearTimeout(persistDebounce);
+    persistDebounce = null;
+  }
 }
