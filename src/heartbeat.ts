@@ -47,6 +47,15 @@ import { archiveOldMemories } from "./memory.ts";
 import { loadPrefs, isQuietHours } from "./notification-prefs.ts";
 import { loadQueue, getQueue, flushMorningDigest, enqueue } from "./notification-queue.ts";
 import { runAllScanners, isDuplicate } from "./autonomy-scanner.ts";
+import {
+  loadAlertState,
+  saveAlertState,
+  loadCooldowns,
+  shouldSendAlert,
+  markAlertSent,
+  cleanupResolvedAlerts,
+  buildAlertKey,
+} from "./alert-state.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -494,15 +503,27 @@ export async function pulse(): Promise<{
     console.error(`[${timestamp}] Morning digest flush error:`, err);
   }
 
-  // Hourly: Alert checks
+  // Hourly: Alert checks with deduplication
   try {
     const hourAgo = now - 60 * 60 * 1000;
     if (!state.lastAlertCheckAt || new Date(state.lastAlertCheckAt).getTime() < hourAgo) {
       console.log(`[${timestamp}] Running hourly alert checks...`);
       const alerts = await runAllChecks(supabase, sprint);
+      const alertState = await loadAlertState();
+      const cooldowns = await loadCooldowns();
+      const currentKeys = new Set<string>();
+
       if (alerts.length > 0) {
         console.log(`[${timestamp}] ${alerts.length} alert(s) detected.`);
+        let sent = 0;
         for (const alert of alerts) {
+          const key = buildAlertKey(alert);
+          currentKeys.add(key);
+
+          if (!shouldSendAlert(key, alert, alertState, cooldowns, now)) {
+            continue;
+          }
+
           await enqueue({
             type: "alert",
             severity: alert.severity === "critical" ? "critical" : "normal",
@@ -512,8 +533,16 @@ export async function pulse(): Promise<{
               taskId: (alert.data?.taskId as string) || undefined,
             },
           });
+          markAlertSent(key, alert, alertState, now);
+          sent++;
+        }
+        if (sent > 0) {
+          console.log(`[${timestamp}] ${sent}/${alerts.length} alert(s) sent (${alerts.length - sent} deduplicated).`);
         }
       }
+
+      cleanupResolvedAlerts(currentKeys, alertState, now);
+      await saveAlertState(alertState);
       state.lastAlertCheckAt = timestamp;
     }
   } catch (err) {

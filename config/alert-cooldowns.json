@@ -1,0 +1,11 @@
+{
+  "stuck_task": 21600000,
+  "high_rework": 43200000,
+  "behind_schedule": 43200000,
+  "long_running_step": 21600000,
+  "review_score_drop": 43200000,
+  "agent_failure_pattern": 21600000,
+  "stale_task": 43200000,
+  "default": 21600000,
+  "critical_multiplier": 2
+}

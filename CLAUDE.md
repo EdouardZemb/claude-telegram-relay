@@ -51,6 +51,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto pipeline selection and retries |
 | `cost-tracking.ts` | Token usage tracking, multi-model cost estimation (Opus/Sonnet/Haiku), sprint cost aggregation, /cost command |
 | `workflow.ts` | Workflow engine: loads config/workflow.yaml, tracks state transitions, transition enforcement, retry policies |
+| `alert-state.ts` | Alert deduplication and cooldown persistence: load/save state, cooldown check, cleanup resolved alerts, key generation |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
