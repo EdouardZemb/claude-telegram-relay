@@ -2,7 +2,8 @@
  * Heartbeat — Unit Tests
  */
 
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterAll, mock } from "bun:test";
+import { join } from "path";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 import {
   buildHeartbeatPrompt,
@@ -424,6 +425,90 @@ describe("computeAuditScore", () => {
       { type: "test_count" },        // -10
     ];
     expect(computeAuditScore(gaps)).toBe(80);
+  });
+});
+
+describe("runLightweightAudit", () => {
+  // runLightweightAudit calls countTests (which runs `bun test`) only when structural gaps are 0.
+  // To avoid recursive bun test deadlock, we use a temp project dir with intentional structural gaps.
+  const tmpDir = join(process.cwd(), "tests", ".tmp-audit-fixture");
+  const tmpSrcDir = join(tmpDir, "src");
+  const tmpCommandsDir = join(tmpSrcDir, "commands");
+  const tmpTestsDir = join(tmpDir, "tests");
+
+  beforeEach(async () => {
+    const { mkdirSync, writeFileSync, rmSync } = require("fs");
+    try { rmSync(tmpDir, { recursive: true }); } catch {}
+    mkdirSync(tmpCommandsDir, { recursive: true });
+    mkdirSync(tmpTestsDir, { recursive: true });
+
+    // Create src modules: relay.ts + agent.ts + a fake undocumented one
+    writeFileSync(join(tmpSrcDir, "relay.ts"), 'composer.command("help", () => {});\n');
+    writeFileSync(join(tmpSrcDir, "agent.ts"), "export const x = 1;\n");
+    writeFileSync(join(tmpSrcDir, "undocumented.ts"), "export const y = 2;\n");
+    writeFileSync(join(tmpCommandsDir, "help.ts"), 'composer.command("status", () => {});\n');
+
+    // CLAUDE.md documents relay.ts and agent.ts but NOT undocumented.ts, plus commands /help and /status
+    writeFileSync(
+      join(tmpDir, "CLAUDE.md"),
+      [
+        "### Source Modules (`src/`)",
+        "| `relay.ts` | Bot |",
+        "| `agent.ts` | Agent |",
+        "### Telegram Commands",
+        "| `/help` | Help |",
+        "| `/status` | Status |",
+        "### Conventions",
+        "- Tests: 100 tests",
+      ].join("\n")
+    );
+  });
+
+  it("should return score, gaps array, and testCount", async () => {
+    const { runLightweightAudit } = await import("../../src/heartbeat");
+    const result = await runLightweightAudit(tmpDir);
+    expect(result).toHaveProperty("score");
+    expect(result).toHaveProperty("gaps");
+    expect(result).toHaveProperty("testCount");
+    expect(result.score).toBeGreaterThanOrEqual(0);
+    expect(result.score).toBeLessThanOrEqual(100);
+    expect(Array.isArray(result.gaps)).toBe(true);
+    expect(typeof result.testCount).toBe("number");
+  });
+
+  it("should detect undocumented module as missing_module gap", async () => {
+    const { runLightweightAudit } = await import("../../src/heartbeat");
+    const result = await runLightweightAudit(tmpDir);
+    const missingModules = result.gaps.filter(g => g.type === "missing_module");
+    // undocumented.ts and commands/help.ts are in src but not in CLAUDE.md
+    expect(missingModules.length).toBeGreaterThanOrEqual(1);
+    expect(missingModules.some(g => g.item === "undocumented.ts")).toBe(true);
+  });
+
+  it("should deduct 5 points per structural gap", async () => {
+    const { runLightweightAudit, computeAuditScore } = await import("../../src/heartbeat");
+    const result = await runLightweightAudit(tmpDir);
+    const expectedScore = computeAuditScore(result.gaps);
+    expect(result.score).toBe(expectedScore);
+    // At least 1 gap (undocumented.ts), so score < 100
+    expect(result.score).toBeLessThan(100);
+  });
+
+  it("should have gaps with valid type/item/detail fields", async () => {
+    const { runLightweightAudit } = await import("../../src/heartbeat");
+    const result = await runLightweightAudit(tmpDir);
+    for (const gap of result.gaps) {
+      expect(gap).toHaveProperty("type");
+      expect(gap).toHaveProperty("item");
+      expect(gap).toHaveProperty("detail");
+      expect(["missing_module", "extra_module", "missing_command", "extra_command", "test_count"]).toContain(gap.type);
+    }
+  });
+
+  // Cleanup
+  afterAll(() => {
+    const { rmSync } = require("fs");
+    try { rmSync(tmpDir, { recursive: true }); } catch {}
   });
 });
 
