@@ -47,6 +47,13 @@ export interface GraphStats {
   mostConnected: Array<{ module: string; connections: number }>;
 }
 
+export interface FunctionInfo {
+  name: string;
+  startLine: number;
+  lineCount: number;
+  complexity: number;
+}
+
 // ── Parsing ──────────────────────────────────────────────────
 
 /**
@@ -346,6 +353,209 @@ export function findNode(graph: CodeGraph, query: string): GraphNode | undefined
 
   // Partial match on filename
   return graph.nodes.find((n) => n.id.endsWith(query) || n.id.includes(query));
+}
+
+// ── Cycle Detection ─────────────────────────────────────────
+
+/**
+ * Detect circular dependencies in the module graph via DFS with 3-color marking.
+ * Returns an array of cycles, where each cycle is an array of module IDs.
+ */
+export function detectCycles(graph: CodeGraph): string[][] {
+  // Build adjacency list from edges
+  const adj = new Map<string, string[]>();
+  for (const node of graph.nodes) {
+    adj.set(node.id, []);
+  }
+  for (const edge of graph.edges) {
+    if (!adj.has(edge.source)) adj.set(edge.source, []);
+    adj.get(edge.source)!.push(edge.target);
+  }
+
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  for (const id of adj.keys()) {
+    color.set(id, WHITE);
+  }
+
+  const cycles: string[][] = [];
+  const path: string[] = [];
+
+  function dfs(node: string): void {
+    color.set(node, GRAY);
+    path.push(node);
+
+    for (const neighbor of (adj.get(node) || [])) {
+      if (color.get(neighbor) === GRAY) {
+        const cycleStart = path.indexOf(neighbor);
+        if (cycleStart !== -1) {
+          cycles.push(path.slice(cycleStart));
+        }
+      } else if (color.get(neighbor) === WHITE) {
+        dfs(neighbor);
+      }
+    }
+
+    path.pop();
+    color.set(node, BLACK);
+  }
+
+  for (const node of adj.keys()) {
+    if (color.get(node) === WHITE) {
+      dfs(node);
+    }
+  }
+
+  // Deduplicate: normalize by rotating to start at lexicographically smallest node
+  const seen = new Set<string>();
+  const unique: string[][] = [];
+  for (const cycle of cycles) {
+    const min = cycle.reduce((a, b) => (a < b ? a : b));
+    const minIdx = cycle.indexOf(min);
+    const rotated = [...cycle.slice(minIdx), ...cycle.slice(0, minIdx)];
+    const key = rotated.join("\u2192");
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(rotated);
+    }
+  }
+
+  return unique;
+}
+
+// ── Per-Function Complexity ─────────────────────────────────
+
+/**
+ * Compute cyclomatic complexity of a function body.
+ * Strips comments, string literals, and template literals before counting.
+ * @internal
+ */
+function computeCyclomaticComplexity(body: string): number {
+  // Strip single-line comments
+  let cleaned = body.replace(/\/\/.*$/gm, "");
+  // Strip multi-line comments
+  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Strip template literals (before string literals to avoid interference)
+  cleaned = cleaned.replace(/`(?:[^`\\]|\\[\s\S])*`/g, "");
+  // Strip double-quoted strings
+  cleaned = cleaned.replace(/"(?:[^"\\]|\\.)*"/g, "");
+  // Strip single-quoted strings
+  cleaned = cleaned.replace(/'(?:[^'\\]|\\.)*'/g, "");
+
+  let count = 0;
+
+  // Branch keywords with word boundaries
+  const keywords = [/\bif\b/g, /\bfor\b/g, /\bwhile\b/g, /\bcase\b/g, /\bcatch\b/g];
+  for (const re of keywords) {
+    const m = cleaned.match(re);
+    if (m) count += m.length;
+  }
+
+  // Logical operators
+  count += (cleaned.match(/&&/g) || []).length;
+  count += (cleaned.match(/\|\|/g) || []).length;
+
+  // Ternary ? (exclude ?. optional chaining, ?? nullish coalescing, ?: optional property)
+  count += (cleaned.match(/\?(?![.?:])/g) || []).length;
+
+  return 1 + count;
+}
+
+/**
+ * Extract function body boundaries via brace-depth counting.
+ * Tracks parenthesis depth to skip braces inside parameter type annotations.
+ * Falls back to semicolon-terminated expression for single-expression arrows.
+ * @internal
+ */
+function extractFunctionBody(
+  lines: string[],
+  startIdx: number
+): { endIdx: number; body: string } {
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let foundOpen = false;
+  let bodyStartLine = startIdx;
+
+  for (let i = startIdx; i < lines.length; i++) {
+    for (const ch of lines[i]) {
+      if (ch === "(") parenDepth++;
+      else if (ch === ")") parenDepth--;
+
+      if (parenDepth > 0) continue;
+
+      if (ch === "{") {
+        braceDepth++;
+        if (!foundOpen) {
+          foundOpen = true;
+          bodyStartLine = i;
+        }
+      } else if (ch === "}") {
+        braceDepth--;
+        if (foundOpen && braceDepth === 0) {
+          return { endIdx: i, body: lines.slice(bodyStartLine, i + 1).join("\n") };
+        }
+      }
+    }
+  }
+
+  // No matching brace — single-expression arrow or parse error
+  for (let i = startIdx; i < lines.length; i++) {
+    if (lines[i].trimEnd().endsWith(";")) {
+      return { endIdx: i, body: lines.slice(startIdx, i + 1).join("\n") };
+    }
+  }
+
+  return { endIdx: startIdx, body: lines[startIdx] };
+}
+
+/**
+ * Get exported functions from a module with per-function complexity.
+ * Reads the source file from disk, detects exported function declarations
+ * and arrow function exports, computes cyclomatic complexity.
+ */
+export function getExportedFunctions(modulePath: string): FunctionInfo[] {
+  const absPath = modulePath.startsWith("/") ? modulePath : join(PROJECT_ROOT, modulePath);
+
+  let content: string;
+  try {
+    content = readFileSync(absPath, "utf-8");
+  } catch {
+    return [];
+  }
+
+  const lines = content.split("\n");
+  const results: FunctionInfo[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let name: string | null = null;
+
+    // Pattern 1: export [async] function name(
+    const funcMatch = line.match(/^export\s+(?:async\s+)?function\s+(\w+)/);
+    if (funcMatch) {
+      name = funcMatch[1];
+    } else {
+      // Pattern 2: export const name = ... => (arrow function)
+      const constMatch = line.match(/^export\s+const\s+(\w+)\s*=/);
+      if (constMatch && line.includes("=>")) {
+        name = constMatch[1];
+      }
+    }
+
+    if (!name) continue;
+
+    const startLine = i + 1; // 1-indexed
+    const { endIdx, body } = extractFunctionBody(lines, i);
+    const lineCount = endIdx - i + 1;
+    const complexity = computeCyclomaticComplexity(body);
+
+    results.push({ name, startLine, lineCount, complexity });
+
+    // Skip to end of function body to avoid re-entering
+    i = endIdx;
+  }
+
+  return results;
 }
 
 // ── Statistics ───────────────────────────────────────────────

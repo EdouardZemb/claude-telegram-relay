@@ -22,9 +22,12 @@ import {
   formatGraphStatsForMonitor,
   estimateComplexity,
   findAffectedModules,
+  detectCycles,
+  getExportedFunctions,
   type CodeGraph,
   type GraphNode,
   type GraphEdge,
+  type FunctionInfo,
 } from "../../src/code-graph.ts";
 
 // ── extractExports ──────────────────────────────────────────
@@ -490,5 +493,339 @@ describe("integration: real codebase", () => {
     const score = estimateComplexity(graph, "src/orchestrator.ts");
     expect(score).toBeGreaterThan(0);
     expect(score).toBeLessThanOrEqual(10);
+  });
+});
+
+// ── detectCycles ─────────────────────────────────────────────
+
+describe("detectCycles", () => {
+  it("detects a simple cycle A→B→C→A (AC-1)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [], lineCount: 10 },
+        { id: "src/b.ts", exports: [], lineCount: 10 },
+        { id: "src/c.ts", exports: [], lineCount: 10 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["b"], isTypeOnly: false },
+        { source: "src/b.ts", target: "src/c.ts", imports: ["c"], isTypeOnly: false },
+        { source: "src/c.ts", target: "src/a.ts", imports: ["a"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0]).toHaveLength(3);
+    expect(cycles[0]).toContain("src/a.ts");
+    expect(cycles[0]).toContain("src/b.ts");
+    expect(cycles[0]).toContain("src/c.ts");
+  });
+
+  it("detects multiple independent cycles", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [], lineCount: 10 },
+        { id: "src/b.ts", exports: [], lineCount: 10 },
+        { id: "src/c.ts", exports: [], lineCount: 10 },
+        { id: "src/d.ts", exports: [], lineCount: 10 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["b"], isTypeOnly: false },
+        { source: "src/b.ts", target: "src/a.ts", imports: ["a"], isTypeOnly: false },
+        { source: "src/c.ts", target: "src/d.ts", imports: ["d"], isTypeOnly: false },
+        { source: "src/d.ts", target: "src/c.ts", imports: ["c"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(2);
+  });
+
+  it("returns empty array for acyclic graph (AC-2)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [], lineCount: 10 },
+        { id: "src/b.ts", exports: [], lineCount: 10 },
+        { id: "src/c.ts", exports: [], lineCount: 10 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["b"], isTypeOnly: false },
+        { source: "src/b.ts", target: "src/c.ts", imports: ["c"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(0);
+  });
+
+  it("returns empty array for empty graph", () => {
+    const graph: CodeGraph = {
+      nodes: [],
+      edges: [],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(0);
+  });
+
+  it("deduplicates cycles found from different starting nodes", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [], lineCount: 10 },
+        { id: "src/b.ts", exports: [], lineCount: 10 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["b"], isTypeOnly: false },
+        { source: "src/b.ts", target: "src/a.ts", imports: ["a"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0]).toHaveLength(2);
+  });
+
+  it("does not modify existing graph query results (AC-5)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [{ name: "aFn", kind: "function" }], lineCount: 50 },
+        { id: "src/b.ts", exports: [{ name: "bFn", kind: "function" }], lineCount: 100 },
+        { id: "src/c.ts", exports: [{ name: "cFn", kind: "function" }], lineCount: 200 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["bFn"], isTypeOnly: false },
+        { source: "src/b.ts", target: "src/c.ts", imports: ["cFn"], isTypeOnly: false },
+        { source: "src/c.ts", target: "src/a.ts", imports: ["aFn"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const depsBefore = getModuleDependencies(graph, "src/a.ts");
+    const dependentsBefore = getDependents(graph, "src/b.ts");
+    const impactBefore = getImpactRadius(graph, "src/c.ts", 3);
+
+    detectCycles(graph);
+
+    expect(getModuleDependencies(graph, "src/a.ts")).toEqual(depsBefore);
+    expect(getDependents(graph, "src/b.ts")).toEqual(dependentsBefore);
+    expect(getImpactRadius(graph, "src/c.ts", 3)).toEqual(impactBefore);
+  });
+
+  it("handles self-cycle (A→A)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [], lineCount: 10 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/a.ts", imports: ["a"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    const cycles = detectCycles(graph);
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0]).toEqual(["src/a.ts"]);
+  });
+});
+
+// ── getExportedFunctions ────────────────────────────────────
+
+describe("getExportedFunctions", () => {
+  const fixtureDir = join(process.cwd(), "tests", "fixtures", "code-graph");
+
+  beforeEach(() => {
+    mkdirSync(fixtureDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  });
+
+  it("returns 3 exported functions with correct metadata (AC-4)", () => {
+    const content = [
+      "export function alpha(x: number): void {",
+      "  console.log(x);",
+      "}",
+      "",
+      "export function beta(): string {",
+      "  return \"hello\";",
+      "}",
+      "",
+      "export async function gamma(y: number): Promise<void> {",
+      "  await fetch(String(y));",
+      "}",
+      "",
+    ].join("\n");
+
+    const filePath = join(fixtureDir, "three-exports.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(3);
+
+    expect(fns[0].name).toBe("alpha");
+    expect(fns[0].startLine).toBe(1);
+    expect(fns[0].lineCount).toBe(3);
+    expect(fns[0].complexity).toBe(1);
+
+    expect(fns[1].name).toBe("beta");
+    expect(fns[1].startLine).toBe(5);
+    expect(fns[1].lineCount).toBe(3);
+
+    expect(fns[2].name).toBe("gamma");
+    expect(fns[2].startLine).toBe(9);
+    expect(fns[2].lineCount).toBe(3);
+  });
+
+  it("reports complexity >= 15 for function with 15 if/for/while (AC-3)", () => {
+    const lines = [
+      "export function complexFunction(x: number): number {",
+      "  if (x > 0) { x++; }",
+      "  if (x > 1) { x++; }",
+      "  if (x > 2) { x++; }",
+      "  if (x > 3) { x++; }",
+      "  if (x > 4) { x++; }",
+      "  for (let i = 0; i < 5; i++) { x++; }",
+      "  for (let i = 0; i < 5; i++) { x++; }",
+      "  for (let i = 0; i < 5; i++) { x++; }",
+      "  for (let i = 0; i < 5; i++) { x++; }",
+      "  for (let i = 0; i < 5; i++) { x++; }",
+      "  while (x > 0) { x--; }",
+      "  while (x > 1) { x--; }",
+      "  while (x > 2) { x--; }",
+      "  while (x > 3) { x--; }",
+      "  while (x > 4) { x--; }",
+      "  return x;",
+      "}",
+      "",
+    ];
+    const content = lines.join("\n");
+    const filePath = join(fixtureDir, "complex.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(1);
+    expect(fns[0].name).toBe("complexFunction");
+    expect(fns[0].complexity).toBeGreaterThanOrEqual(15);
+  });
+
+  it("counts various control flow constructs", () => {
+    const content = [
+      "export function mixedComplexity(x: number): number {",
+      "  if (x > 0) {",
+      "    for (let i = 0; i < x; i++) {",
+      "      while (i > 0) {",
+      "        switch (i) {",
+      "          case 1: break;",
+      "          case 2: break;",
+      "        }",
+      "      }",
+      "    }",
+      "  }",
+      "  try {",
+      "    x++;",
+      "  } catch (e) {",
+      "    x--;",
+      "  }",
+      "  return x && x > 0 ? x : -x;",
+      "}",
+      "",
+    ].join("\n");
+
+    const filePath = join(fixtureDir, "mixed.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(1);
+    // if(1) + for(1) + while(1) + case(2) + catch(1) + &&(1) + ?(1) = 8 + 1 base = 9
+    expect(fns[0].complexity).toBeGreaterThanOrEqual(9);
+  });
+
+  it("returns empty array for nonexistent file", () => {
+    const fns = getExportedFunctions("/tmp/nonexistent-module-xyz.ts");
+    expect(fns).toHaveLength(0);
+  });
+
+  it("returns empty array for module with no exported functions", () => {
+    const content = [
+      "export const MAX = 100;",
+      "export interface Config { key: string; }",
+      'export type Mode = "a" | "b";',
+      "function internalHelper() {",
+      "  return 42;",
+      "}",
+      "",
+    ].join("\n");
+
+    const filePath = join(fixtureDir, "no-functions.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(0);
+  });
+
+  it("detects arrow function exports", () => {
+    const content = [
+      "export const add = (a: number, b: number) => {",
+      "  return a + b;",
+      "};",
+      "",
+    ].join("\n");
+
+    const filePath = join(fixtureDir, "arrow.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(1);
+    expect(fns[0].name).toBe("add");
+    expect(fns[0].complexity).toBe(1);
+  });
+
+  it("ignores ternaries inside template literals for complexity", () => {
+    const content = 'export function formatter(x: number): string {\n  return `result: ${x > 0 ? "pos" : "neg"}`;\n}\n';
+    const filePath = join(fixtureDir, "template.ts");
+    writeFileSync(filePath, content, "utf-8");
+
+    const fns = getExportedFunctions(filePath);
+    expect(fns).toHaveLength(1);
+    expect(fns[0].complexity).toBe(1);
+  });
+
+  it("handles real codebase module", () => {
+    const fns = getExportedFunctions("src/code-graph.ts");
+    expect(fns.length).toBeGreaterThan(5);
+    for (const fn of fns) {
+      expect(fn.name).toBeTruthy();
+      expect(fn.startLine).toBeGreaterThan(0);
+      expect(fn.lineCount).toBeGreaterThan(0);
+      expect(fn.complexity).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("does not affect existing functions (AC-5)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { id: "src/a.ts", exports: [{ name: "a", kind: "function" }], lineCount: 50 },
+        { id: "src/b.ts", exports: [{ name: "b", kind: "function" }], lineCount: 100 },
+      ],
+      edges: [
+        { source: "src/a.ts", target: "src/b.ts", imports: ["b"], isTypeOnly: false },
+      ],
+      indexedAt: "2026-01-01T00:00:00Z",
+    };
+
+    // Existing functions still work after new code is loaded
+    expect(getModuleDependencies(graph, "src/a.ts")).toHaveLength(1);
+    expect(getDependents(graph, "src/b.ts")).toHaveLength(1);
+    expect(getImpactRadius(graph, "src/b.ts", 1)).toHaveLength(1);
+    expect(getRelatedModules(graph, "src/a.ts")).toContain("src/b.ts");
+    expect(findNode(graph, "src/a.ts")).toBeDefined();
+    expect(getGraphStats(graph).totalModules).toBe(2);
+    expect(estimateComplexity(graph, "src/a.ts")).toBeGreaterThanOrEqual(0);
   });
 });
