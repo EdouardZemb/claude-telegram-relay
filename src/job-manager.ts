@@ -15,7 +15,7 @@ import { isFeatureEnabled } from "./feature-flags.ts";
 
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const JOBS_FILE = join(RELAY_DIR, "jobs.json");
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const DEFAULT_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ── Types ──────────────────────────────────────────────────────
