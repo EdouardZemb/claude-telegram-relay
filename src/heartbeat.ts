@@ -559,7 +559,8 @@ export async function pulse(): Promise<{
             tags: ["auto-generated", opp.type],
           });
           if (task) {
-            await supabase.from("tasks").update({ notes: opp.dedup_key }).eq("id", task.id);
+            const { error: updateError } = await supabase.from("tasks").update({ notes: opp.dedup_key }).eq("id", task.id);
+            if (updateError) console.error(`[${timestamp}]   update task notes error:`, updateError);
             console.log(`[${timestamp}]   Created: ${opp.title} [${task.id.substring(0, 8)}]`);
             created++;
           }

@@ -53,7 +53,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
 | `prd-workflow.ts` | Conversational PRD-to-Deploy workflow with bounded revision |
-| `code-review.ts` | Adversarial code review before merge, worktree isolation |
+| `code-review.ts` | Adversarial code review before merge |
 | `feedback-loop.ts` | Double-loop learning: retro + gate analysis → agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
 | `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
@@ -172,14 +172,14 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    56 TypeScript modules (core logic)
-  commands/             11 Composer modules (Telegram command handlers)
+src/                    58 TypeScript modules (core logic)
+  commands/             13 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2720 tests (unit + integration + E2E)
+tests/                  2690 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -211,7 +211,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2720 tests, all must pass before merge)
+- Tests: `bun test` (2690 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

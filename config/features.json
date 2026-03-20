@@ -1,6 +1,5 @@
 {
   "heartbeat": true,
-  "explore_mode": true,
   "job_manager": true,
   "auto_document_search": true,
   "prd_to_deploy": true,
