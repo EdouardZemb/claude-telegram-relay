@@ -34,6 +34,23 @@ const DEFAULT_CONFIG: AlertConfig = {
   scheduleCheckEnabled: true,
 };
 
+export interface AlertEntityState {
+  lastAlertedAt: number;
+  alertCount: number;
+  lastSeverity: Alert["severity"];
+}
+
+export type AlertState = {
+  [K in Alert["type"]]?: Record<string, AlertEntityState>;
+};
+
+export type AlertCooldowns = {
+  [K in Alert["type"]]: {
+    normalCooldownMs: number;
+    criticalCooldownMs: number | null;
+  };
+};
+
 // ── Detection ────────────────────────────────────────────────
 
 /**

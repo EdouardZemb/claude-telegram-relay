@@ -1,0 +1,9 @@
+{
+  "stuck_task": { "normalCooldownMs": 21600000, "criticalCooldownMs": 43200000 },
+  "stale_task": { "normalCooldownMs": 86400000, "criticalCooldownMs": null },
+  "high_rework": { "normalCooldownMs": 43200000, "criticalCooldownMs": 21600000 },
+  "behind_schedule": { "normalCooldownMs": 28800000, "criticalCooldownMs": 14400000 },
+  "review_score_drop": { "normalCooldownMs": 86400000, "criticalCooldownMs": 43200000 },
+  "agent_failure_pattern": { "normalCooldownMs": 14400000, "criticalCooldownMs": 7200000 },
+  "long_running_step": { "normalCooldownMs": 7200000, "criticalCooldownMs": 3600000 }
+}

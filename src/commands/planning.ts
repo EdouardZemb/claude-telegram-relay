@@ -219,11 +219,11 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
         }
       } else if (prd.status === "approved") {
-        // Check for backlog tasks tagged with this PRD
+        // Check for non-completed tasks tagged with this PRD
         const { data: prdTasks } = await bctx.supabase!.from("tasks")
           .select("id")
           .contains("tags", [`prd:${prd.id}`])
-          .eq("status", "backlog");
+          .in("status", ["backlog", "in_progress", "review"]);
         if (prdTasks && prdTasks.length > 0) {
           const keyboard = new InlineKeyboard()
             .text(`Lancer l'implementation (${prdTasks.length} taches)`, `prdwf_launch:${prd.id.substring(0, 8)}`);
