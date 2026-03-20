@@ -16,6 +16,8 @@ import {
   type CodeGraph,
 } from "./code-graph.ts";
 import { findSimilarPastTasks, type SimilarTask } from "./memory.ts";
+import { computeExplorationScore } from "./exploration-scoring.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 
 const ROUTER_TIMEOUT = 5_000; // 5s (AC-018)
 
@@ -92,11 +94,26 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
     // Best-effort
   }
 
+  // Exploration score hint for RESEARCH recommendation
+  let explorationHint = "";
+  if (isFeatureEnabled("exploration_phase")) {
+    try {
+      const explorationResult = await computeExplorationScore(task);
+      if (explorationResult.score >= 0.5) {
+        explorationHint = `Exploration score: ${explorationResult.score} (>= 0.5 suggests RESEARCH pipeline). Keywords: ${explorationResult.components.keywordSignal > 0 ? "yes" : "no"}, graph complexity: ${explorationResult.components.graphComplexity >= 0 ? explorationResult.components.graphComplexity.toFixed(2) : "N/A"}`;
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  const fullHint = [complexityHint, explorationHint].filter(Boolean).join("\n");
+
   const prompt = ROUTER_PROMPT_TEMPLATE
     .replace("{title}", task.title)
     .replace("{description}", task.description || "No description")
     .replace("{priority}", String(task.priority || 3))
-    .replace("{complexity_hint}", complexityHint ? `Complexity: ${complexityHint}` : "");
+    .replace("{complexity_hint}", fullHint ? `Complexity: ${fullHint}` : "");
 
   try {
     const resultPromise = spawnClaude({

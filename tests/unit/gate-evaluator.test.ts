@@ -10,6 +10,8 @@ import {
   parseEvaluationOutput,
   formatEvaluationFeedback,
   evaluateAndRework,
+  evaluateExplorationCompleteness,
+  EXPLORATION_RUBRIC_DIMENSIONS,
   type GateEvaluation,
   type EvaluateReworkResult,
 } from "../../src/gate-evaluator";
@@ -272,5 +274,120 @@ describe("evaluateAndRework", () => {
     expect(result.finalEvaluation.pass).toBe(false);
     expect(agentCallCount).toBe(0); // no rework with maxIterations=0
     expect(result.passedAtIteration).toBeNull();
+  });
+});
+
+// ── evaluateExplorationCompleteness ──────────────────────────
+
+describe("evaluateExplorationCompleteness", () => {
+  it("passes with valid exploration output", () => {
+    const data = {
+      domain: "authentification",
+      findings: [
+        { title: "F1", description: "...", sources: ["src/auth.ts"], relevance: "high" },
+        { title: "F2", description: "...", sources: ["docs/arch.md"], relevance: "medium" },
+        { title: "F3", description: "...", sources: [], relevance: "low" },
+      ],
+      alternatives: [
+        { label: "A", description: "...", pros: ["p"], cons: ["c"], effort: "medium" },
+        { label: "B", description: "...", pros: ["p"], cons: ["c"], effort: "small" },
+      ],
+      recommendation: "Utiliser Supabase Auth natif pour simplifier l'architecture",
+      risks: [{ severity: "medium", description: "migration", mitigation: "progressive" }],
+      effort_estimate: "4-6h",
+      confidence: 0.85,
+      open_questions: [],
+    };
+
+    const result = evaluateExplorationCompleteness(data);
+    expect(result.pass).toBe(true);
+    expect(result.score).toBeGreaterThanOrEqual(60);
+    expect(result.rubric).toHaveLength(4);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it("fails with too few findings", () => {
+    const data = {
+      findings: [{ title: "F1", description: "only one", sources: [] }],
+      recommendation: "do something specific and actionable here",
+      confidence: 0.7,
+      alternatives: [],
+    };
+
+    const result = evaluateExplorationCompleteness(data);
+    expect(result.pass).toBe(false);
+    expect(result.issues.some((i) => i.description.includes("findings"))).toBe(true);
+  });
+
+  it("fails with no recommendation", () => {
+    const data = {
+      findings: [
+        { title: "F1", description: "...", sources: [] },
+        { title: "F2", description: "...", sources: [] },
+      ],
+      recommendation: "",
+      confidence: 0.8,
+      alternatives: [],
+    };
+
+    const result = evaluateExplorationCompleteness(data);
+    expect(result.pass).toBe(false);
+    expect(result.issues.some((i) => i.description.includes("recommendation"))).toBe(true);
+  });
+
+  it("flags low confidence", () => {
+    const data = {
+      findings: [
+        { title: "F1", description: "...", sources: ["a.ts"] },
+        { title: "F2", description: "...", sources: ["b.ts"] },
+      ],
+      recommendation: "A clear recommendation with enough detail here",
+      confidence: 0.3,
+      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+    };
+
+    const result = evaluateExplorationCompleteness(data);
+    expect(result.issues.some((i) => i.description.includes("confidence"))).toBe(true);
+  });
+
+  it("handles missing/null data gracefully", () => {
+    const result = evaluateExplorationCompleteness(null);
+    expect(result.pass).toBe(false);
+    expect(result.score).toBeLessThan(60);
+  });
+
+  it("handles empty object", () => {
+    const result = evaluateExplorationCompleteness({});
+    expect(result.pass).toBe(false);
+    expect(result.rubric).toHaveLength(4);
+  });
+
+  it("has correct rubric dimensions", () => {
+    expect(EXPLORATION_RUBRIC_DIMENSIONS).toEqual(["coverage", "depth", "actionability", "confidence"]);
+  });
+
+  it("scores higher with sourced findings", () => {
+    const withSources = {
+      findings: [
+        { title: "F1", description: "...", sources: ["a.ts"] },
+        { title: "F2", description: "...", sources: ["b.ts"] },
+      ],
+      recommendation: "A clear recommendation with enough detail here",
+      confidence: 0.8,
+      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+    };
+    const withoutSources = {
+      findings: [
+        { title: "F1", description: "...", sources: [] },
+        { title: "F2", description: "...", sources: [] },
+      ],
+      recommendation: "A clear recommendation with enough detail here",
+      confidence: 0.8,
+      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+    };
+
+    const resultWith = evaluateExplorationCompleteness(withSources);
+    const resultWithout = evaluateExplorationCompleteness(withoutSources);
+    expect(resultWith.score).toBeGreaterThan(resultWithout.score);
   });
 });

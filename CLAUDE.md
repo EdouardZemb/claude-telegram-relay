@@ -72,7 +72,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `feature-flags.ts` | Feature flags: file-based toggle system, hot-reload, /feature command |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets and historical data |
 | `mcp-config.ts` | Per-role MCP tool configuration: tool allowlists, Tavily web research tools for explorer, system prompt instructions for agent MCP access |
-| `pipeline-selection.ts` | Dynamic pipeline selection: keyword arrays, pipeline constants (DEFAULT/QUICK/REVIEW/SOLO/LIGHT/RESEARCH), selectPipeline, selectAdaptivePipeline, classifyPipeline, classifyAdaptivePipeline |
+| `exploration-scoring.ts` | Exploration phase scoring: computeExplorationScore (graph 40% + keywords 30% + no similar tasks 30%), shouldExplore with --explore/--no-explore options, auto-skip for SOLO/QUICK, threshold 0.5 |
+| `pipeline-selection.ts` | Dynamic pipeline selection: keyword arrays, pipeline constants (DEFAULT/QUICK/REVIEW/SOLO/LIGHT/RESEARCH), selectPipeline, selectAdaptivePipeline, selectPipelineWithExploration, classifyPipeline, classifyAdaptivePipeline |
 | `pipeline-state.ts` | Pipeline checkpoint/resume: persists execution state after each agent step, enables resuming from last success |
 | `action-registry.ts` | Structured registry of all 34 bot commands: metadata, params, risk levels, aliases for intent detection |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback (Haiku), maps natural language to commands |

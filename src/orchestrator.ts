@@ -38,6 +38,8 @@ import {
   buildStructuredChainContext,
   getJsonSchemaForRole,
   formatStructuredOutput,
+  parseExplorationPhaseOutput,
+  formatExplorationPhaseOutput,
 } from "./agent-schemas.ts";
 import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
 import {
@@ -108,6 +110,10 @@ import {
   getDeliberationReviewer,
   runDeliberation,
 } from "./deliberation.ts";
+import {
+  shouldExplore,
+  type ExplorationScore,
+} from "./exploration-scoring.ts";
 
 // Re-export pipeline selection for backward compatibility
 export {
@@ -468,10 +474,45 @@ export async function orchestrate(
   }
 
   // Dynamic pipeline selection (S22-06)
-  const pipeline = options.autoPipeline
+  let pipeline = options.autoPipeline
     ? selectPipeline(task, options.pipeline)
     : (options.pipeline || DEFAULT_PIPELINE);
   const maxRetries = options.maxRetries ?? 0;
+
+  // Exploration phase: check if task needs research before decomposition
+  let explorationScore: ExplorationScore | null = null;
+  if (!options.resumeSessionId) {
+    const pipelineType = pipeline === RESEARCH_PIPELINE ? "RESEARCH"
+      : pipeline === SOLO_PIPELINE ? "SOLO"
+      : pipeline === QUICK_PIPELINE ? "QUICK"
+      : pipeline === REVIEW_PIPELINE ? "REVIEW"
+      : pipeline === LIGHT_PIPELINE ? "LIGHT"
+      : "DEFAULT";
+
+    const exploreResult = await shouldExplore(task, { pipeline: pipelineType }, supabase);
+
+    if (exploreResult.explore) {
+      explorationScore = exploreResult.score;
+
+      if (exploreResult.score?.forceResearch && !pipeline.includes("explorer")) {
+        // Score >= 0.7: force RESEARCH pipeline
+        pipeline = RESEARCH_PIPELINE;
+        if (options.onProgress) {
+          await options.onProgress(
+            `Exploration fortement recommandee (score ${exploreResult.score.score}) : pipeline RESEARCH active`
+          );
+        }
+      } else if (!pipeline.includes("explorer")) {
+        // Score >= 0.5: prepend explorer to current pipeline
+        pipeline = ["explorer", ...pipeline] as AgentRole[];
+        if (options.onProgress) {
+          await options.onProgress(
+            `Phase exploration activee (score ${exploreResult.score?.score || "?"}) : explorer ajoute en tete du pipeline`
+          );
+        }
+      }
+    }
+  }
   const startTime = Date.now();
   const steps: AgentStepResult[] = [];
   const messages: AgentMessage[] = [];
@@ -814,6 +855,52 @@ export async function orchestrate(
       // Persist agent artifacts to the task in Supabase
       if (result!.success && supabase) {
         await persistAgentArtifact(supabase, task.id, agentId, result!.output);
+      }
+
+      // Write exploration report to blackboard + inject into downstream agent contexts
+      if (agentId === "explorer" && result!.success) {
+        try {
+          const explorationReport = parseExplorationPhaseOutput(result!.output);
+          const formattedReport = explorationReport
+            ? formatExplorationPhaseOutput(explorationReport)
+            : result!.output.substring(0, 4000);
+
+          // Inject exploration report into all remaining agents' context
+          for (const remainingRole of pipeline) {
+            if (remainingRole === "explorer") continue;
+            const existing = agentContextCache.get(remainingRole) || "";
+            // Rebuild context with exploration report if supabase available
+            if (supabase) {
+              const enrichedCtx = await buildAgentContext(supabase, {
+                role: remainingRole,
+                projectId: task.project_id || undefined,
+                sprintId: task.sprint || undefined,
+                conversationContext: options.conversationContext,
+                explorationReport: formattedReport,
+              });
+              if (enrichedCtx) agentContextCache.set(remainingRole, enrichedCtx);
+            } else {
+              // No supabase: append exploration report directly
+              agentContextCache.set(remainingRole, existing + "\n\nRAPPORT EXPLORATION:\n" + formattedReport);
+            }
+          }
+
+          // Write to blackboard if enabled
+          if (bbSessionId) {
+            const explorationData = explorationReport || { raw: result!.output.substring(0, 10000) };
+            if (supabase && !bbFallback) {
+              const currentSpec = await readSection(supabase, bbSessionId, "spec") || {};
+              const res = await writeSection(supabase, bbSessionId, "spec", { ...currentSpec, exploration: explorationData }, "explorer", bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            } else if (bbFallback) {
+              const currentSpec = bbFallback.read(bbSessionId, "spec") || {};
+              const res = bbFallback.write(bbSessionId, "spec", { ...currentSpec, exploration: explorationData }, "explorer", bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            }
+          }
+        } catch {
+          // Best-effort exploration report storage
+        }
       }
 
       // S24: Write to blackboard section + gate evaluation

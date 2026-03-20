@@ -55,7 +55,7 @@ export interface GateEvaluation {
   autoApproved?: boolean;
 }
 
-export type GateName = "spec" | "plan" | "tasks" | "implementation";
+export type GateName = "spec" | "plan" | "tasks" | "implementation" | "exploration";
 
 export interface EvaluateReworkResult {
   finalEvaluation: GateEvaluation;
@@ -88,11 +88,20 @@ export const SPEC_RUBRIC_DIMENSIONS = [
   "feasibility",
 ] as const;
 
+export const EXPLORATION_RUBRIC_DIMENSIONS = [
+  "coverage",
+  "depth",
+  "actionability",
+  "confidence",
+] as const;
+
 export type CodeRubricDimension = typeof CODE_RUBRIC_DIMENSIONS[number];
 export type SpecRubricDimension = typeof SPEC_RUBRIC_DIMENSIONS[number];
+export type ExplorationRubricDimension = typeof EXPLORATION_RUBRIC_DIMENSIONS[number];
 
 function getRubricDimensions(gateName: GateName): readonly string[] {
   if (gateName === "implementation") return CODE_RUBRIC_DIMENSIONS;
+  if (gateName === "exploration") return EXPLORATION_RUBRIC_DIMENSIONS;
   return SPEC_RUBRIC_DIMENSIONS;
 }
 
@@ -231,6 +240,18 @@ const GATE_CRITERIA: Record<GateName, string> = {
     "Score 0-100 based on completeness and quality.",
     "Pass threshold: 60.",
   ].join("\n"),
+
+  exploration: [
+    "Evaluate the EXPLORATION report of this pipeline output.",
+    "Check the following criteria:",
+    "1. Coverage: the domain has been adequately explored (multiple findings, sources cited)",
+    "2. Depth: findings go beyond surface level, with concrete evidence",
+    "3. Actionability: recommendation is clear, alternatives have pros/cons/effort",
+    "4. Confidence: the confidence score reflects the actual depth of research",
+    "",
+    "Score 0-100 based on research thoroughness and usefulness.",
+    "Pass threshold: 60.",
+  ].join("\n"),
 };
 
 // ── Rubric Prompt Builder (S34 FR-002) ───────────────────────
@@ -293,6 +314,96 @@ export interface EvaluateGateOptions {
  *
  * On timeout (EC-004): returns pass with warning.
  */
+// ── Exploration Completeness Check ───────────────────────────
+
+interface ExplorationCompletenessResult {
+  pass: boolean;
+  score: number;
+  issues: EvaluationIssue[];
+  rubric: RubricDimension[];
+}
+
+/**
+ * Deterministic completeness check for exploration output.
+ * Checks: >= 2 findings, recommendation present, confidence >= 0.6.
+ * Returns a structured result with rubric dimensions.
+ */
+export function evaluateExplorationCompleteness(sectionData: any): ExplorationCompletenessResult {
+  const issues: EvaluationIssue[] = [];
+  const rubric: RubricDimension[] = [];
+
+  // Coverage: check findings count
+  const findings = Array.isArray(sectionData?.findings) ? sectionData.findings : [];
+  const coverageScore = findings.length >= 3 ? 25 : findings.length >= 2 ? 18 : findings.length === 1 ? 10 : 0;
+  rubric.push({
+    name: "coverage",
+    score: coverageScore,
+    feedback: findings.length >= 2 ? `${findings.length} findings` : `Only ${findings.length} findings (need >= 2)`,
+    critical: coverageScore < 10,
+  });
+  if (findings.length < 2) {
+    issues.push({
+      severity: "critical",
+      description: `Only ${findings.length} findings found, need at least 2`,
+      suggestion: "Explore more aspects of the domain before concluding",
+    });
+  }
+
+  // Depth: check for sources in findings
+  const findingsWithSources = findings.filter((f: any) => Array.isArray(f?.sources) && f.sources.length > 0);
+  const depthScore = findingsWithSources.length >= findings.length * 0.5 ? 20
+    : findingsWithSources.length > 0 ? 15 : 5;
+  rubric.push({
+    name: "depth",
+    score: depthScore,
+    feedback: `${findingsWithSources.length}/${findings.length} findings have sources`,
+    critical: depthScore < 10,
+  });
+
+  // Actionability: check recommendation and alternatives
+  const hasRecommendation = typeof sectionData?.recommendation === "string" && sectionData.recommendation.length > 10;
+  const alternatives = Array.isArray(sectionData?.alternatives) ? sectionData.alternatives : [];
+  const actionScore = hasRecommendation ? (alternatives.length >= 2 ? 25 : 18) : 5;
+  rubric.push({
+    name: "actionability",
+    score: actionScore,
+    feedback: hasRecommendation
+      ? `Recommendation present, ${alternatives.length} alternatives`
+      : "Missing recommendation",
+    critical: actionScore < 10,
+  });
+  if (!hasRecommendation) {
+    issues.push({
+      severity: "critical",
+      description: "No recommendation provided",
+      suggestion: "Provide a clear recommendation based on findings",
+    });
+  }
+
+  // Confidence: check confidence score
+  const confidence = typeof sectionData?.confidence === "number" ? sectionData.confidence : 0;
+  const confidenceScore = confidence >= 0.8 ? 25 : confidence >= 0.6 ? 20 : confidence >= 0.4 ? 12 : 5;
+  rubric.push({
+    name: "confidence",
+    score: confidenceScore,
+    feedback: `Confidence: ${Math.round(confidence * 100)}%`,
+    critical: confidenceScore < 10,
+  });
+  if (confidence < 0.6) {
+    issues.push({
+      severity: "major",
+      description: `Low confidence (${Math.round(confidence * 100)}%), threshold is 60%`,
+      suggestion: "Investigate further to increase confidence in findings",
+    });
+  }
+
+  const totalScore = rubric.reduce((sum, r) => sum + r.score, 0);
+  const hasCritical = rubric.some((r) => r.critical);
+  const pass = totalScore >= 60 && !hasCritical && issues.filter((i) => i.severity === "critical").length === 0;
+
+  return { pass, score: totalScore, issues, rubric };
+}
+
 export async function evaluateGate(
   supabase: SupabaseClient | null,
   sessionId: string,
@@ -377,6 +488,30 @@ export async function evaluateGate(
         issues,
         gate_name: gateName,
         deterministicChecks: deterministicResults,
+      };
+    }
+  }
+
+  // Exploration gate: deterministic completeness check
+  if (gateName === "exploration") {
+    const explorationChecks = evaluateExplorationCompleteness(sectionData);
+    if (!explorationChecks.pass) {
+      return {
+        pass: false,
+        score: explorationChecks.score,
+        issues: explorationChecks.issues,
+        gate_name: gateName,
+        rubric: explorationChecks.rubric,
+      };
+    }
+    // If completeness check passed but feature flag says no LLM, return pass
+    if (!isFeatureEnabled("exploration_gate")) {
+      return {
+        pass: true,
+        score: explorationChecks.score,
+        issues: [],
+        gate_name: gateName,
+        rubric: explorationChecks.rubric,
       };
     }
   }

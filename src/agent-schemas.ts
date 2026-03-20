@@ -131,6 +131,39 @@ export interface ExplorerOutput {
   references: string[];
 }
 
+/**
+ * Structured output for the exploration phase in the workflow pipeline.
+ * Richer than ExplorerOutput: includes domain, findings with sources,
+ * alternatives with effort, risks with mitigation, confidence score.
+ * Used when explorer runs as part of orchestrate() exploration phase.
+ */
+export interface ExplorationPhaseOutput {
+  role: "explorer";
+  domain: string;
+  findings: Array<{
+    title: string;
+    description: string;
+    sources: string[];
+    relevance: "high" | "medium" | "low";
+  }>;
+  alternatives: Array<{
+    label: string;
+    description: string;
+    pros: string[];
+    cons: string[];
+    effort: "trivial" | "small" | "medium" | "large";
+  }>;
+  recommendation: string;
+  risks: Array<{
+    severity: "high" | "medium" | "low";
+    description: string;
+    mitigation: string;
+  }>;
+  effort_estimate: string;
+  confidence: number;
+  open_questions: string[];
+}
+
 /** Union of all structured agent outputs */
 export type StructuredAgentOutput =
   | AnalystOutput
@@ -140,7 +173,8 @@ export type StructuredAgentOutput =
   | QaOutput
   | SmOutput
   | PlannerOutput
-  | ExplorerOutput;
+  | ExplorerOutput
+  | ExplorationPhaseOutput;
 
 // ── AgentMessage: wrapper around structured output ───────────
 
@@ -227,6 +261,17 @@ const SCHEMA_DESCRIPTIONS: Record<AgentRole, string> = {
   "recommandations": [{"action": "action concrete", "effort": "trivial|small|medium|large", "impact": "low|medium|high", "files": ["src/fichier.ts"]}],
   "effort_estimate": {"total": "estimation globale", "breakdown": ["detail 1", "detail 2"]},
   "references": ["src/module.ts:42", "docs/adr/001.md"]
+}`,
+  exploration: `{
+  "role": "explorer",
+  "domain": "domaine technique explore (ex: authentification, base de donnees, API)",
+  "findings": [{"title": "decouverte", "description": "details", "sources": ["src/module.ts:42"], "relevance": "high|medium|low"}],
+  "alternatives": [{"label": "Option A", "description": "...", "pros": ["avantage"], "cons": ["inconvenient"], "effort": "trivial|small|medium|large"}],
+  "recommendation": "recommandation finale en 1-2 phrases",
+  "risks": [{"severity": "high|medium|low", "description": "risque", "mitigation": "comment le mitiger"}],
+  "effort_estimate": "estimation globale (ex: 4-6h)",
+  "confidence": 0.8,
+  "open_questions": ["question non resolue"]
 }`,
   planner: `{
   "role": "planner",
@@ -460,6 +505,57 @@ const JSON_SCHEMAS: Record<string, object> = {
       references: { type: "array", items: { type: "string" } },
     },
     required: ["role", "etat_des_lieux", "options", "recommandations"],
+  },
+  exploration: {
+    type: "object",
+    properties: {
+      role: { type: "string", const: "explorer" },
+      domain: { type: "string" },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+            sources: { type: "array", items: { type: "string" } },
+            relevance: { type: "string", enum: ["high", "medium", "low"] },
+          },
+          required: ["title", "description"],
+        },
+      },
+      alternatives: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            description: { type: "string" },
+            pros: { type: "array", items: { type: "string" } },
+            cons: { type: "array", items: { type: "string" } },
+            effort: { type: "string", enum: ["trivial", "small", "medium", "large"] },
+          },
+          required: ["label", "description"],
+        },
+      },
+      recommendation: { type: "string" },
+      risks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            description: { type: "string" },
+            mitigation: { type: "string" },
+          },
+          required: ["severity", "description"],
+        },
+      },
+      effort_estimate: { type: "string" },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+      open_questions: { type: "array", items: { type: "string" } },
+    },
+    required: ["role", "domain", "findings", "alternatives", "recommendation", "confidence"],
   },
   gate_evaluation: {
     type: "object",
@@ -854,4 +950,111 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
     default:
       return JSON.stringify(output, null, 2);
   }
+}
+
+// ── Exploration Phase Output Parsing ─────────────────────────
+
+/**
+ * Validate that an object is a valid ExplorationPhaseOutput.
+ * Checks required fields: domain, findings, alternatives, recommendation, confidence.
+ */
+export function validateExplorationPhaseOutput(obj: any): obj is ExplorationPhaseOutput {
+  if (!obj || typeof obj !== "object") return false;
+  return (
+    typeof obj.domain === "string" &&
+    Array.isArray(obj.findings) &&
+    Array.isArray(obj.alternatives) &&
+    typeof obj.recommendation === "string" &&
+    typeof obj.confidence === "number" &&
+    obj.confidence >= 0 &&
+    obj.confidence <= 1
+  );
+}
+
+/**
+ * Parse exploration phase output from raw agent output.
+ * Tries JSON parse, then <<<JSON>>> markers, then fallback.
+ * Returns null if parsing fails (caller should use raw output as fallback).
+ */
+export function parseExplorationPhaseOutput(rawOutput: string): ExplorationPhaseOutput | null {
+  // Try direct JSON parse
+  try {
+    const parsed = JSON.parse(rawOutput);
+    if (validateExplorationPhaseOutput(parsed)) {
+      return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
+    }
+  } catch {
+    // Not direct JSON
+  }
+
+  // Try <<<JSON>>> markers
+  const markerMatch = rawOutput.match(/<<<JSON>>>\s*([\s\S]*?)\s*<<<END>>>/);
+  if (markerMatch) {
+    try {
+      const parsed = JSON.parse(markerMatch[1].trim());
+      if (validateExplorationPhaseOutput(parsed)) {
+        return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Fallback: find largest JSON object
+  const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (validateExplorationPhaseOutput(parsed)) {
+        return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Format ExplorationPhaseOutput for agent context injection.
+ * Used in the "RAPPORT EXPLORATION" section of agent prompts.
+ */
+export function formatExplorationPhaseOutput(output: ExplorationPhaseOutput): string {
+  const parts: string[] = [
+    `Domaine: ${output.domain}`,
+    `Confiance: ${Math.round(output.confidence * 100)}%`,
+    `Recommandation: ${output.recommendation}`,
+  ];
+
+  if (output.findings.length > 0) {
+    parts.push(`Decouvertes (${output.findings.length}):`);
+    for (const f of output.findings) {
+      const sources = f.sources?.length ? ` [${f.sources.join(", ")}]` : "";
+      parts.push(`  [${f.relevance || "medium"}] ${f.title}: ${f.description}${sources}`);
+    }
+  }
+
+  if (output.alternatives.length > 0) {
+    parts.push(`Alternatives (${output.alternatives.length}):`);
+    for (const a of output.alternatives) {
+      parts.push(`  ${a.label} (${a.effort || "medium"}): ${a.description}`);
+      if (a.pros?.length) parts.push(`    +: ${a.pros.join(", ")}`);
+      if (a.cons?.length) parts.push(`    -: ${a.cons.join(", ")}`);
+    }
+  }
+
+  if (output.risks?.length) {
+    parts.push(`Risques: ${output.risks.map((r) => `[${r.severity}] ${r.description} -> ${r.mitigation || "?"}`).join("; ")}`);
+  }
+
+  if (output.effort_estimate) {
+    parts.push(`Effort estime: ${output.effort_estimate}`);
+  }
+
+  if (output.open_questions?.length) {
+    parts.push(`Questions ouvertes: ${output.open_questions.join("; ")}`);
+  }
+
+  return parts.join("\n");
 }

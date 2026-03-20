@@ -4,5 +4,7 @@
   "explore_mode": true,
   "job_manager": true,
   "auto_document_search": true,
-  "prd_to_deploy": true
+  "prd_to_deploy": true,
+  "exploration_phase": true,
+  "exploration_gate": false
 }

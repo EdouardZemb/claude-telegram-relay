@@ -47,6 +47,8 @@ export interface AgentContextOptions {
   taskTitle?: string;
   /** S43: Conversation context from the session that triggered this agent */
   conversationContext?: string;
+  /** Exploration phase: formatted exploration report to inject into agent context */
+  explorationReport?: string;
 }
 
 /**
@@ -114,16 +116,19 @@ export async function buildAgentContext(
     // S41: Rebalanced shares to include similar tasks section
     const sections: Array<{ label: string; content: string; share: number }> = [];
 
-    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: 0.23 });
-    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: 0.10 });
-    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: 0.13 });
-    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: 0.10 });
-    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: 0.07 });
-    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: 0.09 });
-    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: 0.10 });
-    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: 0.08 });
-    if (similarCtx) sections.push({ label: "TACHES SIMILAIRES", content: similarCtx, share: 0.10 });
-    if (options.conversationContext) sections.push({ label: "CONTEXTE CONVERSATION", content: options.conversationContext, share: 0.08 });
+    // Shares rebalanced to accommodate exploration report (12% when present)
+    const hasExploration = !!options.explorationReport;
+    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: hasExploration ? 0.21 : 0.23 });
+    if (options.explorationReport) sections.push({ label: "RAPPORT EXPLORATION", content: options.explorationReport, share: 0.12 });
+    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: hasExploration ? 0.08 : 0.10 });
+    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: hasExploration ? 0.11 : 0.13 });
+    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: hasExploration ? 0.08 : 0.10 });
+    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: hasExploration ? 0.06 : 0.07 });
+    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: hasExploration ? 0.07 : 0.09 });
+    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: hasExploration ? 0.08 : 0.10 });
+    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: hasExploration ? 0.06 : 0.08 });
+    if (similarCtx) sections.push({ label: "TACHES SIMILAIRES", content: similarCtx, share: hasExploration ? 0.07 : 0.10 });
+    if (options.conversationContext) sections.push({ label: "CONTEXTE CONVERSATION", content: options.conversationContext, share: hasExploration ? 0.06 : 0.08 });
 
     if (sections.length === 0) return "";
 

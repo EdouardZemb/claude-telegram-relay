@@ -8,6 +8,10 @@ import {
   getSchemaForRole,
   buildStructuredOutputInstructions,
   buildStructuredChainContext,
+  validateExplorationPhaseOutput,
+  parseExplorationPhaseOutput,
+  formatExplorationPhaseOutput,
+  getJsonSchemaForRole,
   type AgentMessage,
   type AnalystOutput,
   type PmOutput,
@@ -15,6 +19,7 @@ import {
   type DevOutput,
   type QaOutput,
   type SmOutput,
+  type ExplorationPhaseOutput,
 } from "../../src/agent-schemas.ts";
 
 // ── Schema Descriptions ──────────────────────────────────────
@@ -528,5 +533,165 @@ describe("buildStructuredChainContext", () => {
 
     const context = buildStructuredChainContext(messages);
     expect(context).toContain("Ne repete pas ce qui a deja ete fait");
+  });
+});
+
+// ── ExplorationPhaseOutput ───────────────────────────────────
+
+const VALID_EXPLORATION_OUTPUT: ExplorationPhaseOutput = {
+  role: "explorer",
+  domain: "authentification",
+  findings: [
+    {
+      title: "OAuth2 standard",
+      description: "Le protocole le plus repandu pour l'auth tierce",
+      sources: ["src/auth.ts:42"],
+      relevance: "high",
+    },
+  ],
+  alternatives: [
+    {
+      label: "Passport.js",
+      description: "Middleware Express pour auth",
+      pros: ["ecosysteme riche", "facile a integrer"],
+      cons: ["dependance lourde"],
+      effort: "medium",
+    },
+  ],
+  recommendation: "Utiliser Supabase Auth natif pour simplifier l'architecture",
+  risks: [
+    {
+      severity: "medium",
+      description: "Migration des sessions existantes",
+      mitigation: "Migration progressive avec double auth pendant 2 sprints",
+    },
+  ],
+  effort_estimate: "4-6h",
+  confidence: 0.85,
+  open_questions: ["Quel provider OAuth pour les comptes pro ?"],
+};
+
+describe("validateExplorationPhaseOutput", () => {
+  it("validates a correct exploration phase output", () => {
+    expect(validateExplorationPhaseOutput(VALID_EXPLORATION_OUTPUT)).toBe(true);
+  });
+
+  it("rejects null/undefined", () => {
+    expect(validateExplorationPhaseOutput(null)).toBe(false);
+    expect(validateExplorationPhaseOutput(undefined)).toBe(false);
+  });
+
+  it("rejects missing domain", () => {
+    const { domain, ...rest } = VALID_EXPLORATION_OUTPUT;
+    expect(validateExplorationPhaseOutput(rest)).toBe(false);
+  });
+
+  it("rejects missing findings array", () => {
+    const { findings, ...rest } = VALID_EXPLORATION_OUTPUT;
+    expect(validateExplorationPhaseOutput(rest)).toBe(false);
+  });
+
+  it("rejects missing recommendation", () => {
+    const { recommendation, ...rest } = VALID_EXPLORATION_OUTPUT;
+    expect(validateExplorationPhaseOutput(rest)).toBe(false);
+  });
+
+  it("rejects confidence out of range", () => {
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1.5 })).toBe(false);
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: -0.1 })).toBe(false);
+  });
+
+  it("accepts confidence at boundaries", () => {
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 0 })).toBe(true);
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1 })).toBe(true);
+  });
+});
+
+describe("parseExplorationPhaseOutput", () => {
+  it("parses valid direct JSON", () => {
+    const raw = JSON.stringify(VALID_EXPLORATION_OUTPUT);
+    const result = parseExplorationPhaseOutput(raw);
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("authentification");
+    expect(result!.confidence).toBe(0.85);
+    expect(result!.findings).toHaveLength(1);
+  });
+
+  it("parses JSON with <<<JSON>>> markers", () => {
+    const raw = `Voici mon analyse.\n<<<JSON>>>\n${JSON.stringify(VALID_EXPLORATION_OUTPUT)}\n<<<END>>>\nFin.`;
+    const result = parseExplorationPhaseOutput(raw);
+    expect(result).not.toBeNull();
+    expect(result!.domain).toBe("authentification");
+  });
+
+  it("parses JSON embedded in text", () => {
+    const raw = `Some preamble text. ${JSON.stringify(VALID_EXPLORATION_OUTPUT)} Some trailing text.`;
+    const result = parseExplorationPhaseOutput(raw);
+    expect(result).not.toBeNull();
+    expect(result!.recommendation).toContain("Supabase Auth");
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseExplorationPhaseOutput("not json at all")).toBeNull();
+  });
+
+  it("returns null for JSON that doesn't match schema", () => {
+    const raw = JSON.stringify({ name: "irrelevant", value: 42 });
+    expect(parseExplorationPhaseOutput(raw)).toBeNull();
+  });
+});
+
+describe("formatExplorationPhaseOutput", () => {
+  it("formats all sections", () => {
+    const formatted = formatExplorationPhaseOutput(VALID_EXPLORATION_OUTPUT);
+    expect(formatted).toContain("Domaine: authentification");
+    expect(formatted).toContain("Confiance: 85%");
+    expect(formatted).toContain("Recommandation:");
+    expect(formatted).toContain("Decouvertes (1):");
+    expect(formatted).toContain("OAuth2 standard");
+    expect(formatted).toContain("Alternatives (1):");
+    expect(formatted).toContain("Passport.js");
+    expect(formatted).toContain("Risques:");
+    expect(formatted).toContain("Effort estime: 4-6h");
+    expect(formatted).toContain("Questions ouvertes:");
+  });
+
+  it("handles minimal output (no optional fields)", () => {
+    const minimal: ExplorationPhaseOutput = {
+      role: "explorer",
+      domain: "test",
+      findings: [],
+      alternatives: [],
+      recommendation: "rien a faire",
+      risks: [],
+      effort_estimate: "",
+      confidence: 0.5,
+      open_questions: [],
+    };
+    const formatted = formatExplorationPhaseOutput(minimal);
+    expect(formatted).toContain("Domaine: test");
+    expect(formatted).toContain("Confiance: 50%");
+    expect(formatted).not.toContain("Decouvertes");
+    expect(formatted).not.toContain("Alternatives");
+  });
+});
+
+describe("getJsonSchemaForRole — exploration", () => {
+  it("returns JSON Schema for exploration role", () => {
+    const schema = getJsonSchemaForRole("exploration");
+    expect(schema).not.toBeNull();
+    expect((schema as any).required).toContain("domain");
+    expect((schema as any).required).toContain("findings");
+    expect((schema as any).required).toContain("confidence");
+  });
+});
+
+describe("getSchemaForRole — exploration", () => {
+  it("returns schema description for exploration role", () => {
+    const schema = getSchemaForRole("exploration" as any);
+    expect(schema.length).toBeGreaterThan(50);
+    expect(schema).toContain("domain");
+    expect(schema).toContain("findings");
+    expect(schema).toContain("confidence");
   });
 });

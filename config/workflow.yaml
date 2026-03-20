@@ -13,6 +13,16 @@ steps:
       enabled: false
       mode: off
 
+  - id: exploration
+    label: Exploration
+    description: Recherche et investigation du domaine (automatique si score > 0.5)
+    checkpoint:
+      enabled: false
+      mode: off
+    skip_conditions:
+      - pipeline_in: [SOLO, QUICK]
+        description: Pipelines simples sautent l'exploration
+
   - id: decomposition
     label: Decomposition
     description: Analyse et decoupage en sous-taches
@@ -66,6 +76,11 @@ steps:
 
 transitions:
   - from: request
+    to: exploration
+  - from: request
+    to: decomposition
+    condition: exploration_skipped
+  - from: exploration
     to: decomposition
   - from: decomposition
     to: validation

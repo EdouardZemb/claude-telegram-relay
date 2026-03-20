@@ -212,6 +212,28 @@ function identifyPipelineType(pipeline: AgentRole[]): string {
   return mapping[key] || "DEFAULT";
 }
 
+/**
+ * Select pipeline with exploration scoring.
+ * If exploration score > 0.7, forces RESEARCH pipeline.
+ * Otherwise falls back to adaptive pipeline selection.
+ */
+export async function selectPipelineWithExploration(
+  task: Task,
+  explorationScore: number,
+  explicitPipeline?: AgentRole[],
+  supabase?: any,
+): Promise<AgentRole[]> {
+  if (explicitPipeline) return explicitPipeline;
+
+  // Force RESEARCH if exploration score is very high
+  if (explorationScore >= 0.7) {
+    return RESEARCH_PIPELINE;
+  }
+
+  // Otherwise use adaptive pipeline
+  return selectAdaptivePipeline(task, undefined, supabase);
+}
+
 export async function classifyAdaptivePipeline(
   task: Task,
   supabase?: any,
