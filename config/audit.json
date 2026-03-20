@@ -1,0 +1,73 @@
+{
+  "weights": {
+    "structure": 20,
+    "tests": 20,
+    "architecture": 20,
+    "debt": 15,
+    "security": 15,
+    "docs": 10
+  },
+  "globalThresholds": {
+    "pass": 70,
+    "warn": 50
+  },
+  "axisThresholds": {
+    "structure": {
+      "maxLineCount": 1000,
+      "maxComplexity": 8
+    },
+    "tests": {
+      "minCoveragePercent": 80
+    },
+    "debt": {
+      "todoMaxAgeDays": 60
+    },
+    "architecture": {
+      "maxDependencyCount": 10
+    },
+    "security": {
+      "maxAnyCount": 5
+    }
+  },
+  "penalties": {
+    "structure": {
+      "largeModule": 10,
+      "highComplexity": 5,
+      "emptyExports": 1
+    },
+    "debt": {
+      "critical": 5,
+      "important": 3,
+      "minor": 1
+    },
+    "architecture": {
+      "cycle": 20,
+      "overCoupled": 5
+    },
+    "security": {
+      "important": 3,
+      "minor": 1
+    }
+  },
+  "layering": [
+    {
+      "source": "src/commands/",
+      "forbiddenTargets": ["db/"],
+      "message": "Composers must not import database layer directly — use bot-context or service modules"
+    },
+    {
+      "source": "mcp/",
+      "forbiddenTargets": ["src/commands/"],
+      "message": "MCP server must not import Telegram command handlers"
+    },
+    {
+      "source": "supabase/functions/",
+      "forbiddenTargets": ["src/"],
+      "message": "Edge Functions are deployed independently — must not import source modules"
+    }
+  ],
+  "fix": {
+    "defaultPriority": 2,
+    "tag": "audit"
+  }
+}
