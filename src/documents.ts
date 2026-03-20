@@ -55,6 +55,7 @@ export interface ClassificationResult {
   description: string;
   document_date: string | null;
   is_new_category: boolean;
+  suggested_title: string | null;
 }
 
 export interface DocumentSearchResult {
@@ -336,6 +337,7 @@ Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
   const confidence = Math.max(0, Math.min(1, parsed.confidence || 0));
   const description = parsed.description || "";
   const documentDate = parsed.document_date || null;
+  const suggestedTitle = parsed.suggested_title || null;
 
   // Check if category exists
   const existingCategory = categories.find(
@@ -370,6 +372,7 @@ Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
     description,
     document_date: documentDate,
     is_new_category: isNewCategory,
+    suggested_title: suggestedTitle,
   };
 }
 
@@ -476,7 +479,11 @@ export async function createDocument(
   }
 
   // 4. Insert document record
-  const title = input.title || classification?.description || input.filePath.split("/").pop() || "Sans titre";
+  // Use suggested_title when input title is missing or generic (e.g. Adobe Scan default)
+  const genericTitles = ["créé et partagé avec adobe scan.", "créé et partagé avec adobe scan", "shared with adobe scan"];
+  const inputTitleIsGeneric = !input.title || genericTitles.includes(input.title.toLowerCase().trim());
+  const title = (inputTitleIsGeneric ? classification?.suggested_title : input.title)
+    || input.title || classification?.description || input.filePath.split("/").pop() || "Sans titre";
 
   const record = {
     user_id: input.userId,
