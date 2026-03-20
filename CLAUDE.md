@@ -12,10 +12,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Module | Purpose |
 |--------|---------|
-| `relay.ts` | Bot entrypoint: creates Bot, loads Composers via loader, auth middleware, startup/shutdown. Exports async `createBot(token)` factory for E2E testing via `handleUpdate` |
-| `bot-context.ts` | Shared dependency object for Composers: callClaude, sendResponse, buildPrompt, supabase, session, topic helpers |
-| `topic-config.ts` | Topic configuration for Telegram forum groups: per-topic system prompts and command allowlists |
-| `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ via Bun Glob, errorBoundary per module |
+| `relay.ts` | Bot entrypoint: creates Bot, loads Composers, auth middleware, startup/shutdown |
+| `bot-context.ts` | Shared dependency object for Composers (callClaude, sendResponse, supabase, session) |
+| `topic-config.ts` | Per-topic system prompts and command allowlists for forum groups |
+| `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ |
 | `commands/help.ts` | Composer: /help, /workflow, /agents, /status, /monitor |
 | `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
 | `commands/execution.ts` | Composer: /exec, /orchestrate, /autopipeline + gate callbacks |
@@ -24,67 +24,67 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
 | `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
 | `commands/project.ts` | Composer: /projects, /project |
-| `commands/documents.ts` | Composer: /docs (list, search, stats, delete, categories) + classification callbacks (doc_confirm, doc_change, doc_cancel) |
-| `commands/exploration.ts` | Composer: /explore — launches Explorer agent (Ada) for codebase investigation |
-| `commands/jobs.ts` | Composer: /jobs (list, cancel) — background job status and management |
-| `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + gate/notif callbacks |
-| `commands/zz-messages.ts` | Composer: message:text (with intent routing), message:voice, message:photo, message:document handlers (loaded last) |
-| `agent.ts` | Sub-agent execution: launches Claude Code with branch-PR workflow, centralized spawnClaude() with CLI flags |
-| `agent-context.ts` | Supabase context assembly for BMad agents: memory, sprint, tasks, profile, code graph, trust scores, sprint metrics, document shards, similar past tasks with token budgets per role |
-| `code-graph.ts` | Knowledge graph of the codebase: regex-based TypeScript indexer, dependency/dependent queries, BFS impact radius, complexity estimation, agent context formatting |
-| `explore-graph.ts` | Zero-LLM fast-path for /explore: detects structural queries (module info, dependencies, dependents, impact, complexity, stats) answerable from code graph without LLM call |
+| `commands/documents.ts` | Composer: /docs + classification callbacks |
+| `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
+| `commands/jobs.ts` | Composer: /jobs (list, cancel) |
+| `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
+| `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
+| `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
+| `agent-context.ts` | Supabase context assembly for agents with token budgets per role |
+| `code-graph.ts` | Codebase knowledge graph: regex indexer, dependency queries, impact radius |
+| `explore-graph.ts` | Zero-LLM fast-path for /explore structural queries via code graph |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
-| `memory.ts` | Intelligent memory: intent tags, auto-classification via GPT-4o-mini, semantic archive, ideas pipeline, importance scoring with temporal decay, contradiction detection, multi-hop chains, link classification, memory clustering, similar past tasks |
-| `gates.ts` | BMad gates: Gate 1 (PRD approval), Gate 2 (architecture), Gate 3 (code review) |
-| `orchestrator.ts` | Multi-agent pipeline: structured JSON message passing, retry loop, dynamic pipeline selection (SOLO/LIGHT/QUICK/DEFAULT/REVIEW), cost tracking per agent, blackboard integration, parallel DAG execution, adaptive pipeline via difficulty scoring |
-| `blackboard.ts` | Shared structured workspace: versioned JSONB sections, optimistic locking, role authorization, traceability reports, concurrent write retry, fan-in merge |
-| `deliberation.ts` | Deliberation protocol: after strategic agents (architect, dev), paired reviewer (PM, QA) examines output and can request revision. Max 1 round-trip. Behind "deliberation" feature flag |
-| `dag-executor.ts` | DAG-based parallel agent scheduler: dependency resolution, semaphore-gated concurrency, pre-defined DAGs (DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH) |
-| `semaphore.ts` | Promise-based counting semaphore for concurrency control (default max 3) |
-| `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup. Branch isolation for parallel agents |
-| `gate-evaluator.ts` | Gate evaluation: dual verification (deterministic + LLM), structured rubric scoring (4x25), evaluate-rework loop (max 2 iterations), trust-based auto-approval |
-| `llm-router.ts` | LLM-based router for dynamic pipeline selection: Haiku analyzes task, returns pipeline (SOLO/LIGHT/QUICK/DEFAULT/REVIEW/RESEARCH) + model overrides + budget. Difficulty scorer (`computeDifficultyScore`) for adaptive pipeline selection |
-| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, coverage scoring |
-| `agent-schemas.ts` | Typed JSON output schemas per agent role, parsing, structured chain context, JSON Schema for --json-schema flag |
-| `bmad-agents.ts` | 8 agent definitions (analyst, pm, architect, dev, qa, sm, planner, explorer) with YAML templates, CLI flags (effort, model, budget), per-role trust thresholds |
-| `bmad-prompts.ts` | Context-aware prompt builder per agent, system/task prompt split for --append-system-prompt |
-| `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto pipeline selection and retries |
-| `cost-tracking.ts` | Token usage tracking, multi-model cost estimation (Opus/Sonnet/Haiku), sprint cost aggregation, /cost command |
-| `workflow.ts` | Workflow engine: loads config/workflow.yaml, tracks state transitions, transition enforcement, retry policies |
+| `memory.ts` | Intelligent memory: classification, importance scoring, contradiction detection, clustering |
+| `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
+| `orchestrator.ts` | Multi-agent pipeline orchestrator with DAG-based parallel execution |
+| `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
+| `deliberation.ts` | Deliberation protocol: paired reviewer examines strategic agent output |
+| `dag-executor.ts` | DAG-based parallel agent scheduler with semaphore concurrency |
+| `semaphore.ts` | Promise-based counting semaphore (default max 3) |
+| `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup |
+| `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
+| `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
+| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection |
+| `agent-schemas.ts` | Typed JSON output schemas per agent role |
+| `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds |
+| `bmad-prompts.ts` | Context-aware prompt builder per agent role |
+| `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto selection and retries |
+| `cost-tracking.ts` | Token usage tracking, multi-model cost estimation, sprint aggregation |
+| `workflow.ts` | Workflow engine: state transitions, enforcement, retry policies |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
 | `prd.ts` | PRD management: draft → approved/rejected |
-| `prd-workflow.ts` | Conversational PRD-to-Deploy workflow: triage, generation with session constraints, bounded revision (max 3), auto-decomposition, implementation launch, gate notifications, PR merge |
-| `code-review.ts` | Adversarial code review before merge, --from-pr support, worktree isolation |
-| `feedback-loop.ts` | Learning from retros + double-loop gate analysis → permanent agent prompt enrichment, effectiveness tracking, rule promotion/archival |
+| `prd-workflow.ts` | Conversational PRD-to-Deploy workflow with bounded revision |
+| `code-review.ts` | Adversarial code review before merge, worktree isolation |
+| `feedback-loop.ts` | Double-loop learning: retro + gate analysis → agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
-| `documents.ts` | Document management: text extraction (Claude Vision + pdf-parse), LLM classification (Haiku) with dynamic categories, CRUD with Supabase Storage, semantic search |
-| `document-sharding.ts` | Intelligent context cache: splits large docs, loads only relevant shards |
+| `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
+| `document-sharding.ts` | Intelligent context cache: splits large docs, loads relevant shards |
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
-| `proactive-planner.ts` | Daily backlog analysis + recommendations, code graph complexity-based pipeline suggestions, auto-defer for overloaded sprints |
+| `proactive-planner.ts` | Backlog analysis, pipeline suggestions, auto-defer for overloaded sprints |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
-| `notification-queue.ts` | Notification batching queue: enqueue, flush, digest formatting, inline buttons, quiet hours, morning digest, JSON persistence |
-| `notification-prefs.ts` | Notification preferences: quiet hours, per-type enable/disable/immediate, /notify command config |
+| `notification-queue.ts` | Notification batching: flush intervals, digest, quiet hours, inline buttons |
+| `notification-prefs.ts` | Notification preferences: quiet hours, per-type config |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
-| `autonomy-scanner.ts` | Proactive task creation: scans codebase for improvements, creates auto-generated tasks |
-| `job-manager.ts` | Background job manager: fire-and-forget launch, semaphore concurrency (max 3), JSON persistence, completion notifications, timeout/cancel support |
-| `feature-flags.ts` | Feature flags: file-based toggle system, hot-reload, /feature command |
-| `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets and historical data |
-| `mcp-config.ts` | Per-role MCP tool configuration: tool allowlists, Tavily web research tools for explorer, system prompt instructions for agent MCP access |
-| `exploration-scoring.ts` | Exploration phase scoring: computeExplorationScore (graph 40% + keywords 30% + no similar tasks 30%), shouldExplore with --explore/--no-explore options, auto-skip for SOLO/QUICK, threshold 0.5 |
-| `pipeline-selection.ts` | Dynamic pipeline selection: keyword arrays, pipeline constants (DEFAULT/QUICK/REVIEW/SOLO/LIGHT/RESEARCH), selectPipeline, selectAdaptivePipeline, selectPipelineWithExploration, classifyPipeline, classifyAdaptivePipeline |
-| `pipeline-state.ts` | Pipeline checkpoint/resume: persists execution state after each agent step, enables resuming from last success |
-| `action-registry.ts` | Structured registry of all 34 bot commands: metadata, params, risk levels, aliases for intent detection |
-| `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback (Haiku), maps natural language to commands |
-| `command-router.ts` | Routes detected intents to command execution: risk-based confirmation, contextual parameter extraction, multi-turn clarification |
-| `trust-scores.ts` | Trust scores per agent role: confidence tracking, per-role auto-approval thresholds, autonomy levels, accelerated degradation, progressive autonomy |
-| `gate-persistence.ts` | Gate evaluation persistence to Supabase, double-loop learning from recurring rubric weaknesses |
-| `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, in-memory fallback, timeline formatting |
-| `agent-messaging.ts` | Inter-agent messaging: structured messages via blackboard, clarification protocol, conflict detection, context enrichment |
-| `conversation-session.ts` | Conversation sessions: per-chat/thread session tracking, constraint extraction, phase detection, context formatting for intent detection and agents |
-| `heartbeat.ts` | Autonomous heartbeat: periodic project pulse (PM2 cron every 10min) that observes delta, triages, spawns Claude for analysis, executes actions (notify, task_create). Consolidates alert-cron (hourly: alert checks, memory archival, morning digest flush) and autonomy-cron (daily: autonomy scan) into periodic tasks |
-| `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, JSON decision schema, state management types (includes periodic task tracking: lastAlertCheckAt, lastArchivalAt, lastAutonomyScanAt) |
+| `autonomy-scanner.ts` | Proactive task creation from codebase scanning |
+| `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence |
+| `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
+| `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets |
+| `mcp-config.ts` | Per-role MCP tool configuration and allowlists |
+| `exploration-scoring.ts` | Exploration phase scoring: graph + keywords + similarity |
+| `pipeline-selection.ts` | Dynamic pipeline selection: keywords, constants, adaptive selection |
+| `pipeline-state.ts` | Pipeline checkpoint/resume: persists state, enables resume from last success |
+| `action-registry.ts` | Registry of all 34 bot commands: metadata, params, risk levels, aliases |
+| `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
+| `command-router.ts` | Routes intents to commands: risk confirmation, parameter extraction |
+| `trust-scores.ts` | Per-role trust scores: confidence tracking, autonomy levels |
+| `gate-persistence.ts` | Gate evaluation persistence, double-loop learning |
+| `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, timeline |
+| `agent-messaging.ts` | Inter-agent messaging: structured messages, clarification, conflict detection |
+| `conversation-session.ts` | Conversation sessions: per-chat tracking, constraint extraction, phase detection |
+| `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
+| `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
 
 ### Telegram Commands
 
@@ -138,30 +138,7 @@ Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search),
 
 ### MCP Memory Server (`mcp/`)
 
-Local MCP server exposing memory and business tools to Claude Code sessions:
-- `search_thoughts` — Semantic search via embeddings
-- `list_thoughts` — List recent memories by type
-- `thought_stats` — Memory statistics
-- `capture_thought` — Insert new memory
-- `task_create` — Create task (same as /task)
-- `task_update` — Update task status (same as /start, /done)
-- `prd_create` — Create PRD
-- `prd_list` — List PRDs
-- `prd_get` — Get PRD details
-- `prd_approve` — Approve PRD
-- `prd_reject` — Reject PRD
-- `query_dependencies` — Code graph: module dependencies
-- `query_dependents` — Code graph: what imports a module
-- `query_impact_radius` — Code graph: transitive impact analysis
-- `get_sprint_detail` — Sprint status + task list (auto-detects current sprint)
-- `get_metrics` — Sprint performance: velocity, rework, cycle time + comparison
-- `get_cost_summary` — Token usage and cost breakdown by agent/task/sprint
-- `get_alerts` — Anomaly detection: stuck tasks, rework spikes, stale tasks, agent failures
-- `manage_feature` — List/enable/disable feature flags
-- `get_estimate` — Pipeline cost estimation with historical comparison
-- `analyze_backlog` — Proactive backlog analysis: recommendations, pipeline suggestions, pacing
-
-Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function. Notification bridge: MCP tools write to `mcp-pending-notifications.json`, bot relay consumes via `consumeMcpPending()` on each flush cycle. Tool descriptions include dependency metadata (Preconditions + Suggested next) for intelligent chaining.
+Local MCP server (`.mcp.json`, stdio) exposing 21 tools: memory CRUD, task/PRD management, code graph queries, sprint/metrics/cost/alerts, feature flags, backlog analysis. Notification bridge via `mcp-pending-notifications.json`.
 
 ### BMad Workflow
 
@@ -178,75 +155,21 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function. Not
 - REVIEW: qa → architect (auto-selected for review/audit/refactor tasks)
 - RESEARCH: explorer → planner → dev → qa (web research, benchmarks, state of the art via Tavily)
 
-**Pipeline selection (S22):** `autoPipeline: true` enables dynamic selection based on task title/description keywords and priority. Manual override via explicit `pipeline` option.
+Workflow steps (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
-**Structured message passing (S22):** Agents produce typed JSON output (<<<JSON>>>...<<<END>>> markers). Each role has a defined schema (analyst: risks/feasibility, pm: subtasks/priorities, architect: design/decisions, dev: files/summary, qa: score/findings, sm: summary/next_steps). Downstream agents receive structured context instead of raw text.
-
-**Retry loop (S22):** `maxRetries` option (default 0). Failed agents are retried with exponential backoff (1s, 2s, 4s... max 30s). Retry metrics logged to workflow_logs.
-
-**Cost tracking (S23):** Each agent execution logs token usage (input/output) and estimated cost to `cost_tracking` table. Sprint metrics include total tokens and cost. `/cost` command shows breakdown by agent and task.
-
-**Memory importance (S23):** Memories have `importance_score` (0-100) with exponential temporal decay (half-life 70 days). Access boosts score. `getMemoryContext` serves top 20 facts and top 10 goals ranked by importance. Contradiction detection flags semantically similar existing facts.
-
-**Workflow enforcement (S23):** `WorkflowTracker.transition()` accepts `enforce: true` to validate transitions against workflow.yaml. Retry policies are derived from checkpoint modes (off=0, light=1, strict=3).
-
-**Blackboard (S24):** Shared JSONB workspace per pipeline run (`blackboard` table). 5 sections: spec, plan, tasks, implementation, verification. Versioned with optimistic locking. Role-based write authorization. `useBlackboard: true` on orchestrate() enables the blackboard flow. Gate Evaluator checks quality at each gate (score 0-100, pass/fail). Evaluate-rework loop (max 2 iterations) self-corrects on failure. Adversarial Verifier detects spec drift in clean room (spec + implementation only, no plan/tasks). Traceability report maps FR->tasks->tests->files. `/orchestrate <id> [pipeline] --blackboard` activates the flow.
-
-**Parallel execution (S25):** DAG-based parallel scheduling replaces sequential for...of loop when `parallel: true`. Three levels: (1) independent agents run concurrently (analyst+PM in DEFAULT), (2) fan-out N Dev agents on subtasks (each in git worktree), (3) batch tasks in autopipeline. Supervisor (TypeScript, zero LLM cost) handles retry/skip/escalate. Semaphore limits max concurrency (default 3). Blackboard supports concurrent writes via `writeSectionWithRetry`. ParallelMetrics track speedup ratio. `/orchestrate <id> [pipeline] --parallel` activates parallel mode. Backward-compatible: `parallel: false` (default) = sequential.
-
-**Smart Notifications (S26):** All proactive notifications (tasks, PRs, ideas, alerts) route through a batching queue (`notification-queue.ts`). Batching: flush after 5min interval OR 5-message threshold, whichever comes first. Single notifications sent standalone with inline action buttons; 2+ grouped into digest format. Quiet hours (default 20h-9h, timezone-aware) queue non-critical notifications for morning digest. Critical alerts bypass quiet hours. Inline buttons: task (Demarrer/Terminer/Voir), PR (URL button), idea (Promouvoir/Archiver), alert (Voir tache/sprint/Ignorer). Preferences configurable via `/notify` command (quiet hours, per-type enable/disable/immediate). Persistence: queue + prefs saved to JSON files in RELAY_DIR. Morning digest triggered by alert-cron when quiet hours end.
-
-**Documentation & Maintenance (S27):** Automated documentation freshness enforcement. CI step (`scripts/doc-freshness.ts`) verifies every PR: all `src/*.ts` modules appear in CLAUDE.md module table, all `bot.command()` registrations appear in commands table, test count within ±10 of documented value. Conventional commit format enforced by pre-push hook (regex, no external deps). `git-cliff` generates CHANGELOG.md from commit history. `scripts/doc-check.ts` proposes CLAUDE.md updates interactively (`bun run doc:check`). Architecture Decision Records in `docs/adr/`. TSDoc `@module`/`@description` headers on all source modules.
-
-**CLI Optimization (S28):** Centralized `spawnClaude()` function in `agent.ts` replaces 5 duplicated spawn calls. All CLI flags are conditionally constructed: `--output-format json` + `--json-schema` for structured output (replaces <<<JSON>>> markers as primary, kept as fallback), `--effort` per agent role (low/medium/high/max), `--model` + `--fallback-model` for model routing (Opus for architect/dev, Sonnet for analyst/pm/qa, Haiku for sm), `--max-budget-usd` as per-agent cost guard, `--append-system-prompt` for system/task prompt separation, `-w` for worktree isolation (exec/code-review), `--from-pr` for code review PR context. Multi-model pricing in `cost-tracking.ts` (Opus $15/$75, Sonnet $3/$15, Haiku $0.80/$4 per 1M tokens). Agent CLI config (effort, model, budget) defined in `bmad-agents.ts` as source of truth. Backward compatible: all flags are optional, omitted when not set.
-
-**Production Readiness (S29):** Post-deploy validation pipeline. Smoke tests (`bun run smoke`) run 5 checks: PM2 services, Dashboard health, Supabase connectivity, Claude CLI, Telegram bot. Each with 10s timeout, report sent to Telegram. Auto-rollback in deploy.yml if smoke fails (`scripts/rollback.sh`). Feature flags in `config/features.json` with `/feature` command (list/enable/disable, hot-reload). Pre-implementation cost estimation (`/estimate <n> [pipeline]`) based on agent budgets from bmad-agents.ts with historical comparison. Production monitoring in alerts.ts: response time p50/p95/p99 (ring buffer), spawn success/failure rate per agent role, module error counters (1h window). `/monitor` command. `system-alerts.sh` activated via PM2 (every 15min) with 1h cooldown per alert type. Post-merge checklist generation from sprint tasks. `/rollback` command for manual rollback.
-
-**CI/CD & E2E Testing (S30):** Self-hosted GitHub Actions runner on the server (systemd, HTTPS outbound only — no firewall issues). CI (`ci.yml`) and deploy (`deploy.yml`) run on `[self-hosted, linux]`. Deploy is local (git pull + pm2 restart + smoke test + auto-rollback), replacing SSH-based deploy. Auto-deploy polling (`auto-deploy.sh`, `claude-autodeploy` PM2 service) removed — redundant with runner. E2E tests use Grammy's `bot.handleUpdate()` to inject synthetic Telegram updates into the bot's handler pipeline. `relay.ts` exports `createBot(token)` factory function; `import.meta.main` guards startup side effects (bot.start, PID file, intervals, process handlers). E2E framework (`tests/e2e/framework.ts`) intercepts `ctx.reply()` via Grammy API transformer — no real Telegram API calls. 8 E2E tests cover /help, /status, /feature, /workflow, /agents, /monitor, /estimate, /notify. Data isolation via `[E2E-<runId>]` prefix tags, cleanup after each test. E2E job in CI depends on check job, uses RELAY_DIR in /tmp.
-
-**Composer Extensibility (S31):** Refactored relay.ts (3216→243 lines) using Grammy's native Composer pattern. `src/bot-context.ts` provides a typed `BotContext` dependency object (callClaude, sendResponse, buildPrompt, supabase, session, topic helpers) injected into all Composers. `src/loader.ts` auto-discovers `src/commands/*.ts` via Bun Glob, imports each module, and mounts Composers with per-module errorBoundary. 11 Composer modules cover all 34 commands + 4 message handlers + callbacks. `src/topic-config.ts` extracts per-topic system prompts and command allowlists. Adding a new feature = creating a new file in `src/commands/`, no relay.ts modification needed. Zero new dependencies. ADR-007.
-
-**Advanced Multi-Agent Architecture (S33):** Three architectural improvements plus intent detection spike. (1) MCP Dynamic: `src/mcp-config.ts` defines per-role MCP tool allowlists (analyst: read-only context, dev/architect: full blackboard access, qa: read-only, sm: memory-only). `spawnClaude()` accepts `mcpRole` option, injects MCP tool instructions into agent system prompt via `buildMcpToolInstructions()`. Agents inherit MCP server access from project `.mcp.json` automatically. (2) Checkpoint/Resume: `pipeline_runs` table tracks pipeline execution state. `src/pipeline-state.ts` saves state after each agent step (`savePipelineStep()`), enables resume from last successful agent (`buildResumeContext()`). `/orchestrate <id> --resume [sessionId]` resumes failed pipelines. In-memory fallback when Supabase unavailable. (3) Intent Detection: `src/intent-detection.ts` maps natural language to commands via regex patterns with confidence scoring (0.7-0.95). Behind `intent_detection` feature flag (disabled by default). Integrated in `zz-messages.ts` text handler — suggests matching command when confidence >= 0.8.
-
-**Quality Foundations & Routing (S34):** Four improvements to gate intelligence and cost optimization. (1) Dual Verification: `gate-evaluator.ts` runs deterministic checks (tsc type check, bun test) BEFORE LLM evaluation on implementation gates. If checks fail, gate fails immediately without LLM cost. Non-implementation gates (spec, plan, tasks) skip deterministic checks. 30s timeout per check. (2) Structured Rubric Scoring: Gates score 4 dimensions x 25 points instead of single 0-100. Implementation gates: error_handling, test_coverage, code_style, spec_conformity. Spec/plan gates: completeness, traceability, clarity, feasibility. Dimension below 10 flagged as critical weakness. Total = sum of dimensions (0-100 scale preserved). (3) Model Cascade: `spawnClaudeWithCascade()` in agent.ts starts with Haiku, escalates to Sonnet then Opus on failure. Failure context from previous attempt included in escalated prompt. Explicit model override disables cascade. Cascade disabled by default (backward compatible). (4) LLM Router: `src/llm-router.ts` uses a Haiku call to analyze task and return pipeline type + per-role model overrides + budget. Replaces keyword matching in auto-pipeline when `useRouter: true`. 5s timeout with fallback to keyword-based classifyPipeline(). Feature flags: `llm_router`, `model_cascade` (both disabled by default).
-
-**Auto-improvement & Confidence (S35):** Five features for progressive autonomy and self-improvement. (1) Gate Evaluation Persistence: every `evaluateGate()` result is persisted to `gate_evaluations` table with rubric dimensions, deterministic check results, rework iteration, and auto-approval flag. (2) Trust Scores: `trust_scores` table tracks per-agent-role confidence (0-100, default 50). Pass without rework: +5, pass with rework: +1, fail: -10. Updated automatically after each gate evaluation via `evaluateAndRework()`. (3) Double-loop Learning: when a rubric dimension scores below 15/25 three or more times for an agent role, a corrective feedback rule is auto-generated in `feedback_rules` (source: `double_loop`). Injected into agent prompts via `buildFeedbackContext()`. (4) Progressive Gate Auto-approval: trust >= 80 + P3+ tasks: spec/plan/tasks gates auto-approved (skip LLM). Trust >= 90 + P3+: implementation gates auto-approved (deterministic checks still run). P1/P2 always fully evaluated. Behind `auto_gate_approval` feature flag (disabled by default). (5) /monitor Extension: shows trust scores, 5 most recent gate evaluations, and active double-loop rules.
-
-**Conversational Orchestrator (S37):** Transforms the bot from a command-menu interface into a conversational orchestrator. Users speak naturally, the bot detects intent and routes to commands. (1) Action Registry: `action-registry.ts` defines all 33 commands with structured metadata (description, params, risk level, aliases). Source of truth for intent detection and routing. (2) Two-tier Intent Detection: `intent-detection.ts` uses regex fast-path (confidence >= 0.9 skips LLM) then Haiku LLM fallback for ambiguous messages. 5s timeout, falls back to regex on error. (3) Command Router: `command-router.ts` receives detected intent and executes commands directly. Risk-based confirmation for high-risk actions (exec, orchestrate, autopipeline, rollback) via inline keyboard. Medium/low risk executes immediately. (4) Contextual Parameter Extraction: resolves "la tache" from in_progress tasks, "la derniere tache" from most recent. Queries Supabase for context when params are missing. (5) Multi-turn Clarification: when required params cannot be resolved, asks a targeted question. Next user message auto-resolves to the pending command. 60s TTL. (6) Conversation Fallback: when no intent is detected, conversation prompt is enriched with available actions so the LLM can naturally guide users. Behind `intent_detection` feature flag (disabled by default). Slash commands always work in parallel.
-
-**Inter-Agent Communication (S38):** Agents in a pipeline can communicate during execution via structured messages on the blackboard. (1) Agent Event Log: `agent-events.ts` provides event sourcing with `agent_events` table — tracks spawned, started, completed, failed, clarification_requested, clarification_resolved events per agent per pipeline. In-memory fallback when Supabase unavailable. (2) Inter-Agent Messaging: `agent-messaging.ts` adds a `messages` section to the blackboard. Message types: directive, question, observation, warning, escalation. All roles can write. Truncation at 20 messages (keep 15 most recent). (3) Clarification Protocol: downstream agents can ask questions to upstream agents. Max 1 round-trip per agent pair per pipeline to prevent loops. Supervisor detects unresolved questions after each agent step. (4) Conflict Detection: lexical overlap (Jaccard > 0.5) on working_memory decisions detects contradictions between agents. Higher-ranked agent mediates (architect > pm > analyst). Escalation to user if unresolved. (5) Enriched Context: inter-agent messages injected into agent prompts, prioritized by type (escalation > warning > question). Token budget: 2000 max for messages. (6) Monitoring: /monitor shows agent timeline and message flow summary for latest pipeline. Behind `inter_agent_messaging` feature flag (disabled by default). Backward compatible: pipelines without the flag behave identically.
-
-**Knowledge Graph (S39):** Structural understanding of the codebase for agents. (1) Regex-based Indexer: `code-graph.ts` parses all `src/**/*.ts` files — extracts imports, exports (function, class, interface, type, const), and inter-module edges. No TypeScript compiler dependency. (2) Local Cache: graph stored in `config/code-graph.json`, regenerated via `bun run graph:index`. In-memory cache for fast queries. (3) Graph Queries: `getModuleDependencies()` (what a module imports), `getDependents()` (what imports it), `getImpactRadius()` (BFS of transitive dependents with depth limit), `getRelatedModules()` (imports + importers), `findNode()` (partial match). (4) Agent Context Integration: `buildAgentContext()` injects relevant subgraph when `code_graph` flag enabled. Uses `findAffectedModules()` to match task title to module names, then formats graph context per role (architect/qa get impact radius). (5) LLM Router Enhancement: `routeTask()` includes complexity hint from graph — affected module count and max complexity score — to improve pipeline selection. (6) MCP Tools: `query_dependencies`, `query_dependents`, `query_impact_radius` exposed in MCP memory server for Claude Code agent real-time graph queries. (7) Monitoring: `/monitor` shows graph stats (modules, edges, exports, avg dependencies, most connected). (8) Complexity Estimation: `estimateComplexity()` scores 0-10 based on dependencies, dependents, impact radius, and line count. Behind `code_graph` feature flag (disabled by default).
-
-**Agent Context Complet (S40):** Enriched agent context with full Supabase data. (1) Token Budgets Increased: +30% per role (analyst 4000, pm/architect 3500, dev/sm 2000, qa 2500) to accommodate new sections. (2) Trust Score Context: `fetchTrustContext()` reads from in-memory cache (no DB call), injects agent's own trust score + peer scores, shows auto-approval eligibility and consecutive failure warnings. (3) Sprint Metrics: `fetchSprintMetrics()` queries `sprint_metrics` table for last 3 sprints — velocity, rework rate, cycle time. Gives agents historical performance awareness. (4) Document Shards: `fetchDocumentContext()` delegates to `buildTaskContext()` from document-sharding.ts — injects relevant PRD/architecture shards for the current task (1500 token budget). (5) Double-loop Closure: feedback rules from gate evaluations (S35) already injected via `buildFeedbackContext()` in agent system prompts. Trust scores provide the confidence signal for progressive autonomy. (6) Section Rebalancing: 8 sections with updated weights — memory 25%, tasks 15%, docs 12%, sprint/graph/metrics/profile 10% each, trust 8%. Behind `enhanced_agent_context` feature flag (enabled by default).
-
-**Memoire Relationnelle Active (S41):** Six features for structured memory reasoning. (1) Multi-hop Chains: `getMemoryChain()` BFS traversal of memory links up to depth 3. Returns connected memory tree with enriched link types and similarity scores. Max 50 nodes per traversal. (2) Link Classification: `classifyLinkContent()` heuristic classifies link relationships — "extends" (one elaborates), "supports" (similar conclusions), "contradicts" (negation/opposition), "related" (default). Uses entity overlap + negation patterns + length ratio. Stop word filtering for French/English. `contradicts` added to `memory_links.link_type` CHECK constraint. (3) Memory Clustering: `clusterMemories()` finds connected components in the memory graph via BFS. Returns clusters with 2+ members, sorted by size. `formatClusters()` for display. `/brain` uses proper clustering instead of manual link listing. (4) Reasoning Chains for Agents: `buildMemoryChains()` replaces flat fact injection. Strategic roles (analyst, pm, architect, qa) receive structured chains: fact → [link_type] linked_content. Tactical roles (dev, sm) receive flat facts for efficiency. Link types enriched via `classifyLinkContent()` at display time. (5) Similar Past Tasks: `findSimilarPastTasks()` searches completed tasks by keyword matching. Returns estimated vs actual hours, sprint, tags. `fetchSimilarTasksContext()` in agent-context injects historical data for estimation calibration. New "TACHES SIMILAIRES" section (10% budget). (6) Section Rebalancing: 9 sections with adjusted weights — memory 23%, tasks 13%, similar tasks 10%, graph 10%, docs 10%, sprint 10%, metrics 9%, profile 8%, trust 7%. Behind `memory_chains` feature flag (disabled by default). 43 new tests.
-
-**Autonomie Progressive (S42):** Five features for progressive agent autonomy based on track record. (1) Per-role Trust Thresholds: each agent role has custom auto-approval thresholds defined in `bmad-agents.ts` (source of truth). Dev/architect lower spec thresholds (70-75) since output is verified by tests. QA highest impl threshold (92) as quality gate. SM lowest thresholds (60/80) as low-risk role. Global fallback (80/90) for unknown roles. (2) Accelerated Degradation: 3+ consecutive failures trigger -20 penalty instead of -10, rapidly demoting unreliable agents. Resets to normal after a pass. (3) Autonomy Levels: 4 tiers based on trust score — strict (<40), supervised (40-spec), autonomous (spec-impl), full (>=impl). `getAutonomyLevel()` returns level + label. `formatTrustScores()` shows autonomy level per role. (4) Feedback Effectiveness: `measureRuleEffectiveness()` compares gate scores before/after rule application per agent. `promoteOrArchiveRules()` promotes effective rules (trust delta >= +5) and archives ineffective ones (delta <= -5). FeedbackRule extended with `trustDeltaAfter`, `promoted`, `archived` fields. (5) Enriched Planner: `analyzeBacklog()` now includes pipeline recommendations per task based on code graph complexity (`recommendPipelines()`), auto-defer suggestions for P4/P5 tasks in overloaded sprints (`detectDeferrableTasks()`). PlannerRecommendation extended with `suggestedPipeline`, `estimatedCost`, `complexityScore`. (6) Dashboard Autonomy: `/api/autonomy-status` endpoint exposes trust scores, recent gate evaluations with rubric details, and feedback rule status (active/promoted/archived). (7) Monitor Extension: `/monitor` shows trust scores with autonomy levels and feedback rule summary when `progressive_autonomy` flag enabled. Behind `progressive_autonomy` feature flag (disabled by default). 28 new tests.
-
-**Orchestrateur Mature (S43):** Five features transforming the bot from stateless command handler into a contextual conversational orchestrator. (1) Conversation Sessions: `conversation-session.ts` tracks per-chat/thread state with 30min TTL. Sessions capture intent trail, user constraints (speed/quality/budget/scope/deadline), decisions, recent messages, active task, and conversation phase (discovery/planning/execution/closure). Auto-created on first interaction. (2) Contextual Intent Detection: `detectIntentWithLLM` receives session context (recent intents, constraints, phase) so LLM understands conversation evolution. "Je veux refactorer" then "montre-moi le design d'abord" = exploration, not exec. (3) Conversation Context for Agents: `buildConversationContext()` extracts session data (messages, constraints, decisions, intent trail) and injects as new "CONTEXTE CONVERSATION" section in agent context (8% budget). Agents know why the user asked and what they want. Passed via `conversationContext` option on `orchestrate()`. (4) Deliberation Protocol: after strategic agents (architect, dev), the paired reviewer (PM, QA) examines output and can request revision. Max 1 round-trip. `runDeliberation()` spawns a review call (low effort, Sonnet), proposer revises if REVISE feedback. APPROVE skips revision. Behind `deliberation` feature flag (disabled by default). (5) Monitoring: `/monitor` shows active session count when `conversation_sessions` flag enabled. Both flags disabled by default for backward compatibility. 57 new tests.
-
-**MCP Business Server (S44):** Exposes bot business logic as MCP tools for Claude Code sessions. (1) Task Tools: `task_create` and `task_update` in MCP memory server, same effect as /task and /start/done. (2) PRD Tools: `prd_create`, `prd_list`, `prd_get`, `prd_approve`, `prd_reject`. (3) Notification Bridge: MCP tools write to `mcp-pending-notifications.json`, bot relay consumes via `consumeMcpPending()` on each flush cycle. Respects notification preferences. (4) Explorer Agent "Ada": read-only codebase investigation agent (Haiku, low effort, $0.10), `/explore` command, zero-LLM fast-path for structural queries via `explore-graph.ts`. 7 intent detection patterns for natural language routing ("comment fonctionne X", "explore X", "impact de X", etc.). (5) Adaptive Pipeline: difficulty scorer (`computeDifficultyScore`) combines code graph complexity, description analysis, and historical effort to select SOLO/LIGHT/DEFAULT pipeline. SOLO (score < 0.3): dev only. LIGHT (0.3-0.6): planner → dev → qa. DEFAULT (> 0.6): full 5-agent pipeline. Planner agent "Ivy" fuses analyst + PM roles in a single pass. New DAGs (SOLO_DAG, LIGHT_DAG) for parallel execution. Behind `adaptive_pipeline` feature flag (enabled by default). Router and `selectAdaptivePipeline()` support all 6 pipeline types. (6) Tavily Web Research: `tavily_search` and `tavily_extract` MCP tools for explorer agent. `detectWebResearchIntent()` with 27 keywords upgrades explorer to Sonnet ($0.25 budget) for web queries. RESEARCH pipeline (explorer → planner → dev → qa) auto-selected for research/benchmark/compare tasks. RESEARCH_DAG for parallel execution. Behind `tavily_search` feature flag (enabled by default).
-
-**Background Jobs (S46):** Non-blocking execution for long-running operations. (1) Job Manager: `job-manager.ts` singleton with in-memory registry + JSON persistence (`config/jobs.json`). API: `launch()` (fire-and-forget with Semaphore), `list()`, `get()`, `cancel()`, `cleanup()`. Timeout per job (default 30min). Restart recovery: running jobs marked failed on startup. (2) Classification: commands with `backgroundEligible: true` in action-registry run as background jobs when `job_manager` flag enabled. Eligible: exec, orchestrate, autopipeline, explore, plan, prd, planify, retro, rollback. (3) Integration: Composers check `isJobManagerEnabled()` — if true, wrap long operations in `jobManager.launch()` and return immediately with job ID. If false, blocking behavior preserved. Completion notifications via notification-queue. (4) `/jobs` command: list running + recent jobs, cancel by ID, view job detail. (5) Intent detection: patterns for "ou en est le job", "c'est fini", "qu'est-ce qui tourne". Behind `job_manager` feature flag (disabled by default).
-
-**Workflow steps** (config/workflow.yaml): request → decomposition → validation → execution → review → closure
+Details: see CHANGELOG.md and docs/sprints/ for version history.
 
 ### Infrastructure
 
 **PM2 services** (ecosystem.config.cjs):
-- `claude-relay` — Main bot (start-relay.sh)
+- `claude-relay` — Main bot
 - `claude-dashboard` — Kanban board (port 3456)
-- `claude-heartbeat` — Autonomous pulse every 10min (includes hourly alert checks, memory archival, morning digest flush, daily autonomy scan)
+- `claude-heartbeat` — Autonomous pulse every 10min (alert checks, memory archival, morning digest)
 - `claude-system-alerts` — System health monitoring (every 15min)
 
-**GitHub Actions** (self-hosted runner):
-- Runner installed on server via `scripts/setup-runner.sh` (systemd service)
-- `ci.yml` — PR checks: type check, unit/integration/system tests, doc freshness, E2E tests
-- `deploy.yml` — Production deploy on push to master: git pull, pm2 restart, smoke test, auto-rollback
-- E2E job runs after unit tests, uses `handleUpdate` injection (no Telegram API dependency)
+**GitHub Actions** (self-hosted runner): `ci.yml` (PR checks: typecheck, tests, doc freshness, E2E) and `deploy.yml` (master: git pull, pm2 restart, smoke test, auto-rollback).
 
-**Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards. API: /api/projects, /api/tasks, /api/prds, /api/health, /api/autonomy-status
+**Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards.
 
 ### Project Structure
 
@@ -254,22 +177,18 @@ Config: `.mcp.json`. Transport: stdio. Wraps the `memory-mcp` Edge Function. Not
 src/                    58 TypeScript modules (core logic)
   commands/             11 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
-config/
-  profile.md            User profile
-  workflow.yaml         Workflow state machine
-  bmad-templates/       Agent YAML definitions + workflow templates
+config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2061 tests (unit + integration + E2E)
+tests/                  2720 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
-examples/               Onboarding examples (morning briefing, checkin, memory)
 ```
 
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2061 tests, all must pass before merge)
+- Tests: `bun test` (2720 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
@@ -277,123 +196,6 @@ examples/               Onboarding examples (morning briefing, checkin, memory)
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 
----
+## Setup
 
-## Setup Guide
-
-> For new users setting up the project. Walk through one phase at a time.
-> If this is a fresh clone, run `bun run setup` first.
-
-### Phase 1: Telegram Bot (~3 min)
-
-**You need from the user:**
-- A Telegram bot token from @BotFather
-- Their personal Telegram user ID
-
-**What to tell them:**
-1. Open Telegram, search for @BotFather, send `/newbot`
-2. Pick a display name and a username ending in "bot"
-3. Copy the token BotFather gives them
-4. Get their user ID by messaging @userinfobot on Telegram
-
-**What you do:**
-1. Run `bun run setup` if `.env` does not exist yet
-2. Save `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` in `.env`
-3. Run `bun run test:telegram` to verify — it sends a test message to the user
-
-**Done when:** Test message arrives on Telegram.
-
-### Phase 2: Database & Memory — Supabase (~12 min)
-
-#### Step 1: Create Supabase Project
-
-**You need from the user:**
-- Supabase Project URL
-- Supabase anon public key
-
-**What to tell them:**
-1. Go to supabase.com, create a free account
-2. Create a new project (any name, any region close to them)
-3. Wait ~2 minutes for it to provision
-4. Go to Project Settings > API
-5. Copy: Project URL and anon public key
-
-**What you do:**
-1. Save `SUPABASE_URL` and `SUPABASE_ANON_KEY` to `.env`
-
-#### Step 2: Connect Supabase MCP
-
-**What to tell them:**
-1. Go to supabase.com/dashboard/account/tokens
-2. Create an access token, copy it
-
-**What you do:**
-```
-claude mcp add supabase -- npx -y @supabase/mcp-server-supabase@latest --access-token ACCESS_TOKEN
-```
-
-#### Step 3: Create Tables
-
-1. Read `db/schema.sql`
-2. Execute it via `execute_sql` (or tell the user to paste it in the SQL Editor)
-3. Run `bun run test:supabase` to verify tables exist
-
-#### Step 4: Set Up Semantic Search
-
-**You need from the user:**
-- An OpenAI API key (for generating text embeddings)
-
-**What you do:**
-1. Deploy the embed Edge Function via Supabase MCP (`deploy_edge_function` with `supabase/functions/embed/index.ts`)
-2. Deploy the search Edge Function (`supabase/functions/search/index.ts`)
-3. Tell the user to store their OpenAI key in Supabase:
-   - Go to Supabase dashboard > Project Settings > Edge Functions
-   - Under Secrets, add: `OPENAI_API_KEY` = their key
-4. Set up database webhooks so embeddings are generated automatically:
-   - Go to Supabase dashboard > Database > Webhooks > Create webhook
-   - Name: `embed_messages`, Table: `messages`, Events: INSERT
-   - Type: Supabase Edge Function, Function: `embed`
-   - Create a second webhook: `embed_memory`, Table: `memory`, Events: INSERT, Function: `embed`
-   - Create a third webhook: `embed_documents`, Table: `documents`, Events: INSERT, Function: `embed`
-
-#### Step 5: Verify
-
-Run `bun run test:supabase` to confirm tables exist, Edge Functions respond, and embeddings work.
-
-### Phase 3: Personalize (~3 min)
-
-**Ask the user:** first name, timezone, occupation, time constraints, communication style.
-
-**What you do:**
-1. Save `USER_NAME` and `USER_TIMEZONE` to `.env`
-2. Copy `config/profile.example.md` to `config/profile.md`
-3. Fill in `config/profile.md` with their answers
-
-### Phase 4: Test (~2 min)
-
-1. Run `bun run start`
-2. Tell the user to send a test message on Telegram
-3. Confirm it responded, then Ctrl+C to stop
-
-### Phase 5: Always On (~5 min)
-
-**macOS:** `bun run setup:launchd -- --service relay`
-**Linux:** `bun run setup:services -- --service relay` (uses PM2)
-**Verify:** `npx pm2 status` (Linux) or `launchctl list | grep com.claude` (macOS)
-
-### Phase 6: Proactive AI (Optional)
-
-- `examples/smart-checkin.ts` — Periodic intelligent check-ins
-- `examples/morning-briefing.ts` — Daily summary
-
-Schedule: `bun run setup:services -- --service all`
-
-### Phase 7: Voice Transcription (Optional)
-
-**Option A: Groq (recommended)** — Set `VOICE_PROVIDER=groq` and `GROQ_API_KEY`
-**Option B: Local whisper** — Set `VOICE_PROVIDER=local`, `WHISPER_BINARY`, `WHISPER_MODEL_PATH`
-Verify: `bun run test:voice`
-
-### After Setup
-
-Run `bun run setup:verify` for full health check.
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide. Quick start: `bun run setup`.
