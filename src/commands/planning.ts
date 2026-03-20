@@ -472,11 +472,20 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
         // Launch autopipeline for the first task via job manager
         if (isJobManagerEnabled()) {
-          const { runAutoPipeline } = await import("../auto-pipeline.ts");
+          const { runAutoPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
           const firstTask = tasks[0];
+          // Fetch full task object (runAutoPipeline expects Task, not just id)
+          const { data: fullTask } = await bctx.supabase.from("tasks")
+            .select("*")
+            .eq("id", firstTask.id)
+            .single();
+          if (!fullTask) {
+            await ctx.editMessageText("Erreur: tache introuvable en base.");
+            return;
+          }
           const launchFn = async (): Promise<string> => {
-            const result = await runAutoPipeline(bctx.supabase!, firstTask.id, { autoPipeline: true });
-            return result || "Implementation terminee.";
+            const result = await runAutoPipeline(bctx.supabase!, fullTask, { autoPipeline: true });
+            return formatPipelineResult(result);
           };
           const jobId = await launchJob("autopipeline", cId, launchFn, {
             messageThreadId: tId,
