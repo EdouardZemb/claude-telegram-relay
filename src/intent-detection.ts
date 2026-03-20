@@ -173,6 +173,19 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "resume_pipeline",
+    command: "orchestrate",
+    patterns: [
+      // "relance le workflow", "reprends le pipeline", "resume l'execution"
+      /\b(relance[rz]?|reprend[sz]?|reprendre|resume[rz]?)\s+(le\s+|la\s+|l'?)?(workflow|pipeline|orchestration|execution|implementation)\b/i,
+      // "relance depuis l'echec", "reprendre ou ca a plante"
+      /\b(relance[rz]?|reprend[sz]?|reprendre)\s+.{0,40}\b(echec|plante|echoue|crashe?)\b/i,
+      // "relance le dernier pipeline", "reprendre le dernier workflow"
+      /\b(relance[rz]?|reprend[sz]?|reprendre|resume[rz]?)\s+(le\s+)?dernier\s+(pipeline|workflow|execution)\b/i,
+    ],
+    argExtractor: () => "--resume",
+  },
+  {
     intent: "search_document",
     command: "docs",
     patterns: [

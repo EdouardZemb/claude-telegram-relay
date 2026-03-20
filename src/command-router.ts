@@ -98,6 +98,30 @@ async function resolveTaskId(
 }
 
 /**
+ * Try to resolve task from the most recent failed/paused pipeline run.
+ * Used when intent is "resume" without explicit task ID.
+ */
+async function resolveLastFailedPipeline(
+  supabase: SupabaseClient | null,
+): Promise<{ taskId: string; sessionId: string } | undefined> {
+  if (!supabase) return undefined;
+
+  const { data } = await supabase
+    .from("pipeline_runs")
+    .select("task_id, session_id")
+    .in("status", ["failed", "paused"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (!data?.[0]) return undefined;
+
+  return {
+    taskId: data[0].task_id.substring(0, 8),
+    sessionId: data[0].session_id,
+  };
+}
+
+/**
  * Try to resolve sprint ID from context
  */
 async function resolveSprintId(
@@ -139,6 +163,18 @@ export async function routeIntent(
 
   // Resolve missing required parameters from context
   let args = intent.args || "";
+
+  // Resume pipeline: resolve task from last failed pipeline run
+  if (action.command === "orchestrate" && args.trim() === "--resume") {
+    const resolved = await resolveLastFailedPipeline(rctx.supabase);
+    if (resolved) {
+      args = `${resolved.taskId} --resume`;
+    } else {
+      await ctx.reply("Aucun pipeline echoue ou en pause a reprendre.", rctx.threadOpts(ctx));
+      return { handled: true };
+    }
+  }
+
   const missingParams = action.params.filter((p) => p.required && !args.trim());
 
   if (missingParams.length > 0) {

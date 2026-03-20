@@ -265,6 +265,80 @@ describe("command-router", () => {
     });
   });
 
+  describe("routeIntent — resume pipeline", () => {
+    it("resolves task from last failed pipeline run", async () => {
+      const mockSupa = {
+        from: (table: string) => {
+          if (table === "pipeline_runs") {
+            return {
+              select: () => ({
+                in: () => ({
+                  order: () => ({
+                    limit: () => Promise.resolve({
+                      data: [{ task_id: "abcd1234-5678-9abc-def0-1234567890ab", session_id: "sess-123" }],
+                    }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return fakeSupa.from(table);
+        },
+      } as any;
+
+      const { ctx, replies } = createMockCtx();
+      const intent: DetectedIntent = {
+        intent: "resume_pipeline",
+        command: "orchestrate",
+        confidence: 0.9,
+        args: "--resume",
+        action: getAction("orchestrate"),
+        source: "regex",
+      };
+
+      const { rctx } = createRouterCtx(mockSupa);
+      const result = await routeIntent(ctx as any, intent, rctx);
+      expect(result.handled).toBe(true);
+      // Should be high-risk confirmation with resolved task ID
+      expect(result.pendingAction).toBe("orchestrate");
+      expect(replies.some((r) => r.includes("abcd1234") && r.includes("--resume"))).toBe(true);
+    });
+
+    it("returns error when no failed pipeline found", async () => {
+      const mockSupa = {
+        from: (table: string) => {
+          if (table === "pipeline_runs") {
+            return {
+              select: () => ({
+                in: () => ({
+                  order: () => ({
+                    limit: () => Promise.resolve({ data: [] }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return fakeSupa.from(table);
+        },
+      } as any;
+
+      const { ctx, replies } = createMockCtx();
+      const intent: DetectedIntent = {
+        intent: "resume_pipeline",
+        command: "orchestrate",
+        confidence: 0.9,
+        args: "--resume",
+        action: getAction("orchestrate"),
+        source: "regex",
+      };
+
+      const { rctx } = createRouterCtx(mockSupa);
+      const result = await routeIntent(ctx as any, intent, rctx);
+      expect(result.handled).toBe(true);
+      expect(replies.some((r) => r.includes("Aucun pipeline"))).toBe(true);
+    });
+  });
+
   describe("handleConfirmationCallback", () => {
     it("returns null for intent_cancel", () => {
       const { ctx } = createMockCtx({

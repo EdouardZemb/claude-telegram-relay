@@ -49,6 +49,7 @@ export interface PipelineResult {
   task: Task;
   durationMs: number;
   message: string;
+  summary?: string;
   blocked?: {
     reason: string;
     gate?: string;
@@ -109,6 +110,8 @@ export async function runAutoPipeline(
   const progress = async (msg: string) => {
     if (onProgress) await onProgress(msg);
   };
+
+  let analysisSummary: string | undefined;
 
   // S34: LLM router for dynamic pipeline selection (FR-004)
   let routerDecision: RouterDecision | null = null;
@@ -203,6 +206,7 @@ export async function runAutoPipeline(
     });
 
     const analysisOk = analysisResult.steps.filter((s) => s.success).length;
+    analysisSummary = analysisResult.summary;
     await progress(`Analyse: ${analysisOk}/${analysisResult.steps.length} agents OK.`);
 
     // Reload task from DB so dev agent gets PM/Architect artefacts
@@ -277,6 +281,7 @@ export async function runAutoPipeline(
     task,
     durationMs: Date.now() - startTime,
     message: `Pipeline complete en ${totalDuration}s`,
+    summary: analysisSummary,
     prUrl: execResult.prUrl,
     reviewScore: execResult.reviewScore,
   };
@@ -375,6 +380,11 @@ export function formatPipelineResult(result: PipelineResult): string {
     if (result.blocked.overridable) {
       lines.push("(peut etre bypass manuellement)");
     }
+  }
+
+  if (result.summary) {
+    lines.push("");
+    lines.push(result.summary);
   }
 
   lines.push("");

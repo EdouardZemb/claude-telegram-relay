@@ -166,7 +166,7 @@ const ACTIONS: ActionDefinition[] = [
     risk: "high",
     module: "execution",
     requiresSupabase: true,
-    aliases: ["orchestrer", "pipeline multi-agents", "lancer pipeline"],
+    aliases: ["orchestrer", "pipeline multi-agents", "lancer pipeline", "relancer workflow", "reprendre pipeline", "resume pipeline"],
     backgroundEligible: true,
   },
   {
