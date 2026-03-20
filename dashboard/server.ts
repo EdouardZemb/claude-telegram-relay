@@ -42,7 +42,7 @@ function checkAuth(req: Request): Response | null {
   return new Response("Unauthorized. Add ?token=YOUR_TOKEN to the URL.", { status: 401 });
 }
 
-const server = Bun.serve({
+const server = import.meta.main ? Bun.serve({
   port: PORT,
   hostname: HOST,
   async fetch(req) {
@@ -106,9 +106,15 @@ const server = Bun.serve({
       return handleAutonomyStatus();
     }
 
+    if (url.pathname === "/api/audit") {
+      const limitParam = url.searchParams.get("limit");
+      const axisParam = url.searchParams.get("axis") || undefined;
+      return handleAudit(limitParam, axisParam);
+    }
+
     return new Response("Not found", { status: 404 });
   },
-});
+}) : null;
 
 async function handleProxyProjects(): Promise<Response> {
   if (!supabase) {
@@ -616,4 +622,44 @@ async function handleAutonomyStatus(): Promise<Response> {
   });
 }
 
-console.log(`Dashboard running at http://${HOST}:${PORT}`);
+export async function handleAudit(
+  limitParam: string | null,
+  axisParam?: string,
+  sb?: typeof supabase,
+): Promise<Response> {
+  const client = sb ?? supabase;
+  if (!client) {
+    return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
+  }
+
+  const limit = Math.max(1, Math.min(50, parseInt(limitParam || "1", 10) || 1));
+
+  const { data, error } = await client
+    .from("audit_results")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  let results = data ?? [];
+
+  if (axisParam) {
+    results = results.filter((row: any) =>
+      row.axis_scores && typeof row.axis_scores === "object" && axisParam in row.axis_scores
+    );
+  }
+
+  return new Response(JSON.stringify(results), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+if (import.meta.main) {
+  console.log(`Dashboard running at http://${HOST}:${PORT}`);
+}
