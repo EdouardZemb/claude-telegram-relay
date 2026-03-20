@@ -474,14 +474,15 @@ describe("scoreToPipeline", () => {
     expect(scoreToPipeline(0.29)).toBe("SOLO");
   });
 
-  it("AC-008: returns LIGHT for score 0.3-0.6", () => {
+  it("AC-008: returns LIGHT for score 0.3-0.7", () => {
     expect(scoreToPipeline(0.3)).toBe("LIGHT");
     expect(scoreToPipeline(0.45)).toBe("LIGHT");
     expect(scoreToPipeline(0.6)).toBe("LIGHT");
+    expect(scoreToPipeline(0.7)).toBe("LIGHT");
   });
 
-  it("AC-009: returns DEFAULT for score > 0.6", () => {
-    expect(scoreToPipeline(0.61)).toBe("DEFAULT");
+  it("AC-009: returns DEFAULT for score > 0.7", () => {
+    expect(scoreToPipeline(0.71)).toBe("DEFAULT");
     expect(scoreToPipeline(0.8)).toBe("DEFAULT");
     expect(scoreToPipeline(1.0)).toBe("DEFAULT");
   });
@@ -489,8 +490,8 @@ describe("scoreToPipeline", () => {
   it("handles boundary values precisely", () => {
     expect(scoreToPipeline(0.299)).toBe("SOLO");
     expect(scoreToPipeline(0.3)).toBe("LIGHT");
-    expect(scoreToPipeline(0.6)).toBe("LIGHT");
-    expect(scoreToPipeline(0.601)).toBe("DEFAULT");
+    expect(scoreToPipeline(0.7)).toBe("LIGHT");
+    expect(scoreToPipeline(0.701)).toBe("DEFAULT");
   });
 });
 

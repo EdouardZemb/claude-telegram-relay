@@ -21,7 +21,8 @@ export type AgentEventType =
   | "message_sent"
   | "message_received"
   | "clarification_requested"
-  | "clarification_resolved";
+  | "clarification_resolved"
+  | "failure_captured";
 
 export interface AgentEvent {
   id?: string;
@@ -172,3 +173,68 @@ export function formatAgentTimeline(events: AgentEvent[]): string {
   }
   return lines.join("\n");
 }
+
+// ── P3: Agent DLQ (Dead Letter Queue cognitive) ──────────────
+
+export interface FailureContext {
+  /** First 500 chars of the prompt */
+  promptSnippet: string;
+  /** First 2000 chars of partial output */
+  partialOutput: string;
+  /** Error message */
+  error: string;
+  /** Input tokens consumed */
+  tokensInput: number;
+  /** Output tokens consumed */
+  tokensOutput: number;
+  /** Duration in milliseconds */
+  durationMs: number;
+}
+
+/**
+ * Capture an agent failure after retry exhaustion.
+ * Fire-and-forget: never blocks the pipeline, never propagates errors.
+ * Falls back to in-memory when Supabase is unavailable.
+ */
+export async function captureAgentFailure(
+  supabase: SupabaseClient | null,
+  sessionId: string,
+  role: string,
+  ctx: FailureContext
+): Promise<void> {
+  const payload = {
+    prompt_snippet: (ctx.promptSnippet || "").substring(0, 500),
+    partial_output: (ctx.partialOutput || "").substring(0, 2000),
+    error: ctx.error || "",
+    tokens_input: ctx.tokensInput || 0,
+    tokens_output: ctx.tokensOutput || 0,
+    duration_ms: ctx.durationMs || 0,
+  };
+
+  try {
+    await emitAgentEvent(supabase, sessionId, role, "failure_captured", payload);
+  } catch {
+    // Fire-and-forget: never propagate errors
+    // emitAgentEvent already has its own fallback, but guard against unexpected failures
+    try {
+      getInMemoryEvents(sessionId).push({
+        session_id: sessionId,
+        agent_role: role,
+        event_type: "failure_captured",
+        payload,
+        created_at: new Date().toISOString(),
+      });
+    } catch {
+      // Last resort: log to console
+      console.error("captureAgentFailure: failed to store event", { sessionId, role });
+    }
+  }
+}
+
+// ── P5: Tracing Timeline alias ───────────────────────────────
+
+/**
+ * Get tracing timeline for a pipeline session.
+ * Alias of getAgentEvents — no new implementation needed (R13).
+ */
+export const getTracingTimeline = getAgentEvents;
