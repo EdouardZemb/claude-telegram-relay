@@ -250,8 +250,16 @@ describe("Difficulty Score Integration (S44 T8)", () => {
     expect(scoreToPipeline(0.6)).toBe("LIGHT");
   });
 
-  it("score 0.61 → DEFAULT", () => {
-    expect(scoreToPipeline(0.61)).toBe("DEFAULT");
+  it("score 0.65 → LIGHT", () => {
+    expect(scoreToPipeline(0.65)).toBe("LIGHT");
+  });
+
+  it("score 0.7 → LIGHT", () => {
+    expect(scoreToPipeline(0.7)).toBe("LIGHT");
+  });
+
+  it("score 0.71 → DEFAULT", () => {
+    expect(scoreToPipeline(0.71)).toBe("DEFAULT");
   });
 
   it("score 1.0 → DEFAULT", () => {

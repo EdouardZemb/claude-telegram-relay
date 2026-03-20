@@ -79,7 +79,7 @@ import {
   findLatestPipelineRun,
   type StepSnapshot,
 } from "./pipeline-state.ts";
-import { emitAgentEvent, clearInMemoryEvents } from "./agent-events.ts";
+import { emitAgentEvent, clearInMemoryEvents, captureAgentFailure } from "./agent-events.ts";
 import {
   getAgentMessages,
   checkPendingClarifications,
@@ -440,6 +440,10 @@ export interface OrchestrateOptions {
   cascade?: boolean;
   /** S43: Conversation context from the session that triggered this pipeline */
   conversationContext?: string;
+  /** P1: Run the last 2 agents in parallel (overlap mode). Incompatible with useBlackboard */
+  overlap?: boolean;
+  /** P2: Rebuild agent context via buildAgentContext() between each agent (except the first) */
+  refreshContext?: boolean;
 }
 
 /**
@@ -662,8 +666,20 @@ export async function orchestrate(
     }
   }
 
-  // ── Sequential execution ─────────────────────────────────
+  // P1: Resolve overlap + blackboard incompatibility (R1c)
+  let effectiveOverlap = options.overlap ?? false;
+  if (effectiveOverlap && options.useBlackboard) {
+    console.warn("orchestrate: overlap is incompatible with useBlackboard, falling back to sequential");
+    effectiveOverlap = false;
+  }
+
+  // ── Sequential execution (with optional overlap for last 2 agents) ──
   {
+    // P1: Determine which agents run sequentially vs in parallel
+    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
+      ? pipeline.length - 2 // index where overlap starts
+      : pipeline.length; // no overlap: all sequential
+
     let stepIndex = 0;
     for (const agentId of pipeline) {
       // S33: Skip already completed steps on resume
@@ -673,10 +689,33 @@ export async function orchestrate(
       }
       stepIndex++;
 
+      // P1: Break out of sequential loop to run overlap agents in parallel
+      if (stepIndex - 1 >= overlapThreshold) {
+        break;
+      }
+
       const agent = getAgent(agentId);
       const agentLabel = agent
         ? `${agent.icon} ${agent.name} (${agent.title})`
         : agentId;
+
+      // P2: Refresh context mid-pipeline (R4, R5, R6)
+      if (options.refreshContext && stepIndex > 1 && supabase) {
+        try {
+          const refreshedCtx = await buildAgentContext(supabase, {
+            role: agentId,
+            projectId: task.project_id || undefined,
+            sprintId: task.sprint || undefined,
+            conversationContext: options.conversationContext,
+          });
+          // R6: Only update cache if refresh returned non-empty string
+          if (refreshedCtx) {
+            agentContextCache.set(agentId, refreshedCtx);
+          }
+        } catch {
+          // R6: On error, preserve existing cache
+        }
+      }
 
       if (options.onProgress) {
         await options.onProgress(`${agentLabel} en cours...`);
@@ -728,6 +767,18 @@ export async function orchestrate(
           }
           await new Promise((resolve) => setTimeout(resolve, backoffMs));
         }
+      }
+
+      // P3: Capture agent failure after retry exhaustion (R7, R8)
+      if (result && !result.success && pipelineSessionId) {
+        captureAgentFailure(supabase, pipelineSessionId, agentId, {
+          promptSnippet: "", // prompt not readily available here, empty is acceptable
+          partialOutput: (result.output || "").substring(0, 2000),
+          error: result.error || "unknown error",
+          tokensInput: result.tokensInput || 0,
+          tokensOutput: result.tokensOutput || 0,
+          durationMs: result.durationMs || 0,
+        }).catch((err) => console.error("captureAgentFailure error:", err));
       }
 
       // result is never null here because maxRetries >= 0 guarantees at least one iteration
@@ -994,7 +1045,7 @@ export async function orchestrate(
         }
       }
 
-      // Log cost (S23-05, S28: include model)
+      // Log cost (S23-05, S28: include model, P5: correlation_id)
       if (supabase && result!.tokensInput) {
         logCost(supabase, {
           taskId: task.id,
@@ -1008,6 +1059,7 @@ export async function orchestrate(
           retryAttempt: retryCount,
           context: "orchestration",
           model: agent?.model,
+          metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
         }).catch((err) => console.error("logCost orchestration error:", err));
       }
 
@@ -1042,6 +1094,194 @@ export async function orchestrate(
           );
         }
         break;
+      }
+    }
+
+    // P1: Overlap execution — run last 2 agents in parallel (R1, R1b, R1d)
+    if (effectiveOverlap && pipeline.length >= 2) {
+      // Only run overlap if sequential part didn't fail with stopOnFailure
+      const lastFailed = steps.length > 0 && !steps[steps.length - 1].success && options.stopOnFailure;
+      if (!lastFailed) {
+        const overlapAgents = pipeline.slice(overlapThreshold);
+        const previousMessagesSnapshot = [...messages]; // R1d: frozen snapshot
+
+        const overlapPromises = overlapAgents.map(async (agentId) => {
+          const agent = getAgent(agentId);
+          const agentLabel = agent
+            ? `${agent.icon} ${agent.name} (${agent.title})`
+            : agentId;
+
+          // P2: Refresh context for overlap agents too
+          if (options.refreshContext && supabase) {
+            try {
+              const refreshedCtx = await buildAgentContext(supabase, {
+                role: agentId,
+                projectId: task.project_id || undefined,
+                sprintId: task.sprint || undefined,
+                conversationContext: options.conversationContext,
+              });
+              if (refreshedCtx) {
+                agentContextCache.set(agentId, refreshedCtx);
+              }
+            } catch {
+              // Preserve existing cache
+            }
+          }
+
+          if (options.onProgress) {
+            await options.onProgress(`${agentLabel} en cours (overlap)...`);
+          }
+
+          if (tracker) {
+            await tracker.transition(`orchestration_${agentId}`, {
+              agent_notes: `Agent ${agentId} demarre dans le pipeline (overlap)`,
+            });
+          }
+
+          if (pipelineSessionId) {
+            emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
+              model: agent?.model, effort: agent?.effort, overlap: true,
+            }).catch((err) => console.error("emitAgentEvent spawned error:", err));
+          }
+
+          // Retry loop for overlap agent
+          let result: AgentStepResult | null = null;
+          let retryCount = 0;
+
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            result = await runAgentStep(
+              agentId, task, previousMessagesSnapshot, shardedContext,
+              agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade
+            );
+            if (result.success) break;
+            if (attempt < maxRetries) {
+              retryCount = attempt + 1;
+              const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+              await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            }
+          }
+
+          // P3: DLQ capture for overlap agents
+          if (result && !result.success && pipelineSessionId) {
+            captureAgentFailure(supabase, pipelineSessionId, agentId, {
+              promptSnippet: "",
+              partialOutput: (result.output || "").substring(0, 2000),
+              error: result.error || "unknown error",
+              tokensInput: result.tokensInput || 0,
+              tokensOutput: result.tokensOutput || 0,
+              durationMs: result.durationMs || 0,
+            }).catch((err) => console.error("captureAgentFailure error:", err));
+          }
+
+          result!.retryCount = retryCount;
+
+          // Emit completed/failed event
+          if (pipelineSessionId) {
+            const eventType = result!.success ? "completed" : "failed";
+            emitAgentEvent(supabase, pipelineSessionId, agentId, eventType, {
+              duration_ms: result!.durationMs,
+              tokens_input: result!.tokensInput,
+              tokens_output: result!.tokensOutput,
+              cost_usd: result!.costUsd,
+              overlap: true,
+              ...(result!.error ? { error: result!.error } : {}),
+            }).catch((err) => console.error("emitAgentEvent error:", err));
+          }
+
+          // Log cost with P5 correlation_id
+          if (supabase && result!.tokensInput) {
+            logCost(supabase, {
+              taskId: task.id,
+              sprintId: task.sprint || undefined,
+              agentRole: agentId,
+              agentName: result!.agentName,
+              tokensInput: result!.tokensInput || 0,
+              tokensOutput: result!.tokensOutput || 0,
+              costUsd: result!.costUsd || 0,
+              durationMs: result!.durationMs,
+              retryAttempt: retryCount,
+              context: "orchestration",
+              model: agent?.model,
+              metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
+            }).catch((err) => console.error("logCost orchestration error:", err));
+          }
+
+          // Checkpoint
+          if (pipelineSessionId) {
+            const snapshot: StepSnapshot = {
+              agentId,
+              success: result!.success,
+              durationMs: result!.durationMs,
+              completedAt: new Date().toISOString(),
+              tokensInput: result!.tokensInput,
+              tokensOutput: result!.tokensOutput,
+              costUsd: result!.costUsd,
+            };
+            const message: AgentMessage = {
+              agentId,
+              agentName: result!.agentName,
+              success: result!.success,
+              structured: result!.structured,
+              rawOutput: result!.output,
+              durationMs: result!.durationMs,
+              error: result!.error,
+            };
+            await savePipelineStep(supabase, pipelineSessionId, snapshot, message);
+          }
+
+          // Persist artifact
+          if (result!.success && supabase) {
+            await persistAgentArtifact(supabase, task.id, agentId, result!.output);
+          }
+
+          return { agentId, result: result! };
+        });
+
+        // R1b: Use Promise.allSettled to preserve both results
+        const settled = await Promise.allSettled(overlapPromises);
+
+        // Process results in pipeline order
+        for (const outcome of settled) {
+          if (outcome.status === "fulfilled") {
+            const { agentId: aId, result: r } = outcome.value;
+            steps.push(r);
+            messages.push({
+              agentId: aId,
+              agentName: r.agentName,
+              success: r.success,
+              structured: r.structured,
+              rawOutput: r.output,
+              durationMs: r.durationMs,
+              error: r.error,
+            });
+
+            if (options.onProgress) {
+              const agent = getAgent(aId);
+              const label = agent ? `${agent.icon} ${agent.name} (${agent.title})` : aId;
+              const status = r.success ? "OK" : "ECHEC";
+              const duration = Math.round(r.durationMs / 1000);
+              await options.onProgress(`${label} : ${status} (${duration}s) [overlap]`);
+            }
+          } else {
+            // Unexpected rejection — create a synthetic failure step
+            console.error("orchestrate overlap: unexpected rejection", outcome.reason);
+          }
+        }
+
+        // R1b: Check if any overlap agent failed with stopOnFailure
+        if (options.stopOnFailure) {
+          const overlapFailed = steps.slice(-overlapAgents.length).some(s => !s.success);
+          if (overlapFailed && pipelineSessionId) {
+            const failedStep = steps.find(s => !s.success);
+            await updatePipelineStatus(supabase, pipelineSessionId, "failed", failedStep?.error);
+            if (options.onProgress) {
+              await options.onProgress(
+                `Pipeline arrete: agent en overlap a echoue.` +
+                (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : "")
+              );
+            }
+          }
+        }
       }
     }
   }

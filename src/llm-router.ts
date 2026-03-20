@@ -366,7 +366,7 @@ export function scoreToPipeline(
   score: number,
 ): "SOLO" | "LIGHT" | "DEFAULT" {
   if (score < 0.3) return "SOLO";
-  if (score <= 0.6) return "LIGHT";
+  if (score <= 0.7) return "LIGHT";
   return "DEFAULT";
 }
 

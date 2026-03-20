@@ -61,6 +61,12 @@ const RESEARCH_KEYWORDS = [
   "explore options", "explorer les options",
 ];
 
+/** Keywords that indicate breaking changes — forces DEFAULT pipeline (R11) */
+export const BREAKING_KEYWORDS = [
+  "breaking", "migration schema", "deprecate", "api v2",
+  "schema change", "backward incompatible", "supprime", "retire",
+];
+
 // ── Types ────────────────────────────────────────────────────
 
 export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC" | "SOLO" | "LIGHT" | "RESEARCH";
@@ -139,14 +145,38 @@ export async function selectAdaptivePipeline(
   const { computeDifficultyScore } = await import("./llm-router.ts");
   const difficulty = await computeDifficultyScore(task, supabase);
 
+  let selectedPipeline: AgentRole[];
   switch (difficulty.pipeline) {
     case "SOLO":
-      return SOLO_PIPELINE;
+      selectedPipeline = SOLO_PIPELINE;
+      break;
     case "LIGHT":
-      return LIGHT_PIPELINE;
+      selectedPipeline = LIGHT_PIPELINE;
+      break;
     default:
-      return DEFAULT_PIPELINE;
+      selectedPipeline = DEFAULT_PIPELINE;
+      break;
   }
+
+  // R10: Force DEFAULT when > 5 affected modules
+  if (difficulty.affectedModules.length > 5 && selectedPipeline !== DEFAULT_PIPELINE) {
+    selectedPipeline = DEFAULT_PIPELINE;
+  }
+
+  // R11: Force DEFAULT when breaking changes keywords detected
+  if (selectedPipeline !== DEFAULT_PIPELINE && hasBreakingKeywords(text)) {
+    selectedPipeline = DEFAULT_PIPELINE;
+  }
+
+  return selectedPipeline;
+}
+
+/**
+ * Check if task text contains breaking change keywords (R11).
+ */
+export function hasBreakingKeywords(text: string): boolean {
+  const lower = text.toLowerCase();
+  return BREAKING_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 /**
