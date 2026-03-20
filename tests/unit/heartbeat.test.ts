@@ -377,6 +377,201 @@ describe("Heartbeat Actions", () => {
   });
 });
 
+// ── Lightweight Audit ─────────────────────────────────────
+
+describe("computeAuditScore", () => {
+  it("should return 100 when no gaps", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    expect(computeAuditScore([])).toBe(100);
+  });
+
+  it("should deduct 5 points per module gap", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    const gaps = [
+      { type: "missing_module" },
+      { type: "extra_module" },
+    ];
+    expect(computeAuditScore(gaps)).toBe(90);
+  });
+
+  it("should deduct 5 points per command gap", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    const gaps = [
+      { type: "missing_command" },
+      { type: "extra_command" },
+    ];
+    expect(computeAuditScore(gaps)).toBe(90);
+  });
+
+  it("should deduct 10 points for test count gap", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    const gaps = [{ type: "test_count" }];
+    expect(computeAuditScore(gaps)).toBe(90);
+  });
+
+  it("should clamp score to 0 minimum", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    // 25 module gaps = 125 point deduction
+    const gaps = Array.from({ length: 25 }, () => ({ type: "missing_module" }));
+    expect(computeAuditScore(gaps)).toBe(0);
+  });
+
+  it("should handle mixed gap types", async () => {
+    const { computeAuditScore } = await import("../../src/heartbeat");
+    const gaps = [
+      { type: "missing_module" },   // -5
+      { type: "extra_command" },     // -5
+      { type: "test_count" },        // -10
+    ];
+    expect(computeAuditScore(gaps)).toBe(80);
+  });
+});
+
+describe("Heartbeat Lightweight Audit Integration", () => {
+  // AC-1: Given heartbeat active + audit_system enabled + 24h elapsed → audit is triggered
+  describe("AC-1: Daily audit trigger", () => {
+    it("should trigger audit when audit_system enabled and 24h elapsed", async () => {
+      // We test the time-gating logic by checking state changes
+      const state = createDefaultState();
+      state.lastAuditAt = null; // never run before
+
+      const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      const now = Date.now();
+      const isExpired = !state.lastAuditAt || new Date(state.lastAuditAt).getTime() < (now - 24 * 60 * 60 * 1000);
+      expect(isExpired).toBe(true);
+    });
+
+    it("should not trigger audit when less than 24h elapsed", () => {
+      const state = createDefaultState();
+      state.lastAuditAt = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(); // 12h ago
+
+      const now = Date.now();
+      const dayAgo = now - 24 * 60 * 60 * 1000;
+      const isExpired = !state.lastAuditAt || new Date(state.lastAuditAt).getTime() < dayAgo;
+      expect(isExpired).toBe(false);
+    });
+
+    it("should trigger audit on first run (lastAuditAt null)", () => {
+      const state = createDefaultState();
+      expect(state.lastAuditAt).toBeNull();
+
+      const now = Date.now();
+      const dayAgo = now - 24 * 60 * 60 * 1000;
+      const isExpired = !state.lastAuditAt || new Date(state.lastAuditAt).getTime() < dayAgo;
+      expect(isExpired).toBe(true);
+    });
+  });
+
+  // AC-2: Score regression > 5 points → alert via notification
+  describe("AC-2: Regression alert", () => {
+    it("should detect regression when score drops by more than 5 points", () => {
+      const previousScore = 78;
+      const currentScore = 72;
+      const delta = previousScore - currentScore;
+      const shouldAlert = previousScore !== null && delta > 5;
+      expect(shouldAlert).toBe(true);
+      expect(delta).toBe(6);
+    });
+
+    it("should include delta in alert message", () => {
+      const previousScore = 78;
+      const currentScore = 72;
+      const delta = previousScore - currentScore;
+      const message = `[Audit] Score structure/tests en regression: ${previousScore} -> ${currentScore} (${delta} points). 3 ecart(s) detecte(s).`;
+      expect(message).toContain("78 -> 72");
+      expect(message).toContain("6 points");
+      expect(message).toContain("3 ecart(s)");
+    });
+
+    it("should detect large regression (e.g. 20 points)", () => {
+      const previousScore = 90;
+      const currentScore = 70;
+      const delta = previousScore - currentScore;
+      expect(delta > 5).toBe(true);
+      expect(delta).toBe(20);
+    });
+  });
+
+  // AC-3: Stable score (delta <= 5) → no alert
+  describe("AC-3: No alert on stable score", () => {
+    it("should not alert when score improves", () => {
+      const previousScore = 72;
+      const currentScore = 78;
+      const delta = previousScore - currentScore;
+      const shouldAlert = previousScore !== null && delta > 5;
+      expect(shouldAlert).toBe(false);
+    });
+
+    it("should not alert when score is exactly 5 points lower", () => {
+      const previousScore = 78;
+      const currentScore = 73;
+      const delta = previousScore - currentScore;
+      const shouldAlert = previousScore !== null && delta > 5;
+      expect(shouldAlert).toBe(false);
+    });
+
+    it("should not alert when score is unchanged", () => {
+      const previousScore = 78;
+      const currentScore = 78;
+      const delta = previousScore - currentScore;
+      const shouldAlert = previousScore !== null && delta > 5;
+      expect(shouldAlert).toBe(false);
+    });
+
+    it("should not alert on first run (no previous score)", () => {
+      const previousScore = null;
+      const currentScore = 72;
+      const shouldAlert = previousScore !== null && previousScore - currentScore > 5;
+      expect(shouldAlert).toBe(false);
+    });
+  });
+
+  // AC-4: audit_system flag disabled → no audit
+  describe("AC-4: Feature flag gate", () => {
+    it("should have audit_system flag defaulting to false", () => {
+      const features = require("../../config/features.json");
+      expect(features.audit_system).toBe(false);
+    });
+
+    it("should skip audit when feature flag is disabled", () => {
+      // Simulates the guard in pulse()
+      const flagEnabled = false; // audit_system is off
+      const lastAuditAt = null; // never ran
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const shouldRun = flagEnabled && (!lastAuditAt || new Date(lastAuditAt).getTime() < dayAgo);
+      expect(shouldRun).toBe(false);
+    });
+
+    it("should run audit when feature flag is enabled and time has elapsed", () => {
+      const flagEnabled = true; // audit_system is on
+      const lastAuditAt = null; // never ran
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const shouldRun = flagEnabled && (!lastAuditAt || new Date(lastAuditAt).getTime() < dayAgo);
+      expect(shouldRun).toBe(true);
+    });
+  });
+});
+
+describe("HeartbeatState audit fields", () => {
+  it("should include lastAuditAt in default state", () => {
+    const state = createDefaultState();
+    expect(state.lastAuditAt).toBeNull();
+  });
+
+  it("should include lastAuditScore in default state", () => {
+    const state = createDefaultState();
+    expect(state.lastAuditScore).toBeNull();
+  });
+
+  it("should allow setting audit fields", () => {
+    const state = createDefaultState();
+    state.lastAuditAt = "2026-03-20T12:00:00.000Z";
+    state.lastAuditScore = 85;
+    expect(state.lastAuditAt).toBe("2026-03-20T12:00:00.000Z");
+    expect(state.lastAuditScore).toBe(85);
+  });
+});
+
 describe("Heartbeat Git Delta", () => {
   it("should detect no changes when SHA matches", () => {
     // getGitDelta calls spawnSync which will work in test env

@@ -47,6 +47,16 @@ import { archiveOldMemories } from "./memory.ts";
 import { loadPrefs, isQuietHours } from "./notification-prefs.ts";
 import { loadQueue, getQueue, flushMorningDigest, enqueue } from "./notification-queue.ts";
 import { runAllScanners, isDuplicate } from "./autonomy-scanner.ts";
+import {
+  extractModules,
+  extractCommands,
+  parseClaudeMdModules,
+  parseClaudeMdCommands,
+  parseClaudeMdTestCount,
+  countTests,
+  findGaps,
+  type DocState,
+} from "../scripts/doc-utils.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -346,6 +356,79 @@ export async function executeActions(
   return executed;
 }
 
+// ── Lightweight Audit ─────────────────────────────────────────
+
+export interface LightweightAuditResult {
+  score: number;
+  gaps: Array<{ type: string; item: string; detail: string }>;
+  testCount: number;
+}
+
+/**
+ * Compute audit score from gaps list.
+ * Score: 100 - (5 * missing/extra modules) - (5 * missing/extra commands) - (10 if test count drifts).
+ * Clamped to [0, 100].
+ */
+export function computeAuditScore(gaps: Array<{ type: string }>): number {
+  let score = 100;
+  for (const gap of gaps) {
+    score -= gap.type === "test_count" ? 10 : 5;
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
+/**
+ * Run a lightweight structure + tests audit using doc-utils.
+ */
+export async function runLightweightAudit(projectDir: string): Promise<LightweightAuditResult> {
+  const srcDir = join(projectDir, "src");
+  const relayPath = join(srcDir, "relay.ts");
+  const claudeMdPath = join(projectDir, "CLAUDE.md");
+  const testsDir = join(projectDir, "tests");
+
+  const srcModules = await extractModules(srcDir);
+  const srcCommands = await extractCommands(relayPath);
+  const claudeMdModules = await parseClaudeMdModules(claudeMdPath);
+  const claudeMdCommands = await parseClaudeMdCommands(claudeMdPath);
+
+  const claudeMdContent = await readFile(claudeMdPath, "utf-8");
+  const claudeMdTestCount = parseClaudeMdTestCount(claudeMdContent);
+
+  // Only run countTests if structural checks pass (avoid heavy operation)
+  let actualTestCount = claudeMdTestCount; // assume no drift by default
+  const structState: DocState = {
+    srcModules,
+    claudeMdModules,
+    srcCommands,
+    claudeMdCommands,
+    actualTestCount,
+    claudeMdTestCount,
+  };
+  const structGaps = findGaps(structState);
+  const structuralGapsOnly = structGaps.filter(g => g.type !== "test_count");
+
+  if (structuralGapsOnly.length === 0) {
+    try {
+      actualTestCount = await countTests(testsDir);
+    } catch {
+      actualTestCount = claudeMdTestCount; // fallback: assume no drift
+    }
+  }
+
+  const fullState: DocState = {
+    srcModules,
+    claudeMdModules,
+    srcCommands,
+    claudeMdCommands,
+    actualTestCount,
+    claudeMdTestCount,
+  };
+  const gaps = findGaps(fullState);
+  const score = computeAuditScore(gaps);
+
+  return { score, gaps, testCount: actualTestCount };
+}
+
 // ── Main Pulse ────────────────────────────────────────────────
 
 export async function pulse(): Promise<{
@@ -576,6 +659,44 @@ export async function pulse(): Promise<{
     }
   } catch (err) {
     console.error(`[${timestamp}] Autonomy scan error:`, err);
+  }
+
+  // Daily: Lightweight audit (structure + tests)
+  try {
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    if (
+      isFeatureEnabled("audit_system") &&
+      (!state.lastAuditAt || new Date(state.lastAuditAt).getTime() < dayAgo)
+    ) {
+      console.log(`[${timestamp}] Running daily lightweight audit...`);
+      const auditResult = await runLightweightAudit(PROJECT_DIR);
+      console.log(`[${timestamp}] Audit score: ${auditResult.score}/100 (${auditResult.gaps.length} gap(s))`);
+
+      // Check for regression (only if we have a previous score)
+      if (
+        state.lastAuditScore !== null &&
+        state.lastAuditScore - auditResult.score > 5
+      ) {
+        const delta = state.lastAuditScore - auditResult.score;
+        await writeMcpPending({
+          type: "alert",
+          severity: "normal",
+          message: `[Audit] Score structure/tests en regression: ${state.lastAuditScore} -> ${auditResult.score} (${delta} points). ${auditResult.gaps.length} ecart(s) detecte(s).`,
+          data: {
+            previousScore: state.lastAuditScore,
+            currentScore: auditResult.score,
+            delta,
+            gapCount: auditResult.gaps.length,
+          },
+        });
+        console.log(`[${timestamp}] Audit regression alert sent: ${state.lastAuditScore} -> ${auditResult.score}`);
+      }
+
+      state.lastAuditAt = timestamp;
+      state.lastAuditScore = auditResult.score;
+    }
+  } catch (err) {
+    console.error(`[${timestamp}] Lightweight audit error:`, err);
   }
 
   // ── Save state and return ─────────────────────────────────

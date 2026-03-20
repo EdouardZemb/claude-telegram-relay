@@ -1,5 +1,6 @@
 {
   "model_cascade": false,
+  "audit_system": false,
   "heartbeat": true,
   "explore_mode": true,
   "job_manager": true,
