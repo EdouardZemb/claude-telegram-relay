@@ -1,7 +1,7 @@
 /**
  * Unit Tests — S44 T8: Adaptive Pipeline (SOLO, LIGHT) + Fusion Planner
  *
- * Tests pipeline definitions, DAG structures, planner agent, difficulty-based
+ * Tests pipeline definitions, planner agent, difficulty-based
  * pipeline selection, and router integration.
  */
 
@@ -17,14 +17,6 @@ import {
   classifyPipeline,
   classifyAdaptivePipeline,
 } from "../../src/orchestrator";
-import {
-  getDAG,
-  SOLO_DAG,
-  LIGHT_DAG,
-  DEFAULT_DAG,
-  QUICK_DAG,
-  buildSequentialDAG,
-} from "../../src/dag-executor";
 import {
   routerPipelineToRoles,
   scoreToPipeline,
@@ -64,53 +56,6 @@ describe("Pipeline Definitions (S44 T8)", () => {
 
   it("REVIEW_PIPELINE is unchanged", () => {
     expect(REVIEW_PIPELINE).toEqual(["qa", "architect"]);
-  });
-});
-
-// ── DAG Definitions ──────────────────────────────────────────
-
-describe("DAG Definitions (S44 T8)", () => {
-  it("SOLO_DAG has dev with no dependencies", () => {
-    expect(SOLO_DAG.size).toBe(1);
-    expect(SOLO_DAG.get("dev")).toEqual([]);
-  });
-
-  it("LIGHT_DAG has planner -> dev -> qa", () => {
-    expect(LIGHT_DAG.size).toBe(3);
-    expect(LIGHT_DAG.get("planner")).toEqual([]);
-    expect(LIGHT_DAG.get("dev")).toEqual(["planner"]);
-    expect(LIGHT_DAG.get("qa")).toEqual(["dev"]);
-  });
-
-  it("getDAG returns SOLO_DAG for SOLO type", () => {
-    const dag = getDAG("SOLO");
-    expect(dag.size).toBe(1);
-    expect(dag.has("dev")).toBe(true);
-  });
-
-  it("getDAG returns LIGHT_DAG for LIGHT type", () => {
-    const dag = getDAG("LIGHT");
-    expect(dag.size).toBe(3);
-    expect(dag.has("planner")).toBe(true);
-    expect(dag.has("dev")).toBe(true);
-    expect(dag.has("qa")).toBe(true);
-  });
-
-  it("getDAG returns DEFAULT_DAG for DEFAULT type", () => {
-    const dag = getDAG("DEFAULT");
-    expect(dag.size).toBe(5);
-  });
-
-  it("getDAG returns QUICK_DAG for QUICK type", () => {
-    const dag = getDAG("QUICK");
-    expect(dag.size).toBe(2);
-  });
-
-  it("getDAG falls back to sequential for unknown types with roles", () => {
-    const dag = getDAG("UNKNOWN", ["dev", "qa"]);
-    expect(dag.size).toBe(2);
-    expect(dag.get("dev")).toEqual([]);
-    expect(dag.get("qa")).toEqual(["dev"]);
   });
 });
 

@@ -680,7 +680,7 @@ export function applyWorkflowSuggestions(
         reason: opts.reason || `Applied ${applied.length} workflow suggestions`,
         changes,
         configVersion: config.version,
-      }).catch(() => {});
+      }).catch((err) => console.error("logWorkflowAudit fire-and-forget error:", err));
     }
   }
 

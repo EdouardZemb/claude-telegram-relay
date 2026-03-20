@@ -177,7 +177,7 @@ describe("README AC-3: reflects all features up to S31", () => {
     await readmePromise;
     // Core features that must be in README per CLAUDE.md
     const features = [
-      "blackboard", "dag-executor",
+      "blackboard",
       "gate-evaluator", "adversarial", "notification-queue",
       "cost-tracking", "MCP",
     ];

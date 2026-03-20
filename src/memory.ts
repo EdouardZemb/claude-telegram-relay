@@ -28,7 +28,7 @@ import { enqueue } from "./notification-queue.ts";
 // ── Interfaces ───────────────────────────────────────────────
 
 /** Full memory table row */
-export interface MemoryRecord {
+interface MemoryRecord {
   id: string;
   created_at: string;
   updated_at: string;
@@ -45,7 +45,7 @@ export interface MemoryRecord {
 }
 
 /** memory_links table row */
-export interface MemoryLink {
+interface MemoryLink {
   id: string;
   source_id: string;
   target_id: string;
@@ -55,7 +55,7 @@ export interface MemoryLink {
 }
 
 /** Result from match_memory RPC / search Edge Function */
-export interface MemorySearchResult {
+interface MemorySearchResult {
   id: string;
   content: string;
   type: string;
@@ -64,10 +64,10 @@ export interface MemorySearchResult {
 }
 
 /** Result count from archive_old_memories RPC (returns integer) */
-export type MemoryArchiveResult = number;
+type MemoryArchiveResult = number;
 
 /** A fact from get_facts RPC */
-export interface FactRecord {
+interface FactRecord {
   id: string;
   content: string;
   importance_score: number;
@@ -75,7 +75,7 @@ export interface FactRecord {
 }
 
 /** A goal from get_active_goals RPC */
-export interface GoalRecord {
+interface GoalRecord {
   id: string;
   content: string;
   deadline: string | null;
@@ -84,7 +84,7 @@ export interface GoalRecord {
 }
 
 /** An idea from memory (alias for the Idea interface with all fields) */
-export interface IdeaRecord {
+interface IdeaRecord {
   id: string;
   content: string;
   type: string;
@@ -115,7 +115,7 @@ export interface MemoryChain {
 }
 
 /** Memory statistics summary */
-export interface MemoryStats {
+interface MemoryStats {
   totalFacts: number;
   totalGoals: number;
   totalIdeas: number;
@@ -737,7 +737,7 @@ const COMPLEMENT_THRESHOLD = 0.75;
 const ACTIONABILITY_THRESHOLD = 5;
 
 /** A semantically similar existing memory */
-export interface SimilarMemory {
+interface SimilarMemory {
   id: string;
   content: string;
   type: string;
@@ -1263,7 +1263,7 @@ export function classifyLinkContent(sourceContent: string, targetContent: string
 // ── Memory Chains (S41-01) ──────────────────────────────────
 
 /** A node in a multi-hop memory chain (alias for MemoryChain) */
-export type MemoryChainNode = MemoryChain;
+type MemoryChainNode = MemoryChain;
 
 /** Max nodes in a chain traversal */
 const MAX_CHAIN_NODES = 50;

@@ -694,7 +694,7 @@ export async function orchestrate(
       if (pipelineSessionId) {
         emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
           model: agent?.model, effort: agent?.effort,
-        }).catch(() => {});
+        }).catch((err) => console.error("emitAgentEvent spawned error:", err));
       }
 
       // S22-04: Retry loop with exponential backoff
@@ -743,7 +743,7 @@ export async function orchestrate(
           tokens_output: result!.tokensOutput,
           cost_usd: result!.costUsd,
           ...(result!.error ? { error: result!.error } : {}),
-        }).catch(() => {});
+        }).catch((err) => console.error("emitAgentEvent completed/failed error:", err));
       }
 
       // S38: Detect conflicts in working memory after agent completes
@@ -793,7 +793,7 @@ export async function orchestrate(
               }
               emitAgentEvent(supabase, pipelineSessionId!, q.from, "clarification_requested", {
                 target_agent: q.to, question: q.content.substring(0, 200),
-              }).catch(() => {});
+              }).catch((err) => console.error("emitAgentEvent clarification error:", err));
             }
           }
         } catch {
@@ -1008,7 +1008,7 @@ export async function orchestrate(
           retryAttempt: retryCount,
           context: "orchestration",
           model: agent?.model,
-        }).catch(() => {});
+        }).catch((err) => console.error("logCost orchestration error:", err));
       }
 
       if (options.onProgress) {

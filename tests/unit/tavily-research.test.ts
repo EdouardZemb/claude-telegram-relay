@@ -28,10 +28,6 @@ import {
   type PipelineType,
 } from "../../src/orchestrator";
 import {
-  getDAG,
-  RESEARCH_DAG,
-} from "../../src/dag-executor";
-import {
   parseRouterResponse,
   routerPipelineToRoles,
 } from "../../src/llm-router";
@@ -223,31 +219,6 @@ describe("classifyPipeline with RESEARCH", () => {
   it("RESEARCH type is valid PipelineType", () => {
     const ptype: PipelineType = "RESEARCH";
     expect(ptype).toBe("RESEARCH");
-  });
-});
-
-// ── RESEARCH DAG ───────────────────────────────────────────────
-
-describe("RESEARCH DAG", () => {
-  it("defines explorer -> planner -> dev -> qa dependency chain", () => {
-    expect(RESEARCH_DAG.get("explorer")).toEqual([]);
-    expect(RESEARCH_DAG.get("planner")).toEqual(["explorer"]);
-    expect(RESEARCH_DAG.get("dev")).toEqual(["planner"]);
-    expect(RESEARCH_DAG.get("qa")).toEqual(["dev"]);
-  });
-
-  it("has 4 nodes", () => {
-    expect(RESEARCH_DAG.size).toBe(4);
-  });
-
-  it("getDAG returns RESEARCH DAG for RESEARCH type", () => {
-    const dag = getDAG("RESEARCH");
-    expect(dag.has("explorer")).toBe(true);
-    expect(dag.has("planner")).toBe(true);
-    expect(dag.has("dev")).toBe(true);
-    expect(dag.has("qa")).toBe(true);
-    expect(dag.get("explorer")).toEqual([]);
-    expect(dag.get("planner")).toEqual(["explorer"]);
   });
 });
 

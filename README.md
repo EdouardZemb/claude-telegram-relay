@@ -92,11 +92,9 @@ graph TB
 
     subgraph Pipeline["Agent Pipeline"]
         Orch["orchestrator.ts"]
-        DAG["dag-executor.ts"]
         Super["supervisor.ts"]
         BB["blackboard.ts"]
         Gates["gates.ts +\ngate-evaluator.ts"]
-        FanOut["fan-out.ts +\nworktree.ts"]
     end
 
     subgraph Agents["BMad Agents"]
@@ -121,11 +119,8 @@ graph TB
     Loader --> Composers
     Composers --> BotCtx
     BotCtx --> Pipeline
-    Orch --> DAG
-    DAG --> Super
     Orch --> BB
     Orch --> Gates
-    DAG --> FanOut
     Pipeline --> Agents
     Agents --> Supa
     Agents --> CI
@@ -151,7 +146,7 @@ sequenceDiagram
         O->>A: Analyst → feasibility + risks
         O->>A: PM → subtasks + priorities
         O->>A: Architect → design + decisions
-        O->>A: Dev → code + tests (in worktree)
+        O->>A: Dev → code + tests
         O->>A: QA → review + score
     end
 
@@ -233,13 +228,11 @@ Defined in `config/workflow.yaml`. Each step has configurable checkpoints (off /
 
 ### Parallel Execution
 
-DAG-based parallel scheduling for multi-agent pipelines:
+Sequential multi-agent pipelines with retry support:
 
-- Independent agents run concurrently (e.g., analyst + PM in parallel)
-- Fan-out N Dev agents on subtasks, each in an isolated git worktree
+- Configurable pipeline types (DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH)
 - Deterministic TypeScript supervisor: retry / skip / escalate (zero LLM cost)
 - Semaphore-gated concurrency (default max 3)
-- Activate with `--parallel` flag
 
 ### Blackboard Architecture
 
@@ -499,9 +492,7 @@ src/                        54 TypeScript modules
   commands/                 10 Composer modules (33 commands + 4 handlers)
   orchestrator.ts           Multi-agent pipeline engine
   blackboard.ts             Shared workspace (JSONB, versioned)
-  dag-executor.ts           Parallel agent scheduler
   supervisor.ts             Deterministic retry/skip/escalate
-  fan-out.ts + worktree.ts  Parallel dev agents in git worktrees
   memory.ts                 Facts, goals, ideas, semantic search
   gates.ts                  3-gate quality enforcement
   gate-evaluator.ts         LLM-based gate scoring

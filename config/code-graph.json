@@ -31,44 +31,6 @@
       "lineCount": 224
     },
     {
-      "id": "src/worktree.ts",
-      "exports": [
-        {
-          "name": "createWorktree",
-          "kind": "function"
-        },
-        {
-          "name": "pushWorktree",
-          "kind": "function"
-        },
-        {
-          "name": "mergeWorktrees",
-          "kind": "function"
-        },
-        {
-          "name": "cleanupWorktree",
-          "kind": "function"
-        },
-        {
-          "name": "cleanupAllWorktrees",
-          "kind": "function"
-        },
-        {
-          "name": "detectFileOverlap",
-          "kind": "function"
-        },
-        {
-          "name": "WorktreeInfo",
-          "kind": "interface"
-        },
-        {
-          "name": "MergeResult",
-          "kind": "interface"
-        }
-      ],
-      "lineCount": 196
-    },
-    {
       "id": "src/trust-scores.ts",
       "exports": [
         {
@@ -2407,72 +2369,6 @@
       "lineCount": 262
     },
     {
-      "id": "src/dag-executor.ts",
-      "exports": [
-        {
-          "name": "getDAG",
-          "kind": "function"
-        },
-        {
-          "name": "buildSequentialDAG",
-          "kind": "function"
-        },
-        {
-          "name": "executeDag",
-          "kind": "function"
-        },
-        {
-          "name": "DAGNode",
-          "kind": "interface"
-        },
-        {
-          "name": "DAGExecutionResult",
-          "kind": "interface"
-        },
-        {
-          "name": "DAGNodeStatus",
-          "kind": "type"
-        },
-        {
-          "name": "DAGDefinition",
-          "kind": "type"
-        },
-        {
-          "name": "RunAgentFn",
-          "kind": "type"
-        },
-        {
-          "name": "OnNodeFailedFn",
-          "kind": "type"
-        },
-        {
-          "name": "DEFAULT_DAG",
-          "kind": "const"
-        },
-        {
-          "name": "QUICK_DAG",
-          "kind": "const"
-        },
-        {
-          "name": "REVIEW_DAG",
-          "kind": "const"
-        },
-        {
-          "name": "SOLO_DAG",
-          "kind": "const"
-        },
-        {
-          "name": "LIGHT_DAG",
-          "kind": "const"
-        },
-        {
-          "name": "RESEARCH_DAG",
-          "kind": "const"
-        }
-      ],
-      "lineCount": 278
-    },
-    {
       "id": "src/cost-estimate.ts",
       "exports": [
         {
@@ -4548,23 +4444,6 @@
         "AgentRole"
       ],
       "isTypeOnly": true
-    },
-    {
-      "source": "src/dag-executor.ts",
-      "target": "src/orchestrator.ts",
-      "imports": [
-        "AgentRole",
-        "AgentStepResult"
-      ],
-      "isTypeOnly": true
-    },
-    {
-      "source": "src/dag-executor.ts",
-      "target": "src/semaphore.ts",
-      "imports": [
-        "Semaphore"
-      ],
-      "isTypeOnly": false
     },
     {
       "source": "src/cost-estimate.ts",

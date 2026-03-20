@@ -36,12 +36,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Intelligent memory: classification, importance scoring, contradiction detection, clustering |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
-| `orchestrator.ts` | Multi-agent pipeline orchestrator with DAG-based parallel execution |
+| `orchestrator.ts` | Multi-agent pipeline orchestrator with sequential execution and retry |
 | `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
 | `deliberation.ts` | Deliberation protocol: paired reviewer examines strategic agent output |
-| `dag-executor.ts` | DAG-based parallel agent scheduler with semaphore concurrency |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
-| `worktree.ts` | Git worktree lifecycle: create, push, merge, cleanup |
 | `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
 | `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection |
@@ -174,7 +172,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    58 TypeScript modules (core logic)
+src/                    56 TypeScript modules (core logic)
   commands/             11 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
@@ -183,7 +181,32 @@ mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
 tests/                  2720 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
+docs/specs/             Formal specifications (SPEC-{name}.md)
+docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
+docs/explorations/      Exploration reports (EXPLORE-{name}.md)
+.claude/agents/         11 specialized agents (dev pipeline)
+.claude/skills/         7 skills (dev pipeline orchestration)
 ```
+
+### Dev Pipeline (maturation code)
+
+Pour toute modification non triviale, utiliser le pipeline de maturation :
+
+| Commande | Phase | Description |
+|----------|-------|-------------|
+| `/dev-explore` | 0 | Exploration structuree avant spec (optionnel, verdict GO/PIVOT/DROP) |
+| `/dev-spec` | 1 | Specification formelle 9 sections + V-criteres |
+| `/dev-challenge` | 2 | Challenge adversarial (3 agents paralleles) + analyse d'impact |
+| `/dev-implement` | 3 | Implementation TDD (Test Architect → Implementer → Tester) |
+| `/dev-review` | 4 | Revue de code |
+| `/dev-doc` | 5 | Mise a jour documentation |
+| `/dev-pipeline` | * | Meta-orchestrateur (toutes les phases bout en bout) |
+
+Workflow complet : `/dev-spec` → quality gate → `/dev-challenge` + Impact → `/dev-implement` (TDD) → conformance → review → `/dev-doc` → commit
+
+Reprise en contexte frais : `/dev-pipeline --from {phase} docs/specs/SPEC-{name}.md`
+
+Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/WORKFLOW-DEV.md](docs/WORKFLOW-DEV.md)
 
 ### Conventions
 
