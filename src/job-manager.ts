@@ -199,6 +199,10 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
       if (prUrl) { kb.url("Voir la PR", prUrl); hasButtons = true; }
       if (job.taskId) { kb.text("Terminer la tache", `jc_done:${job.taskId.substring(0, 8)}`); hasButtons = true; }
       break;
+    case "autopipeline-batch":
+      kb.text("Voir le backlog", "jc_backlog");
+      hasButtons = true;
+      break;
     case "prd-decompose":
     case "plan":
       kb.text("Voir le backlog", "jc_backlog");
@@ -252,6 +256,9 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       const taskCount = parts[1] || "?";
       const details = parts.slice(2).join("|");
       message = `Decomposition terminée (${elapsed})\n${taskCount} taches creees\n\n${details}`;
+    } else if (job.type === "autopipeline-batch" && job.result?.startsWith("BATCH_COMPLETE:")) {
+      const summary = job.result.replace("BATCH_COMPLETE:", "").split("\n")[0];
+      message = `Implementation batch terminée (${elapsed})\nResultat : ${summary} taches reussies`;
     } else {
       message = `Job ${job.type} terminé (${elapsed})\n${job.result || ""}`;
     }

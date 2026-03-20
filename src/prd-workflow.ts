@@ -300,6 +300,7 @@ export async function decomposePRDIntoTasks(
       priority: st.priority,
       project: projectSlug,
       project_id: projectId,
+      tags: [`prd:${prd.id}`],
     });
     if (task) {
       if (st.acceptance_criteria) {

@@ -448,7 +448,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       }
 
       if (data.startsWith("prdwf_launch:")) {
-        // F5: User confirms implementation launch
+        // F5: User confirms implementation launch — run ALL PRD tasks
         const prdPrefix = data.replace("prdwf_launch:", "");
         const prd = await getPRD(bctx.supabase, prdPrefix);
         if (!prd) {
@@ -457,42 +457,33 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         }
         await ctx.answerCallbackQuery({ text: "Lancement..." });
 
-        // Get tasks from the PRD's project backlog
+        // Get tasks tagged with this PRD (created by decomposePRDIntoTasks)
         const { data: tasks } = await bctx.supabase.from("tasks")
-          .select("id, title, priority")
-          .eq("project", prd.project)
+          .select("*")
+          .contains("tags", [`prd:${prd.id}`])
           .eq("status", "backlog")
-          .order("priority", { ascending: true })
-          .limit(20);
+          .order("priority", { ascending: true });
 
         if (!tasks || tasks.length === 0) {
-          await ctx.editMessageText("Aucune tache en backlog a executer. Lance /backlog pour verifier.");
+          await ctx.editMessageText("Aucune tache en backlog pour ce PRD. Lance /backlog pour verifier.");
           return;
         }
 
-        // Launch autopipeline for the first task via job manager
+        // Launch batch pipeline for ALL PRD tasks via job manager
         if (isJobManagerEnabled()) {
-          const { runAutoPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
-          const firstTask = tasks[0];
-          // Fetch full task object (runAutoPipeline expects Task, not just id)
-          const { data: fullTask } = await bctx.supabase.from("tasks")
-            .select("*")
-            .eq("id", firstTask.id)
-            .single();
-          if (!fullTask) {
-            await ctx.editMessageText("Erreur: tache introuvable en base.");
-            return;
-          }
+          const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
           const launchFn = async (): Promise<string> => {
-            const result = await runAutoPipeline(bctx.supabase!, fullTask, { autoPipeline: true });
-            return formatPipelineResult(result);
+            const results = await runBatchPipeline(bctx.supabase!, tasks, { autoPipeline: true });
+            const ok = results.filter(r => r.success).length;
+            const lines = results.map(r => formatPipelineResult(r));
+            return `BATCH_COMPLETE:${ok}/${results.length}\n\n${lines.join("\n\n---\n\n")}`;
           };
-          const jobId = await launchJob("autopipeline", cId, launchFn, {
+          const taskList = tasks.map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`).join("\n");
+          const jobId = await launchJob("autopipeline-batch", cId, launchFn, {
             messageThreadId: tId,
-            taskId: firstTask.id,
           });
           await ctx.editMessageText(
-            `Implementation lancee en arriere-plan (job: ${jobId})\nTache : ${firstTask.title} [${firstTask.id.substring(0, 8)}]`
+            `Implementation lancee pour ${tasks.length} taches (job: ${jobId})\n\n${taskList}`
           );
         } else {
           await ctx.editMessageText("Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.");
