@@ -51,7 +51,7 @@ Le projet a accumule 56 modules TypeScript et de la dette technique au fil des s
 
 ---
 
-## Phase 3 — Micro-corrections [A FAIRE — effort faible]
+## Phase 3 — Micro-corrections [DONE]
 
 > Severite : MIXTE — 1 bug critique + nettoyage rapide
 > Estimation : 30 minutes, pas besoin de pipeline complet
@@ -77,9 +77,11 @@ Le projet a accumule 56 modules TypeScript et de la dette technique au fil des s
 | D3 | CLAUDE.md : module count inconsistances possibles | Verifier le count reel vs declare |
 
 **Actions requises :**
-- [ ] Fix heartbeat.ts:562 (ajouter `const { error } = await ...`)
-- [ ] Supprimer flag `explore_mode` de config/features.json
-- [ ] Mettre a jour CLAUDE.md (tests, descriptions, counts)
+- [x] Fix heartbeat.ts:562 (ajouter `const { error } = await ...`)
+- [x] Supprimer flag `explore_mode` de config/features.json
+- [x] Mettre a jour CLAUDE.md (tests 2690, modules 58, composers 13, code-review.ts)
+
+> Commit : fd5931a | Pipeline : docs/reviews/pipeline-micro-corrections.md
 
 ---
 
@@ -182,7 +184,7 @@ Le projet a accumule 56 modules TypeScript et de la dette technique au fil des s
 |-------|--------|------|-----------|
 | 1. Simplification code mort + zz-messages | DONE | 2026-03-20 | 34e8dcb |
 | 2. Migration schema Supabase | DONE | 2026-03-20 | a72e978 |
-| 3. Micro-corrections (heartbeat, flags, docs) | A FAIRE | — | — |
+| 3. Micro-corrections (heartbeat, flags, docs) | DONE | 2026-03-20 | fd5931a |
 | 4. Nettoyage schema (tables/RPCs mortes) | A EVALUER | — | — |
 | 5. Decomposition gros fichiers | A PLANIFIER | — | — |
 | 6. Resilience et monitoring | FUTUR | — | — |
