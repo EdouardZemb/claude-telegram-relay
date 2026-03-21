@@ -19,6 +19,7 @@ import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
 import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
 import { loadGraph, formatGraphStatsForMonitor } from "../code-graph.ts";
 import { getActiveSessionCount } from "../conversation-session.ts";
+import { getLlmOpsSnapshot, formatLlmOpsSnapshot } from "../llm-ops.ts";
 
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -230,6 +231,16 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         }
       } catch {
         // Best-effort monitoring
+      }
+    }
+
+    // LLM-Ops monitoring snapshot
+    if (supabase) {
+      try {
+        const llmOpsSnapshot = await getLlmOpsSnapshot(supabase);
+        parts.push("", formatLlmOpsSnapshot(llmOpsSnapshot));
+      } catch {
+        // Best-effort LLM-Ops monitoring
       }
     }
 

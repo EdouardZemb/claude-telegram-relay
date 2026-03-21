@@ -67,7 +67,7 @@ export interface AgentPromptContext {
 
 const agentCache = new Map<string, AgentYaml>();
 
-function loadAgentYaml(agentId: string): AgentYaml | null {
+export function loadAgentYaml(agentId: string): AgentYaml | null {
   if (agentCache.has(agentId)) return agentCache.get(agentId)!;
 
   const filePath = join(AGENTS_DIR, `${agentId}.agent.yaml`);

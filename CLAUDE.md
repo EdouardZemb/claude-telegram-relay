@@ -42,6 +42,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
 | `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
 | `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
+| `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role |
 | `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds |
@@ -128,7 +129,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`, `prompt_versions`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `match_documents`, `archive_old_memories`, `bump_memory_access`
 
