@@ -31,6 +31,7 @@ import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
 import { Semaphore } from "./semaphore.ts";
 import { routeTask, routerPipelineToRoles, type RouterDecision } from "./llm-router.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -184,6 +185,18 @@ export async function runAutoPipeline(
     }
   }
   await progress(`Story file genere: ${story.acceptanceCriteria.length} ACs, ${story.implementationSteps.length} steps.`);
+
+  // Phase 2b: Spec-lite (P1) — generate proto-spec if flag is active
+  // R1: Only on DEFAULT and LIGHT. R4: Behind spec_phase_lite flag.
+  if (isFeatureEnabled("spec_phase_lite") && (pipelineType === "DEFAULT" || pipelineType === "LIGHT")) {
+    await progress("Phase 2b: Generation de la proto-spec (spec-lite)...");
+    const { generateProtoSpec } = await import("./spec-lite.ts");
+    const protoSpec = await generateProtoSpec(task, story);
+    const vcCount = protoSpec.v_criteria.length;
+    await progress(
+      `Proto-spec generee: ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`
+    );
+  }
 
   // Phase 3: Analysis (optional)
   if (includeAnalysis) {

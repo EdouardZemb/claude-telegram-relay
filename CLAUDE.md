@@ -18,7 +18,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ |
 | `commands/help.ts` | Composer: /help, /workflow, /agents, /status, /monitor |
 | `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
-| `commands/execution.ts` | Composer: /exec, /orchestrate, /autopipeline + gate callbacks |
+| `commands/execution.ts` | Composer: /exec, /orchestrate (--skip-challenge), /autopipeline + gate/challenge callbacks |
 | `commands/planning.ts` | Composer: /plan, /prd, /planify + PRD validation callbacks |
 | `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
 | `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
@@ -43,8 +43,10 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
 | `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
-| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection |
-| `agent-schemas.ts` | Typed JSON output schemas per agent role |
+| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, V-criteria conformance check |
+| `adversarial-challenge.ts` | P2 adversarial challenge (Devil's Advocate) + E1 impact analysis before dev |
+| `spec-lite.ts` | P1 lightweight spec phase: proto-spec with V-criteria and impacted files |
+| `agent-schemas.ts` | Typed JSON output schemas per agent role, ProtoSpec/AdversarialResult/ImpactAnalysisResult |
 | `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent role |
 | `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto selection and retries |
@@ -173,14 +175,14 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    58 TypeScript modules (core logic)
+src/                    61 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2690 tests (unit + integration + E2E)
+tests/                  2816 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -212,7 +214,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2690 tests, all must pass before merge)
+- Tests: `bun test` (2816 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`

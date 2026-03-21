@@ -5,5 +5,7 @@
   "prd_to_deploy": true,
   "exploration_phase": false,
   "exploration_gate": false,
-  "llmops_monitoring": false
+  "llmops_monitoring": true,
+  "spec_phase_lite": false,
+  "adversarial_challenge": false
 }
