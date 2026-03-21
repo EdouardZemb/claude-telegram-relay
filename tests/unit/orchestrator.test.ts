@@ -10,6 +10,8 @@ import {
   DEFAULT_PIPELINE,
   QUICK_PIPELINE,
   REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+  LIGHT_PIPELINE,
   formatOrchestrationResult,
   selectPipeline,
   classifyPipeline,
@@ -18,6 +20,7 @@ import {
   type AgentStepResult,
 } from "../../src/orchestrator";
 import type { Task } from "../../src/tasks";
+import { isFeatureEnabled, loadFeatures } from "../../src/feature-flags";
 
 describe("Pipeline Definitions", () => {
   it("DEFAULT_PIPELINE includes all main agents in order", () => {
@@ -347,5 +350,82 @@ describe("classifyPipeline", () => {
 
   it("classifies feature tasks as DEFAULT", () => {
     expect(classifyPipeline(makeTask({ title: "Implement new auth system", priority: 1 }))).toBe("DEFAULT");
+  });
+});
+
+// ── P1/P2/E1/P3 Feature Flags ────────────────────────────────
+
+describe("[V14] Feature Flags for P1/P2/E1/P3", () => {
+  it("[V14] config/features.json contains spec_phase_lite=false", () => {
+    const flags = loadFeatures();
+    expect(flags.spec_phase_lite).toBe(false);
+  });
+
+  it("[V14] config/features.json contains adversarial_challenge=false", () => {
+    const flags = loadFeatures();
+    expect(flags.adversarial_challenge).toBe(false);
+  });
+
+  it("spec_phase_lite is disabled by default", () => {
+    expect(isFeatureEnabled("spec_phase_lite")).toBe(false);
+  });
+
+  it("adversarial_challenge is disabled by default", () => {
+    expect(isFeatureEnabled("adversarial_challenge")).toBe(false);
+  });
+
+  it("[V15] existing flags are unchanged after adding new ones", () => {
+    const flags = loadFeatures();
+    expect(flags.heartbeat).toBe(true);
+    expect(flags.job_manager).toBe(true);
+    expect(flags.auto_document_search).toBe(true);
+    expect(flags.prd_to_deploy).toBe(true);
+    expect(flags.exploration_phase).toBe(false);
+    expect(flags.exploration_gate).toBe(false);
+    expect(flags.llmops_monitoring).toBe(true);
+  });
+});
+
+describe("[V12] P1/P2/E1/P3 pipeline scope guards", () => {
+  function makeTask(overrides: Partial<Task> = {}): Task {
+    return {
+      id: "test-scope",
+      title: "Test task",
+      status: "backlog",
+      priority: 2,
+      created_at: new Date().toISOString(),
+      project: "test",
+      ...overrides,
+    } as Task;
+  }
+
+  it("QUICK pipeline is not affected by P1/P2/P3", () => {
+    // V12: QUICK, SOLO, REVIEW unaffected even if flags active
+    // (the orchestrator checks pipelineTypeForFlags before calling P1/P2/P3)
+    expect(QUICK_PIPELINE).toEqual(["dev", "qa"]);
+    expect(QUICK_PIPELINE).not.toContain("spec-lite");
+    expect(QUICK_PIPELINE).not.toContain("adversarial");
+  });
+
+  it("SOLO pipeline is not affected by P1/P2/P3", () => {
+    expect(SOLO_PIPELINE).toEqual(["dev"]);
+  });
+
+  it("REVIEW pipeline is not affected by P1/P2/P3", () => {
+    expect(REVIEW_PIPELINE).toEqual(["qa", "architect"]);
+  });
+
+  it("DEFAULT pipeline has dev preceded by architect (P2 insertion point)", () => {
+    const devIdx = DEFAULT_PIPELINE.indexOf("dev");
+    const archIdx = DEFAULT_PIPELINE.indexOf("architect");
+    expect(devIdx).toBeGreaterThan(archIdx);
+    // P2 inserts between architect and dev (F-DA-2)
+  });
+
+  it("LIGHT pipeline has dev preceded by planner (P2 insertion point)", () => {
+    const devIdx = LIGHT_PIPELINE.indexOf("dev");
+    const plannerIdx = LIGHT_PIPELINE.indexOf("planner");
+    expect(devIdx).toBeGreaterThan(plannerIdx);
+    // F-DA-2: P2 inserts by detecting pre-dev agent, not by gateMap
   });
 });

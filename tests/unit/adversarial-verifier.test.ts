@@ -10,6 +10,7 @@ import {
   parseDriftReport,
   formatDriftReport,
   verifySpecVsImplementation,
+  checkConformance,
   type DriftReport,
 } from "../../src/adversarial-verifier";
 
@@ -173,5 +174,56 @@ describe("formatDriftReport", () => {
     const formatted = formatDriftReport(report);
     expect(formatted).toContain("100%");
     expect(formatted).toContain("PASS");
+  });
+});
+
+// ── checkConformance (V-criteria) ────────────────────────────
+
+describe("[V6] checkConformance", () => {
+  it("[V6] skips on QUICK pipeline", async () => {
+    const protoSpec = {
+      objective: "Test",
+      v_criteria: [{ id: "V1", description: "Test criterion", level: "unit" }],
+    };
+
+    const result = await checkConformance(protoSpec, { summary: "done" }, "QUICK");
+    expect(result).toBeNull();
+  });
+
+  it("[V13] returns warning for empty V-criteria", async () => {
+    const protoSpec = {
+      objective: "Test",
+      v_criteria: [],
+    };
+
+    const result = await checkConformance(protoSpec, { summary: "done" });
+    expect(result).not.toBeNull();
+    expect(result!.coverage_score).toBe(0);
+    expect(result!.overall_verdict).toBe("warning");
+  });
+
+  it("returns fail with items for null dev output", async () => {
+    const protoSpec = {
+      objective: "Test",
+      v_criteria: [
+        { id: "V1", description: "Test 1", level: "unit" },
+        { id: "V2", description: "Test 2", level: "integration" },
+      ],
+    };
+
+    const result = await checkConformance(protoSpec, null);
+    expect(result).not.toBeNull();
+    expect(result!.coverage_score).toBe(0);
+    expect(result!.overall_verdict).toBe("fail");
+    expect(result!.drift_items).toHaveLength(2);
+    expect(result!.drift_items[0].fr_id).toBe("V1");
+    expect(result!.drift_items[0].status).toBe("missing");
+    expect(result!.drift_items[1].fr_id).toBe("V2");
+  });
+
+  it("returns warning for null proto-spec", async () => {
+    const result = await checkConformance(null as any, { summary: "done" });
+    expect(result).not.toBeNull();
+    expect(result!.overall_verdict).toBe("warning");
   });
 });

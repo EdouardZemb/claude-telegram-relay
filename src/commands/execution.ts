@@ -28,8 +28,42 @@ import { findLatestPipelineRun } from "../pipeline-state.ts";
 import { getSession, buildConversationContext, hasActiveSession } from "../conversation-session.ts";
 import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
 
+// F-DA-1: Map of session keys -> resolve callbacks for adversarial challenge pause/resume
+const challengeResolvers = new Map<string, (shouldContinue: boolean) => void>();
+
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
+
+  // F-DA-1: Callback handler for adversarial challenge resume/abort buttons
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+
+    if (data.startsWith("challenge_resume:") || data.startsWith("challenge_abort:")) {
+      const sessionKey = data.replace("challenge_resume:", "").replace("challenge_abort:", "");
+      const resolver = challengeResolvers.get(sessionKey);
+
+      if (resolver) {
+        const shouldContinue = data.startsWith("challenge_resume:");
+        challengeResolvers.delete(sessionKey);
+        resolver(shouldContinue);
+
+        await ctx.answerCallbackQuery({
+          text: shouldContinue ? "Pipeline repris." : "Pipeline abandonne.",
+        });
+        await ctx.reply(
+          shouldContinue
+            ? "Pipeline repris apres challenge adversarial."
+            : "Pipeline abandonne suite au challenge adversarial.",
+          bctx.threadOpts(ctx)
+        );
+      } else {
+        await ctx.answerCallbackQuery({ text: "Session expiree." });
+      }
+      return;
+    }
+
+    await next();
+  });
 
   // /exec — execute a task from the backlog using a sub-agent
   composer.command("exec", async (ctx) => {
@@ -214,10 +248,11 @@ export default function execution(bctx: BotContext): Composer<Context> {
     }
 
     const args = ctx.match?.trim() || "";
-    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--resume [sessionId]]
+    // Parse: /orchestrate <taskId> [pipeline] [--blackboard] [--resume [sessionId]] [--skip-challenge]
     // pipeline: "full" (default), "quick", "review", or comma-separated agent IDs
     const useBlackboard = args.includes("--blackboard");
     const useResume = args.includes("--resume");
+    const skipChallenge = args.includes("--skip-challenge"); // F-EC-4: skips P2+E1 together
     // Extract explicit session ID after --resume if present
     const resumeMatch = args.match(/--resume\s+([^\s-]\S*)/);
     const explicitResumeId = resumeMatch ? resumeMatch[1] : undefined;
@@ -225,6 +260,7 @@ export default function execution(bctx: BotContext): Composer<Context> {
       .replace(/--blackboard/g, "")
       .replace(/--resume\s+\S*/g, "")
       .replace(/--resume/g, "")
+      .replace(/--skip-challenge/g, "")
       .trim();
     const parts = cleanArgs.split(/\s+/);
     const idPrefix = parts[0];
@@ -232,7 +268,7 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     if (!idPrefix) {
       await ctx.reply(
-        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--resume]\n\n" +
+        "Usage: /orchestrate <id> [pipeline] [--blackboard] [--resume] [--skip-challenge]\n\n" +
         "Pipelines disponibles:\n" +
         "  full — Analyst -> PM -> Architect -> Dev -> QA (defaut)\n" +
         "  quick — Dev -> QA\n" +
@@ -240,7 +276,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
         "  custom — ex: /orchestrate abc pm,dev,qa\n\n" +
         "Options:\n" +
         "  --blackboard — Active le blackboard SDD (gates, verifier, tracabilite)\n" +
-        "  --resume [sessionId] — Reprendre depuis le dernier echec (ou un sessionId specifique)",
+        "  --resume [sessionId] — Reprendre depuis le dernier echec (ou un sessionId specifique)\n" +
+        "  --skip-challenge — Bypass le challenge adversarial (P2+E1) meme si le flag est actif",
         bctx.threadOpts(ctx)
       );
       return;
@@ -318,10 +355,43 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
     const bbLabel = useBlackboard ? "\nBlackboard: actif (gates + verifier)" : "";
     const resumeLabel = resumeSessionId ? `\nResume: ${resumeSessionId}` : "";
+    const challengeLabel = skipChallenge ? "\nChallenge: desactive (--skip-challenge)" : "";
 
     // ── Background job wrapper (S46) ────────────────────────────
     const orchestrateFn = async (progressFn: (msg: string) => Promise<void>): Promise<string> => {
       await updateTaskStatus(bctx.supabase!, task.id, "in_progress");
+
+      // F-DA-1: Build adversarial pause callback with inline buttons
+      const onAdversarialPause = async (adversarialResult: any, impactResult: any): Promise<boolean> => {
+        return new Promise<boolean>((resolve) => {
+          const sessionKey = `challenge_${task.id.substring(0, 8)}_${Date.now()}`;
+          const keyboard = new InlineKeyboard()
+            .text("Continuer", `challenge_resume:${sessionKey}`)
+            .text("Abandonner", `challenge_abort:${sessionKey}`);
+
+          const pauseMsg =
+            `CHALLENGE ADVERSARIAL — PAUSE\n\n` +
+            `${adversarialResult.stats.bloquants} finding(s) bloquant(s)\n` +
+            (impactResult ? `Impact: ${impactResult.risk_level}\n` : "") +
+            `\nChoisissez une action:`;
+
+          ctx.reply(pauseMsg, {
+            ...bctx.threadOpts(ctx),
+            reply_markup: keyboard,
+          }).catch((err: any) => console.error("challenge pause reply error:", err));
+
+          // Store the resolve callback for the callback handler
+          challengeResolvers.set(sessionKey, resolve);
+
+          // Timeout: auto-continue after 10 minutes
+          setTimeout(() => {
+            if (challengeResolvers.has(sessionKey)) {
+              challengeResolvers.delete(sessionKey);
+              resolve(true); // Auto-continue on timeout
+            }
+          }, 10 * 60 * 1000);
+        });
+      };
 
       const result = await orchestrate(bctx.supabase!, task, {
         pipeline,
@@ -330,6 +400,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
         resumeSessionId,
         conversationContext: convCtx || undefined,
         onProgress: progressFn,
+        skipChallenge,
+        onAdversarialPause,
       });
 
       if (result.success) {
@@ -343,12 +415,12 @@ export default function execution(bctx: BotContext): Composer<Context> {
       const threadId = bctx.getThreadId(ctx);
       const jobId = await launchJob("orchestrate", chatId, () => orchestrateFn(async () => {}), { taskId: task.id, messageThreadId: threadId });
       await ctx.reply(
-        `Job lance orchestrate (id: ${jobId})\nTache: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}`,
+        `Job lance orchestrate (id: ${jobId})\nTache: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}${challengeLabel}`,
         bctx.threadOpts(ctx)
       );
     } else {
       await ctx.reply(
-        `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}\nCa peut prendre plusieurs minutes...`,
+        `Orchestration lancee pour: ${task.title}\nPipeline: ${pipeline.join(" -> ")}${bbLabel}${resumeLabel}${challengeLabel}\nCa peut prendre plusieurs minutes...`,
         bctx.threadOpts(ctx)
       );
 

@@ -117,6 +117,11 @@ import {
   shouldExplore,
   type ExplorationScore,
 } from "./exploration-scoring.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { generateProtoSpec } from "./spec-lite.ts";
+import { runAdversarialChallenge, runImpactAnalysis } from "./adversarial-challenge.ts";
+import { checkConformance } from "./adversarial-verifier.ts";
+import type { ProtoSpec, AdversarialResult, ImpactAnalysisResult } from "./agent-schemas.ts";
 
 // Re-export pipeline selection for backward compatibility
 export {
@@ -447,6 +452,10 @@ export interface OrchestrateOptions {
   overlap?: boolean;
   /** P2: Rebuild agent context via buildAgentContext() between each agent (except the first) */
   refreshContext?: boolean;
+  /** Skip adversarial challenge (P2+E1) even if feature flag is active. F-EC-4: skips both P2 and E1 together */
+  skipChallenge?: boolean;
+  /** Callback to pause/resume pipeline on adversarial PAUSE (F-DA-1) */
+  onAdversarialPause?: (result: AdversarialResult, impact: ImpactAnalysisResult | null) => Promise<boolean>;
 }
 
 /**
@@ -666,6 +675,69 @@ export async function orchestrate(
 
     if (options.onProgress) {
       await options.onProgress("Blackboard initialise" + (bbFallback ? " (in-memory fallback)" : ""));
+    }
+  }
+
+  // ── P1: Spec-lite phase (proto-spec with V-criteria) ──────────
+  // R1: Only on DEFAULT and LIGHT pipelines. R4: Behind spec_phase_lite flag.
+  // V7: Calls generateProtoSpec and writes to blackboard.spec.proto_spec.
+  // V8: When flag is off, no call to generateProtoSpec.
+  let protoSpec: ProtoSpec | null = null;
+  const pipelineTypeForFlags = pipeline === RESEARCH_PIPELINE ? "RESEARCH"
+    : pipeline === SOLO_PIPELINE ? "SOLO"
+    : pipeline === QUICK_PIPELINE ? "QUICK"
+    : pipeline === REVIEW_PIPELINE ? "REVIEW"
+    : pipeline === LIGHT_PIPELINE ? "LIGHT"
+    : "DEFAULT";
+
+  if (
+    isFeatureEnabled("spec_phase_lite") &&
+    (pipelineTypeForFlags === "DEFAULT" || pipelineTypeForFlags === "LIGHT") &&
+    !options.resumeSessionId // Skip on resume if proto_spec already exists
+  ) {
+    if (options.onProgress) {
+      await options.onProgress("P1: Generation de la proto-spec (spec-lite)...");
+    }
+
+    const story = buildStoryFile(task);
+    protoSpec = await generateProtoSpec(
+      task,
+      story,
+      agentContextCache.get("analyst") || agentContextCache.get("planner") || undefined
+    );
+
+    if (options.onProgress) {
+      const vcCount = protoSpec.v_criteria.length;
+      await options.onProgress(
+        `P1: Proto-spec generee — ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`
+      );
+    }
+
+    // Write proto-spec to blackboard
+    if (options.useBlackboard && bbSessionId) {
+      if (supabase && !bbFallback) {
+        const existing = await readSection(supabase, bbSessionId, "spec");
+        const specData = existing ? { ...existing, proto_spec: protoSpec } : { proto_spec: protoSpec };
+        const res = await writeSection(supabase, bbSessionId, "spec", specData, "spec-lite", bbVersion);
+        if (res.success) bbVersion = res.newVersion;
+      } else if (bbFallback) {
+        const existing = bbFallback.read(bbSessionId, "spec");
+        const specData = existing ? { ...existing, proto_spec: protoSpec } : { proto_spec: protoSpec };
+        const res = bbFallback.write(bbSessionId, "spec", specData, "spec-lite", bbVersion);
+        if (res.success) bbVersion = res.newVersion;
+      }
+    }
+  } else if (options.resumeSessionId && options.useBlackboard && bbSessionId) {
+    // On resume: check if proto_spec exists in blackboard
+    try {
+      const specSection = supabase && !bbFallback
+        ? await readSection(supabase, bbSessionId, "spec")
+        : bbFallback?.read(bbSessionId, "spec");
+      if (specSection?.proto_spec) {
+        protoSpec = specSection.proto_spec;
+      }
+    } catch {
+      // No proto_spec on resume — proceed without
     }
   }
 
@@ -1043,6 +1115,179 @@ export async function orchestrate(
               const status = reworkResult.finalEvaluation.pass ? "PASS" : "FAIL";
               const reworkNote = reworkResult.iterations > 0 ? ` (${reworkResult.iterations} rework)` : "";
               await options.onProgress(`Gate ${gate}: ${status} (${reworkResult.finalEvaluation.score}/100)${reworkNote}`);
+            }
+          }
+        }
+      }
+
+      // ── P2+E1: Adversarial challenge + Impact analysis ──────────
+      // F-DA-2: Insert by detecting that the NEXT agent is "dev", not by gateMap
+      // R5: P2 inserts between last pre-dev agent and dev
+      // R8: Behind adversarial_challenge flag. F-EC-4: --skip-challenge skips P2+E1 together
+      // R1: Only DEFAULT and LIGHT pipelines
+      // V9: Adversarial step inserted between architect/planner and dev
+      if (
+        result!.success &&
+        isFeatureEnabled("adversarial_challenge") &&
+        !options.skipChallenge &&
+        (pipelineTypeForFlags === "DEFAULT" || pipelineTypeForFlags === "LIGHT")
+      ) {
+        // Check if the NEXT agent in the pipeline is "dev"
+        const currentIndex = pipeline.indexOf(agentId);
+        const nextAgent = currentIndex >= 0 && currentIndex < pipeline.length - 1
+          ? pipeline[currentIndex + 1]
+          : null;
+
+        if (nextAgent === "dev") {
+          if (options.onProgress) {
+            await options.onProgress("P2+E1: Challenge adversarial + analyse d'impact en cours...");
+          }
+
+          // R6: Build input from proto-spec (if available) or agent output
+          const challengeInput = {
+            protoSpec: protoSpec,
+            agentOutput: result!.output,
+            taskTitle: task.title,
+            taskDescription: task.description || undefined,
+          };
+
+          // R15: P2 and E1 in parallel via Promise.all. V22: duration = max(P2, E1)
+          const impactedFiles = protoSpec?.impacted_files || [];
+          const [adversarialResult, impactResult] = await Promise.all([
+            runAdversarialChallenge(challengeInput, agentContextCache.get("dev")),
+            runImpactAnalysis(impactedFiles, agentContextCache.get("dev")),
+          ]);
+
+          // Write results to blackboard
+          if (options.useBlackboard && bbSessionId) {
+            const verificationSection = {
+              adversarial_challenge: adversarialResult,
+              impact_analysis: impactResult,
+            };
+            if (supabase && !bbFallback) {
+              const existing = await readSection(supabase, bbSessionId, "verification");
+              const merged = existing ? { ...existing, ...verificationSection } : verificationSection;
+              const res = await writeSection(supabase, bbSessionId, "verification", merged, "adversarial", bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            } else if (bbFallback) {
+              const existing = bbFallback.read(bbSessionId, "verification");
+              const merged = existing ? { ...existing, ...verificationSection } : verificationSection;
+              const res = bbFallback.write(bbSessionId, "verification", merged, "adversarial", bbVersion);
+              if (res.success) bbVersion = res.newVersion;
+            }
+          }
+
+          // F-DA-3: Distinguish PASS/SKIPPED in notification
+          if (adversarialResult.verdict === "SKIPPED") {
+            if (options.onProgress) {
+              await options.onProgress(
+                "P2: Challenge adversarial — SKIPPED (echec agent, analyse non disponible)"
+              );
+            }
+          } else if (options.onProgress) {
+            const impactLabel = impactResult
+              ? ` Impact: ${impactResult.risk_level} (${impactResult.modules_impacted_direct} modules directs).`
+              : "";
+            await options.onProgress(
+              `P2: ${adversarialResult.verdict} — ${adversarialResult.stats.bloquants} bloquant(s), ` +
+              `${adversarialResult.stats.majeurs} majeur(s), ${adversarialResult.stats.mineurs} mineur(s). ` +
+              `(${Math.round(adversarialResult.duration_ms / 1000)}s).${impactLabel}`
+            );
+          }
+
+          // R7/V10: PAUSE on bloquant — F-DA-1: inline buttons + callback for resume
+          if (adversarialResult.verdict === "PAUSE") {
+            const impactLabel = impactResult
+              ? `\nImpact: ${impactResult.risk_level} (${impactResult.modules_impacted_direct} modules directs, ${impactResult.modules_impacted_transitive} transitifs)`
+              : "";
+            const pauseMessage =
+              `Challenge adversarial : ${adversarialResult.stats.bloquants} finding(s) BLOQUANT(s) detecte(s). Pipeline en pause.` +
+              impactLabel +
+              `\n\nFindings bloquants:\n` +
+              adversarialResult.findings
+                .filter((f) => f.severity === "BLOQUANT")
+                .map((f) => `  [${f.id}] ${f.title}: ${f.description}`)
+                .join("\n");
+
+            if (options.onProgress) {
+              await options.onProgress(pauseMessage);
+            }
+
+            // F-DA-1: Callback for resume/abort decision
+            if (options.onAdversarialPause) {
+              const shouldContinue = await options.onAdversarialPause(adversarialResult, impactResult);
+              if (!shouldContinue) {
+                // Abort pipeline
+                if (options.onProgress) {
+                  await options.onProgress("Pipeline abandonne suite au challenge adversarial.");
+                }
+                if (pipelineSessionId) {
+                  await updatePipelineStatus(supabase, pipelineSessionId, "failed", "Adversarial challenge: pipeline aborted by user");
+                }
+                break; // Exit the agent loop
+              }
+              if (options.onProgress) {
+                await options.onProgress("Pipeline repris apres challenge adversarial.");
+              }
+            } else {
+              // No callback — stop pipeline (default behavior, user must use callback)
+              if (pipelineSessionId) {
+                await updatePipelineStatus(supabase, pipelineSessionId, "failed", "Adversarial challenge: PAUSE without resume callback");
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // ── P3: Conformance check (after dev, before qa) ──────────
+      // R9: Only if P1 produced V-criteria. V13: Skip if no proto_spec.
+      // V18: Result stored in blackboard.verification.conformance.
+      if (
+        agentId === "dev" &&
+        result!.success &&
+        protoSpec &&
+        protoSpec.v_criteria.length > 0 &&
+        isFeatureEnabled("spec_phase_lite") // P3 depends on P1 having run
+      ) {
+        // Check if next agent is qa (conformance before qa)
+        const currentIdx = pipeline.indexOf(agentId);
+        const nextAg = currentIdx >= 0 && currentIdx < pipeline.length - 1
+          ? pipeline[currentIdx + 1]
+          : null;
+
+        if (nextAg === "qa" || currentIdx === pipeline.length - 1) {
+          if (options.onProgress) {
+            await options.onProgress("P3: Conformance check (V-criteres vs implementation)...");
+          }
+
+          const devOutput = result!.structured || { raw: result!.output.substring(0, 30000) };
+          const conformanceReport = await checkConformance(
+            protoSpec,
+            devOutput,
+            pipelineTypeForFlags
+          );
+
+          if (conformanceReport) {
+            // Write to blackboard
+            if (options.useBlackboard && bbSessionId) {
+              if (supabase && !bbFallback) {
+                const existing = await readSection(supabase, bbSessionId, "verification");
+                const merged = existing ? { ...existing, conformance: conformanceReport } : { conformance: conformanceReport };
+                const res = await writeSection(supabase, bbSessionId, "verification", merged, "conformance", bbVersion);
+                if (res.success) bbVersion = res.newVersion;
+              } else if (bbFallback) {
+                const existing = bbFallback.read(bbSessionId, "verification");
+                const merged = existing ? { ...existing, conformance: conformanceReport } : { conformance: conformanceReport };
+                const res = bbFallback.write(bbSessionId, "verification", merged, "conformance", bbVersion);
+                if (res.success) bbVersion = res.newVersion;
+              }
+            }
+
+            if (options.onProgress) {
+              await options.onProgress(
+                `P3: Conformance — ${conformanceReport.coverage_score}% coverage, verdict: ${conformanceReport.overall_verdict.toUpperCase()}`
+              );
             }
           }
         }
