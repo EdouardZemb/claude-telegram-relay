@@ -38,6 +38,10 @@ export interface CostEntry {
   model?: string;
   /** S34: Number of cascade escalations (0 = direct, >0 = escalated) */
   cascadeEscalations?: number;
+  /** LLM-Ops: synthetic span ID (format: session:role:step) */
+  span_id?: string;
+  /** LLM-Ops: pipeline session ID for cost attribution */
+  session_id?: string;
 }
 
 export interface SprintCostSummary {
@@ -132,7 +136,7 @@ export async function logCost(
   if (!supabase) return;
 
   try {
-    const { error } = await supabase.from("cost_tracking").insert({
+    const row: Record<string, unknown> = {
       task_id: entry.taskId || null,
       sprint_id: entry.sprintId || null,
       agent_role: entry.agentRole || null,
@@ -145,7 +149,11 @@ export async function logCost(
       context: entry.context || null,
       metadata: entry.metadata || {},
       model: entry.model || null,
-    });
+    };
+    // LLM-Ops span attribution (optional, backward compatible)
+    if (entry.span_id) row.span_id = entry.span_id;
+    if (entry.session_id) row.session_id = entry.session_id;
+    const { error } = await supabase.from("cost_tracking").insert(row);
     if (error) console.error("logCost error:", error);
   } catch (error) {
     console.error("logCost error:", error);

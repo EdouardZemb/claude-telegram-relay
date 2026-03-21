@@ -19,6 +19,7 @@ export interface HeartbeatState {
   lastAlertCheckAt: string | null;    // when alerts were last run (hourly)
   lastArchivalAt: string | null;      // when memory archival last ran (hourly)
   lastAutonomyScanAt: string | null;  // when autonomy scan last ran (daily)
+  lastLlmOpsCheckAt: string | null;   // when LLM-Ops check last ran (30min)
 }
 
 export interface HeartbeatAction {
@@ -216,5 +217,6 @@ export function createDefaultState(): HeartbeatState {
     lastAlertCheckAt: null,
     lastArchivalAt: null,
     lastAutonomyScanAt: null,
+    lastLlmOpsCheckAt: null,
   };
 }

@@ -24,6 +24,7 @@ import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import {
   buildFullAgentPrompt,
   buildIsolationInstructions,
+  loadAgentYaml,
   type AgentPromptContext,
 } from "./bmad-prompts.ts";
 import { getAgent, type BmadAgent } from "./bmad-agents.ts";
@@ -42,6 +43,8 @@ import {
   formatExplorationPhaseOutput,
 } from "./agent-schemas.ts";
 import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
+import { logCostWithSpan, buildSpanId, recordPromptVersion, sha256 } from "./llm-ops.ts";
+import { getFeedbackRulesForAgent } from "./feedback-loop.ts";
 import {
   createBlackboard,
   readSection,
@@ -1045,9 +1048,10 @@ export async function orchestrate(
         }
       }
 
-      // Log cost (S23-05, S28: include model, P5: correlation_id)
+      // Log cost with span attribution (S23-05, S28, LLM-Ops R4/R8)
       if (supabase && result!.tokensInput) {
-        logCost(supabase, {
+        const spanId = pipelineSessionId ? buildSpanId(pipelineSessionId, agentId, stepIndex - 1) : "";
+        logCostWithSpan(supabase, {
           taskId: task.id,
           sprintId: task.sprint || undefined,
           agentRole: agentId,
@@ -1060,7 +1064,18 @@ export async function orchestrate(
           context: "orchestration",
           model: agent?.model,
           metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
-        }).catch((err) => console.error("logCost orchestration error:", err));
+        }, spanId, pipelineSessionId || "").catch((err) => console.error("logCost orchestration error:", err));
+      }
+
+      // LLM-Ops: record prompt version (R3, R11 — fire-and-forget)
+      if (supabase && pipelineSessionId) {
+        const yaml = loadAgentYaml(agentId);
+        const yamlContent = yaml ? JSON.stringify(yaml) : "";
+        const templateH = sha256(yamlContent);
+        const feedbackRules = getFeedbackRulesForAgent(agentId as any);
+        const feedbackH = sha256(JSON.stringify(feedbackRules));
+        recordPromptVersion(supabase, agentId, templateH, feedbackH)
+          .catch((err) => console.error("recordPromptVersion error:", err));
       }
 
       if (options.onProgress) {
@@ -1188,9 +1203,11 @@ export async function orchestrate(
             }).catch((err) => console.error("emitAgentEvent error:", err));
           }
 
-          // Log cost with P5 correlation_id
+          // Log cost with span attribution (LLM-Ops R4/R8)
           if (supabase && result!.tokensInput) {
-            logCost(supabase, {
+            const overlapStepIdx = pipeline.indexOf(agentId);
+            const spanId = pipelineSessionId ? buildSpanId(pipelineSessionId, agentId, overlapStepIdx) : "";
+            logCostWithSpan(supabase, {
               taskId: task.id,
               sprintId: task.sprint || undefined,
               agentRole: agentId,
@@ -1203,7 +1220,7 @@ export async function orchestrate(
               context: "orchestration",
               model: agent?.model,
               metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
-            }).catch((err) => console.error("logCost orchestration error:", err));
+            }, spanId, pipelineSessionId || "").catch((err) => console.error("logCost orchestration error:", err));
           }
 
           // Checkpoint

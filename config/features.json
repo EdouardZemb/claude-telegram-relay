@@ -3,6 +3,7 @@
   "job_manager": true,
   "auto_document_search": true,
   "prd_to_deploy": true,
-  "exploration_phase": true,
-  "exploration_gate": false
+  "exploration_phase": false,
+  "exploration_gate": false,
+  "llmops_monitoring": false
 }

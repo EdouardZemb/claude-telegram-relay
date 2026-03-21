@@ -23,6 +23,7 @@ import { resolveProjectContext } from "../projects.ts";
 import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
 import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
 
 // ── Web Research Detection ───────────────────────────────────
 
@@ -48,6 +49,11 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
 
   // /explore — launch the Explorer agent to investigate a topic
   composer.command("explore", async (ctx) => {
+    if (!isFeatureEnabled("exploration_phase")) {
+      await ctx.reply("La commande /explore est desactivee.", bctx.threadOpts(ctx));
+      return;
+    }
+
     const blocked = bctx.commandGuard(ctx, "explore");
     if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
 

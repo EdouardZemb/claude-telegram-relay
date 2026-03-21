@@ -365,7 +365,9 @@ CREATE TABLE IF NOT EXISTS cost_tracking (
   retry_attempt INTEGER DEFAULT 0,
   context TEXT,
   metadata JSONB DEFAULT '{}',
-  project_id UUID REFERENCES projects(id)
+  project_id UUID REFERENCES projects(id),
+  span_id TEXT,
+  session_id TEXT
 );
 
 COMMENT ON TABLE cost_tracking IS 'Tracks token usage and cost per agent execution for budget visibility';
@@ -374,6 +376,22 @@ CREATE INDEX IF NOT EXISTS idx_cost_tracking_task ON cost_tracking(task_id);
 CREATE INDEX IF NOT EXISTS idx_cost_tracking_sprint ON cost_tracking(sprint_id);
 CREATE INDEX IF NOT EXISTS idx_cost_tracking_created ON cost_tracking(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cost_tracking_project_id ON cost_tracking(project_id);
+CREATE INDEX IF NOT EXISTS idx_cost_tracking_session ON cost_tracking(session_id);
+
+-- ============================================================
+-- PROMPT VERSIONS TABLE (LLM-Ops prompt drift detection)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  agent_role TEXT NOT NULL,
+  template_hash TEXT NOT NULL,
+  feedback_hash TEXT NOT NULL,
+  combined_hash TEXT NOT NULL,
+  UNIQUE (agent_role, combined_hash)
+);
+
+COMMENT ON TABLE prompt_versions IS 'Tracks prompt template + feedback rule versions per agent role for drift detection';
 
 -- ============================================================
 -- BLACKBOARD TABLE (Shared structured workspace for pipelines)

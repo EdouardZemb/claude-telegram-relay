@@ -47,6 +47,8 @@ import { archiveOldMemories } from "./memory.ts";
 import { loadPrefs, isQuietHours } from "./notification-prefs.ts";
 import { loadQueue, getQueue, flushMorningDigest, enqueue } from "./notification-queue.ts";
 import { runAllScanners, isDuplicate } from "./autonomy-scanner.ts";
+// LLM-Ops periodic check
+import { runLlmOpsCheck, LLMOPS_CHECK_INTERVAL_MS } from "./llm-ops.ts";
 
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -533,6 +535,30 @@ export async function pulse(): Promise<{
     }
   } catch (err) {
     console.error(`[${timestamp}] Memory archival error:`, err);
+  }
+
+  // Every 30min: LLM-Ops check (gated on feature flag)
+  try {
+    if (isFeatureEnabled("llmops_monitoring")) {
+      const llmOpsThreshold = now - LLMOPS_CHECK_INTERVAL_MS;
+      if (!state.lastLlmOpsCheckAt || new Date(state.lastLlmOpsCheckAt).getTime() < llmOpsThreshold) {
+        console.log(`[${timestamp}] Running LLM-Ops check...`);
+        const notifyFn = async (msg: string) => {
+          await enqueue({
+            type: "alert",
+            severity: "normal",
+            message: msg,
+          });
+        };
+        const llmOpsResult = await runLlmOpsCheck(supabase, notifyFn);
+        if (llmOpsResult.anomalies.length > 0) {
+          console.log(`[${timestamp}] LLM-Ops: ${llmOpsResult.anomalies.length} anomaly(ies), ${llmOpsResult.notificationsSent} notification(s).`);
+        }
+        state.lastLlmOpsCheckAt = timestamp;
+      }
+    }
+  } catch (err) {
+    console.error(`[${timestamp}] LLM-Ops check error:`, err);
   }
 
   // Daily: Autonomy scan
