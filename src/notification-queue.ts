@@ -37,12 +37,12 @@ export interface NotificationItem {
   severity: "critical" | "normal";
   message: string;
   data?: {
-    taskId?: string;
-    taskStatus?: string;
-    prUrl?: string;
-    ideaId?: string;
-    alertType?: string;
-  };
+    taskId?: string | undefined;
+    taskStatus?: string | undefined;
+    prUrl?: string | undefined;
+    ideaId?: string | undefined;
+    alertType?: string | undefined;
+  } | undefined;
   createdAt: number; // epoch ms
 }
 
@@ -276,7 +276,7 @@ export async function flush(): Promise<void> {
   await saveQueue();
 
   if (items.length === 1) {
-    await sendStandalone(items[0]);
+    await sendStandalone(items[0]!);
   } else {
     await sendDigest(items);
   }

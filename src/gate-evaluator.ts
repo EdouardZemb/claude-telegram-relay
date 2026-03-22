@@ -48,11 +48,11 @@ export interface GateEvaluation {
   issues: EvaluationIssue[];
   gate_name: string;
   /** S34: Structured rubric dimensions */
-  rubric?: RubricDimension[];
+  rubric?: RubricDimension[] | undefined;
   /** S34: Deterministic check results (implementation gates only) */
-  deterministicChecks?: DeterministicCheckResult[];
+  deterministicChecks?: DeterministicCheckResult[] | undefined;
   /** S35: Whether this gate was auto-approved based on trust score */
-  autoApproved?: boolean;
+  autoApproved?: boolean | undefined;
 }
 
 export type GateName = "spec" | "plan" | "tasks" | "implementation" | "exploration";
@@ -295,15 +295,15 @@ function buildRubricJsonSchema(gateName: GateName): string {
 /** S35: Options for gate evaluation */
 export interface EvaluateGateOptions {
   /** S34: Working directory for deterministic checks */
-  cwd?: string;
+  cwd?: string | undefined;
   /** S35: Agent role for trust score lookup */
-  agentRole?: string;
+  agentRole?: string | undefined;
   /** S35: Task priority for auto-approval check */
-  taskPriority?: number;
+  taskPriority?: number | undefined;
   /** S35: Task ID for persistence */
-  taskId?: string;
+  taskId?: string | undefined;
   /** S35: Sprint ID for persistence */
-  sprintId?: string;
+  sprintId?: string | undefined;
 }
 
 /**
@@ -328,12 +328,14 @@ interface ExplorationCompletenessResult {
  * Checks: >= 2 findings, recommendation present, confidence >= 0.6.
  * Returns a structured result with rubric dimensions.
  */
-export function evaluateExplorationCompleteness(sectionData: any): ExplorationCompletenessResult {
+export function evaluateExplorationCompleteness(sectionData: unknown): ExplorationCompletenessResult {
   const issues: EvaluationIssue[] = [];
   const rubric: RubricDimension[] = [];
 
+  const sd = (typeof sectionData === "object" && sectionData !== null ? sectionData : {}) as Record<string, unknown>;
+
   // Coverage: check findings count
-  const findings = Array.isArray(sectionData?.findings) ? sectionData.findings : [];
+  const findings = Array.isArray(sd.findings) ? sd.findings : [];
   const coverageScore = findings.length >= 3 ? 25 : findings.length >= 2 ? 18 : findings.length === 1 ? 10 : 0;
   rubric.push({
     name: "coverage",
@@ -350,7 +352,10 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
   }
 
   // Depth: check for sources in findings
-  const findingsWithSources = findings.filter((f: any) => Array.isArray(f?.sources) && f.sources.length > 0);
+  const findingsWithSources = findings.filter((f: unknown) => {
+    const fe = f as Record<string, unknown> | null;
+    return Array.isArray(fe?.sources) && fe!.sources.length > 0;
+  });
   const depthScore = findingsWithSources.length >= findings.length * 0.5 ? 20
     : findingsWithSources.length > 0 ? 15 : 5;
   rubric.push({
@@ -361,8 +366,8 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
   });
 
   // Actionability: check recommendation and alternatives
-  const hasRecommendation = typeof sectionData?.recommendation === "string" && sectionData.recommendation.length > 10;
-  const alternatives = Array.isArray(sectionData?.alternatives) ? sectionData.alternatives : [];
+  const hasRecommendation = typeof sd.recommendation === "string" && (sd.recommendation as string).length > 10;
+  const alternatives = Array.isArray(sd.alternatives) ? sd.alternatives : [];
   const actionScore = hasRecommendation ? (alternatives.length >= 2 ? 25 : 18) : 5;
   rubric.push({
     name: "actionability",
@@ -381,7 +386,7 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
   }
 
   // Confidence: check confidence score
-  const confidence = typeof sectionData?.confidence === "number" ? sectionData.confidence : 0;
+  const confidence = typeof sd.confidence === "number" ? sd.confidence : 0;
   const confidenceScore = confidence >= 0.8 ? 25 : confidence >= 0.6 ? 20 : confidence >= 0.4 ? 12 : 5;
   rubric.push({
     name: "confidence",
@@ -408,7 +413,7 @@ export async function evaluateGate(
   supabase: SupabaseClient | null,
   sessionId: string,
   gateName: GateName,
-  sectionData: any,
+  sectionData: unknown,
   /** S34: Working directory for deterministic checks (or S35 options) */
   cwdOrOptions?: string | EvaluateGateOptions
 ): Promise<GateEvaluation> {
@@ -620,25 +625,29 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
   };
 }
 
-function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
+function normalizeEvaluation(obj: unknown, gateName: string): GateEvaluation {
+  const o = (typeof obj === "object" && obj !== null ? obj : {}) as Record<string, unknown>;
   // S34: Parse rubric dimensions if present
-  const rubric = parseRubricFromOutput(obj, gateName as GateName);
+  const rubric = parseRubricFromOutput(o, gateName as GateName);
 
   // If rubric is present, compute score from rubric dimensions
   let score: number;
   if (rubric && rubric.length === 4) {
     score = rubric.reduce((sum, d) => sum + d.score, 0);
   } else {
-    score = typeof obj.score === "number" ? Math.min(100, Math.max(0, obj.score)) : 50;
+    score = typeof o.score === "number" ? Math.min(100, Math.max(0, o.score)) : 50;
   }
 
-  const pass = obj.pass !== undefined ? Boolean(obj.pass) : score >= 60;
-  const issues = Array.isArray(obj.issues)
-    ? obj.issues.map((i: any) => ({
-        severity: ["critical", "major", "minor"].includes(i.severity) ? i.severity : "minor",
-        description: String(i.description || ""),
-        suggestion: String(i.suggestion || ""),
-      }))
+  const pass = o.pass !== undefined ? Boolean(o.pass) : score >= 60;
+  const issues = Array.isArray(o.issues)
+    ? (o.issues as unknown[]).map((i: unknown) => {
+        const ie = (typeof i === "object" && i !== null ? i : {}) as Record<string, unknown>;
+        return {
+          severity: (["critical", "major", "minor"].includes(ie.severity as string) ? ie.severity : "minor") as EvaluationIssue["severity"],
+          description: String(ie.description || ""),
+          suggestion: String(ie.suggestion || ""),
+        };
+      })
     : [];
 
   // S34 AC-009: Flag critical weaknesses (dimension below 10)
@@ -661,24 +670,27 @@ function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
  * Parse rubric dimensions from the LLM evaluation output.
  * S34 FR-002: Extracts 4 dimension scores.
  */
-export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimension[] | undefined {
-  if (!obj.rubric || typeof obj.rubric !== "object") return undefined;
+export function parseRubricFromOutput(obj: unknown, gateName: GateName): RubricDimension[] | undefined {
+  const o = (typeof obj === "object" && obj !== null ? obj : {}) as Record<string, unknown>;
+  if (!o.rubric || typeof o.rubric !== "object") return undefined;
+  const rubricObj = o.rubric as Record<string, unknown>;
 
   const dimensions = getRubricDimensions(gateName);
   const rubric: RubricDimension[] = [];
 
   for (const dim of dimensions) {
-    const dimData = obj.rubric[dim];
-    if (!dimData) continue;
+    const dimData = rubricObj[dim];
+    if (!dimData || typeof dimData !== "object") continue;
+    const dd = dimData as Record<string, unknown>;
 
-    const score = typeof dimData.score === "number"
-      ? Math.min(25, Math.max(0, Math.round(dimData.score)))
+    const score = typeof dd.score === "number"
+      ? Math.min(25, Math.max(0, Math.round(dd.score)))
       : 0;
 
     rubric.push({
       name: dim,
       score,
-      feedback: String(dimData.feedback || ""),
+      feedback: String(dd.feedback || ""),
       critical: score < 10,
     });
   }
@@ -690,17 +702,19 @@ export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimen
 
 /** S35: Options for evaluateAndRework */
 export interface EvaluateAndReworkOptions {
-  maxIterations?: number;
+  maxIterations?: number | undefined;
   /** Override evaluator for testing */
-  customEvaluator?: (data: any) => Promise<GateEvaluation>;
+  customEvaluator?: ((data: any) => Promise<GateEvaluation>) | undefined;
   /** S35: Task ID for persistence */
-  taskId?: string;
+  taskId?: string | undefined;
   /** S35: Sprint ID for persistence */
-  sprintId?: string;
+  sprintId?: string | undefined;
   /** S35: Task priority for auto-approval */
-  taskPriority?: number;
+  taskPriority?: number | undefined;
   /** S35: Working directory for deterministic checks */
-  cwd?: string;
+  cwd?: string | undefined;
+  /** S35: Agent role for trust score lookup */
+  agentRole?: string | undefined;
 }
 
 /**
@@ -718,11 +732,11 @@ export async function evaluateAndRework(
   sessionId: string,
   agentRole: string,
   gateName: GateName,
-  sectionData: any,
-  runAgent: (feedback: string) => Promise<any>,
+  sectionData: unknown,
+  runAgent: (feedback: string) => Promise<unknown>,
   maxIterationsOrOpts?: number | EvaluateAndReworkOptions,
   /** Override evaluator for testing (legacy compat) */
-  customEvaluator?: (data: any) => Promise<GateEvaluation>
+  customEvaluator?: (data: unknown) => Promise<GateEvaluation>
 ): Promise<EvaluateReworkResult> {
   // S35: Normalize options (backward compatible)
   const opts: EvaluateAndReworkOptions = typeof maxIterationsOrOpts === "number"

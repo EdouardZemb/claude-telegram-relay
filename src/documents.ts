@@ -40,11 +40,11 @@ export interface Document {
 
 export interface DocumentCreateInput {
   userId: string;
-  projectId?: string;
-  title?: string;
+  projectId?: string | undefined;
+  title?: string | undefined;
   filePath: string;
   fileType: string;
-  fileSize?: number;
+  fileSize?: number | undefined;
   buffer: Buffer;
 }
 
@@ -144,7 +144,7 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   try {
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse(new Uint8Array(buffer));
-    await parser.load();
+    await (parser as any).load();
     const result = await parser.getText();
     const text = (typeof result === "string" ? result : result?.text ?? "").trim();
     if (text.length > 50) {

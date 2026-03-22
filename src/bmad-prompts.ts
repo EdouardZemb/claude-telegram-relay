@@ -51,16 +51,16 @@ interface AgentYaml {
 
 export interface AgentPromptContext {
   command: string;
-  taskTitle?: string;
-  taskDescription?: string;
-  priority?: number;
-  acceptanceCriteria?: string;
-  devNotes?: string;
-  architectureRef?: string;
-  subtasks?: Array<{ title: string; done?: boolean }>;
-  sprintId?: string;
-  projectName?: string;
-  shardedContext?: string;
+  taskTitle?: string | undefined;
+  taskDescription?: string | undefined;
+  priority?: number | undefined;
+  acceptanceCriteria?: string | undefined;
+  devNotes?: string | undefined;
+  architectureRef?: string | undefined;
+  subtasks?: Array<{ title: string; done?: boolean | undefined }> | undefined;
+  sprintId?: string | undefined;
+  projectName?: string | undefined;
+  shardedContext?: string | undefined;
 }
 
 // ── YAML Loader ──────────────────────────────────────────────

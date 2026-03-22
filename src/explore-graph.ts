@@ -31,7 +31,7 @@ export type GraphQueryType =
 
 export interface GraphQueryResult {
   type: GraphQueryType;
-  moduleId?: string;
+  moduleId?: string | undefined;
   response: string;
 }
 
@@ -86,11 +86,11 @@ export function extractModuleName(query: string, graph: CodeGraph): string | nul
 
   // Fuzzy: use findAffectedModules (heuristic match)
   const affected = findAffectedModules(graph, query);
-  if (affected.length === 1) return affected[0];
+  if (affected.length === 1) return affected[0] ?? null;
 
   // If multiple matches, pick the one with shortest name (most specific)
   if (affected.length > 1) {
-    return affected.sort((a, b) => a.length - b.length)[0];
+    return affected.sort((a, b) => a.length - b.length)[0] ?? null;
   }
 
   return null;

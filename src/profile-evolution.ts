@@ -94,7 +94,7 @@ export async function analyzeProfile(
   for (const m of userMessages) {
     const date = new Date(m.created_at);
     hourCounts[date.getHours()]++;
-    const day = dayNames[date.getDay()];
+    const day = dayNames[date.getDay()]!;
     dayCounts[day] = (dayCounts[day] ?? 0) + 1;
   }
 
@@ -303,10 +303,10 @@ function categorizeTask(title: string): string {
 function extractFromProfile(profile: string, section: string): string | null {
   const regex = new RegExp(`\\*\\*${section}[:\\s]*\\*\\*\\s*(.+?)(?=\\n\\*\\*|\\n##|$)`, "is");
   const match = profile.match(regex);
-  if (match) return match[1].trim();
+  if (match) return match[1]!.trim();
 
   // Try without bold
   const simpleRegex = new RegExp(`${section}[:\\s]+(.+?)(?=\\n[A-Z]|\\n##|$)`, "is");
   const simpleMatch = profile.match(simpleRegex);
-  return simpleMatch ? simpleMatch[1].trim() : null;
+  return simpleMatch ? simpleMatch[1]!.trim() : null;
 }

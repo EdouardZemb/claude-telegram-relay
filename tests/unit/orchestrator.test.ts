@@ -356,22 +356,22 @@ describe("classifyPipeline", () => {
 // ── P1/P2/E1/P3 Feature Flags ────────────────────────────────
 
 describe("[V14] Feature Flags for P1/P2/E1/P3", () => {
-  it("[V14] config/features.json contains spec_phase_lite=false", () => {
+  it("[V14] config/features.json contains spec_phase_lite=true", () => {
     const flags = loadFeatures();
-    expect(flags.spec_phase_lite).toBe(false);
+    expect(flags.spec_phase_lite).toBe(true);
   });
 
-  it("[V14] config/features.json contains adversarial_challenge=false", () => {
+  it("[V14] config/features.json contains adversarial_challenge=true", () => {
     const flags = loadFeatures();
-    expect(flags.adversarial_challenge).toBe(false);
+    expect(flags.adversarial_challenge).toBe(true);
   });
 
-  it("spec_phase_lite is disabled by default", () => {
-    expect(isFeatureEnabled("spec_phase_lite")).toBe(false);
+  it("spec_phase_lite is enabled", () => {
+    expect(isFeatureEnabled("spec_phase_lite")).toBe(true);
   });
 
-  it("adversarial_challenge is disabled by default", () => {
-    expect(isFeatureEnabled("adversarial_challenge")).toBe(false);
+  it("adversarial_challenge is enabled", () => {
+    expect(isFeatureEnabled("adversarial_challenge")).toBe(true);
   });
 
   it("[V15] existing flags are unchanged after adding new ones", () => {

@@ -28,8 +28,8 @@ export interface Job {
   type: string;
   status: JobStatus;
   chatId: number | string;
-  messageThreadId?: number;
-  taskId?: string;
+  messageThreadId?: number | undefined;
+  taskId?: string | undefined;
   startedAt: string;
   completedAt: string | null;
   result: string | null;
@@ -37,9 +37,9 @@ export interface Job {
 }
 
 export interface LaunchOptions {
-  taskId?: string;
-  timeoutMs?: number;
-  messageThreadId?: number;
+  taskId?: string | undefined;
+  timeoutMs?: number | undefined;
+  messageThreadId?: number | undefined;
 }
 
 // ── State ──────────────────────────────────────────────────────
@@ -152,9 +152,9 @@ export async function launch(
       job.status = "completed";
       job.result = typeof result === "string" ? result.substring(0, 500) : String(result).substring(0, 500);
       job.completedAt = new Date().toISOString();
-    } catch (error: any) {
+    } catch (error: unknown) {
       job.status = "failed";
-      job.error = (error?.message || String(error)).substring(0, 500);
+      job.error = (error instanceof Error ? error.message : String(error)).substring(0, 500);
       job.completedAt = new Date().toISOString();
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -221,12 +221,14 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
       // R14: Parse PRDWF_PREFLIGHT:{prdId}|{verdict}|{resume}
       if (job.result?.startsWith("PRDWF_PREFLIGHT:")) {
         const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
-        const verdict = (parts[1] || "") as "GO" | "PAUSE" | "STOP";
+        const rawVerdict = parts[1] || "";
+        const verdictMap: Record<string, "PASS" | "PAUSE" | "SKIPPED"> = { GO: "PASS", PAUSE: "PAUSE", STOP: "SKIPPED" };
+        const verdict = verdictMap[rawVerdict] ?? "SKIPPED";
         const preflightKb = buildPreflightKeyboard(verdict);
         // Copy buttons from preflight keyboard
         for (const row of preflightKb.inline_keyboard) {
           for (const btn of row) {
-            kb.text(btn.text, btn.callback_data || "");
+            kb.text(btn.text, (btn as any).callback_data || "");
           }
           kb.row();
         }
@@ -236,7 +238,7 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
     case "prd":
       // result format: PRD_CREATED:<id>|<title>
       if (job.result?.startsWith("PRD_CREATED:")) {
-        const prdId = job.result.replace("PRD_CREATED:", "").split("|")[0].trim();
+        const prdId = job.result.replace("PRD_CREATED:", "").split("|")[0]!.trim();
         kb.text("Visualiser le PRD", `jc_prd:${prdId.substring(0, 8)}`);
         kb.text("Approuver", `prd_approve:${prdId}`);
         hasButtons = true;
@@ -308,7 +310,7 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
     type: job.status === "completed" ? "task" : "alert",
     severity: "normal",
     message: `Job ${job.type} termine (${job.id})\n${job.status === "completed" ? job.result || "" : job.error || "Erreur inconnue"}`,
-    data: job.taskId ? { taskId: job.taskId } : undefined,
+    ...(job.taskId ? { data: { taskId: job.taskId } } : {}),
   });
 }
 

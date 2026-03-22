@@ -207,6 +207,7 @@ export async function getLlmOpsSnapshot(
 
   for (const role of allRoles) {
     const ts = rawScores[role];
+    if (!ts) continue;
     const autonomy = getAutonomyLevel(role);
     trustScores[role] = {
       score: ts.score,

@@ -57,7 +57,7 @@ export interface Reminder {
   text: string;
   triggerAt: number;
   chatId: number;
-  threadId?: number;
+  threadId?: number | undefined;
 }
 
 export { type TopicConfig };
@@ -140,7 +140,7 @@ const claudeQueue: Array<{
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
   prompt: string;
-  options?: ClaudeCallOptions;
+  options?: ClaudeCallOptions | undefined;
 }> = [];
 
 // Forward declaration — set by createBotContext when bot is known
@@ -191,7 +191,7 @@ async function callClaudeInternal(
     const proc = spawn(args, {
       stdout: "pipe",
       stderr: "pipe",
-      cwd: PROJECT_DIR || undefined,
+      cwd: PROJECT_DIR || process.cwd(),
       env: cleanEnv,
     });
 
@@ -206,7 +206,7 @@ async function callClaudeInternal(
 
     const sessionMatch = output.match(/Session ID: ([a-f0-9-]+)/i);
     if (sessionMatch) {
-      session.sessionId = sessionMatch[1];
+      session.sessionId = sessionMatch[1] ?? null;
       session.lastActivity = new Date().toISOString();
       await saveSession(session);
     }
@@ -261,7 +261,7 @@ const messageTimestamps: number[] = [];
 
 export function isRateLimited(): boolean {
   const now = Date.now();
-  while (messageTimestamps.length > 0 && messageTimestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
+  while (messageTimestamps.length > 0 && messageTimestamps[0]! < now - RATE_LIMIT_WINDOW_MS) {
     messageTimestamps.shift();
   }
   if (messageTimestamps.length >= RATE_LIMIT_MAX) return true;
@@ -291,7 +291,7 @@ function clearError(messageId: number): void {
 export function clearStaleState(): void {
   errorCounts.clear();
   const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
-  while (messageTimestamps.length > 0 && messageTimestamps[0] < cutoff) {
+  while (messageTimestamps.length > 0 && messageTimestamps[0]! < cutoff) {
     messageTimestamps.shift();
   }
 }
@@ -457,7 +457,7 @@ export function formatDocumentContext(results: DocumentSearchResult[]): string {
   const lines: string[] = ["--- DOCUMENTS PERTINENTS ---"];
 
   for (let i = 0; i < results.length; i++) {
-    const doc = results[i];
+    const doc = results[i]!;
     const title = doc.title || "Document sans titre";
     const category = doc.category_id ? `cat: ${doc.category_id}` : "";
     const date = doc.document_date || "date inconnue";

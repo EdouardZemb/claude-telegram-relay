@@ -153,12 +153,12 @@ export interface AgentStepResult {
   success: boolean;
   output: string;
   structured: StructuredAgentOutput | null;
-  error?: string;
+  error?: string | undefined;
   durationMs: number;
-  retryCount?: number;
-  tokensInput?: number;
-  tokensOutput?: number;
-  costUsd?: number;
+  retryCount?: number | undefined;
+  tokensInput?: number | undefined;
+  tokensOutput?: number | undefined;
+  costUsd?: number | undefined;
 }
 
 export interface OrchestratedResult {
@@ -428,34 +428,34 @@ async function persistAgentArtifact(
 // ── Main Orchestrate Function ────────────────────────────────
 
 export interface OrchestrateOptions {
-  pipeline?: AgentRole[];
-  onProgress?: (message: string) => Promise<void>;
+  pipeline?: AgentRole[] | undefined;
+  onProgress?: ((message: string) => Promise<void>) | undefined;
   /** Stop the pipeline if an agent fails */
-  stopOnFailure?: boolean;
+  stopOnFailure?: boolean | undefined;
   /** Skip agents that aren't relevant (e.g., analyst for simple tasks) */
-  skipIfSimple?: boolean;
+  skipIfSimple?: boolean | undefined;
   /** Max retry attempts per agent (default: 0 = no retry) */
-  maxRetries?: number;
+  maxRetries?: number | undefined;
   /** Use dynamic pipeline selection based on task analysis (S22-06) */
-  autoPipeline?: boolean;
+  autoPipeline?: boolean | undefined;
   /** Use blackboard for structured context passing (S24) */
-  useBlackboard?: boolean;
+  useBlackboard?: boolean | undefined;
   /** S33: Resume from a previous pipeline run session ID */
-  resumeSessionId?: string;
+  resumeSessionId?: string | undefined;
   /** S34: Per-role model overrides from LLM router (AC-019) */
-  modelOverrides?: Partial<Record<AgentRole, string>>;
+  modelOverrides?: Partial<Record<AgentRole, string>> | undefined;
   /** S34: Enable model cascade for agents (Haiku -> Sonnet -> Opus) */
-  cascade?: boolean;
+  cascade?: boolean | undefined;
   /** S43: Conversation context from the session that triggered this pipeline */
-  conversationContext?: string;
+  conversationContext?: string | undefined;
   /** P1: Run the last 2 agents in parallel (overlap mode). Incompatible with useBlackboard */
-  overlap?: boolean;
+  overlap?: boolean | undefined;
   /** P2: Rebuild agent context via buildAgentContext() between each agent (except the first) */
-  refreshContext?: boolean;
+  refreshContext?: boolean | undefined;
   /** Skip adversarial challenge (P2+E1) even if feature flag is active. F-EC-4: skips both P2 and E1 together */
-  skipChallenge?: boolean;
+  skipChallenge?: boolean | undefined;
   /** Callback to pause/resume pipeline on adversarial PAUSE (F-DA-1) */
-  onAdversarialPause?: (result: AdversarialResult, impact: ImpactAnalysisResult | null) => Promise<boolean>;
+  onAdversarialPause?: ((result: AdversarialResult, impact: ImpactAnalysisResult | null) => Promise<boolean>) | undefined;
 }
 
 /**
@@ -700,9 +700,15 @@ export async function orchestrate(
     }
 
     const story = buildStoryFile(task);
+    const storyInput = {
+      acceptanceCriteria: story.acceptanceCriteria.map((ac) => `${ac.id}: Given ${ac.given} When ${ac.when} Then ${ac.then}`),
+      implementationSteps: story.implementationSteps.map((s) => `${s.id}. ${s.title}: ${s.description}`),
+      testStubs: story.testStubs.map((t) => `${t.id}: ${t.description}`),
+      impactedFiles: story.impactedFiles,
+    };
     protoSpec = await generateProtoSpec(
       task,
-      story,
+      storyInput,
       agentContextCache.get("analyst") || agentContextCache.get("planner") || undefined
     );
 
@@ -733,8 +739,9 @@ export async function orchestrate(
       const specSection = supabase && !bbFallback
         ? await readSection(supabase, bbSessionId, "spec")
         : bbFallback?.read(bbSessionId, "spec");
-      if (specSection?.proto_spec) {
-        protoSpec = specSection.proto_spec;
+      const specObj = (typeof specSection === "object" && specSection !== null ? specSection : null) as Record<string, unknown> | null;
+      if (specObj?.proto_spec) {
+        protoSpec = specObj.proto_spec as ProtoSpec;
       }
     } catch {
       // No proto_spec on resume — proceed without
@@ -1360,7 +1367,7 @@ export async function orchestrate(
     // P1: Overlap execution — run last 2 agents in parallel (R1, R1b, R1d)
     if (effectiveOverlap && pipeline.length >= 2) {
       // Only run overlap if sequential part didn't fail with stopOnFailure
-      const lastFailed = steps.length > 0 && !steps[steps.length - 1].success && options.stopOnFailure;
+      const lastFailed = steps.length > 0 && !steps[steps.length - 1]!.success && options.stopOnFailure;
       if (!lastFailed) {
         const overlapAgents = pipeline.slice(overlapThreshold);
         const previousMessagesSnapshot = [...messages]; // R1d: frozen snapshot

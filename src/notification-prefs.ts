@@ -53,7 +53,7 @@ export async function loadPrefs(): Promise<NotificationPrefs> {
     const content = await readFile(PREFS_FILE, "utf-8");
     const parsed = JSON.parse(content);
     cachedPrefs = { ...DEFAULT_PREFS, ...parsed, types: { ...DEFAULT_PREFS.types, ...parsed.types } };
-    return cachedPrefs;
+    return cachedPrefs!;
   } catch {
     cachedPrefs = getDefaultPrefs();
     return cachedPrefs;

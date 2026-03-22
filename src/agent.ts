@@ -26,21 +26,21 @@ const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
 export interface SpawnClaudeOptions {
   prompt: string;
-  systemPrompt?: string;
-  outputFormat?: "text" | "json";
-  jsonSchema?: object;
-  effort?: "low" | "medium" | "high" | "max";
-  model?: string;
-  fallbackModel?: string;
-  maxBudgetUsd?: number;
-  useWorktree?: boolean;
-  fromPr?: number;
-  cwd?: string;
-  timeout?: number;
+  systemPrompt?: string | undefined;
+  outputFormat?: "text" | "json" | undefined;
+  jsonSchema?: object | undefined;
+  effort?: "low" | "medium" | "high" | "max" | undefined;
+  model?: string | undefined;
+  fallbackModel?: string | undefined;
+  maxBudgetUsd?: number | undefined;
+  useWorktree?: boolean | undefined;
+  fromPr?: number | undefined;
+  cwd?: string | undefined;
+  timeout?: number | undefined;
   /** S33: Agent role for MCP tool instructions injection */
-  mcpRole?: string;
+  mcpRole?: string | undefined;
   /** S34: Enable model cascade (Haiku -> Sonnet -> Opus). AC-011 to AC-015 */
-  cascade?: boolean;
+  cascade?: boolean | undefined;
 }
 
 export interface SpawnClaudeResult {
@@ -48,9 +48,9 @@ export interface SpawnClaudeResult {
   stderr: string;
   exitCode: number;
   /** S34: Model that was actually used (for cascade tracking) */
-  modelUsed?: string;
+  modelUsed?: string | undefined;
   /** S34: Number of cascade escalations (0 if no cascade) */
-  cascadeEscalations?: number;
+  cascadeEscalations?: number | undefined;
 }
 
 /** S34: Model cascade order — cheapest to most expensive */
@@ -80,7 +80,7 @@ export async function spawnClaudeWithCascade(options: SpawnClaudeOptions): Promi
   let escalations = 0;
 
   for (let i = 0; i < CASCADE_MODELS.length; i++) {
-    const model = CASCADE_MODELS[i];
+    const model = CASCADE_MODELS[i]!;
 
     // AC-013: Include failure context from previous attempt
     let prompt = options.prompt;
@@ -120,7 +120,7 @@ export async function spawnClaudeWithCascade(options: SpawnClaudeOptions): Promi
     stdout: "",
     stderr: lastError,
     exitCode: 1,
-    modelUsed: CASCADE_MODELS[CASCADE_MODELS.length - 1],
+    modelUsed: CASCADE_MODELS[CASCADE_MODELS.length - 1]!,
     cascadeEscalations: escalations,
   };
 }
@@ -233,13 +233,13 @@ const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 export interface AgentResult {
   success: boolean;
   output: string;
-  error?: string;
+  error?: string | undefined;
   durationMs: number;
-  prUrl?: string;
-  ciPassed?: boolean;
-  ciDetails?: string;
-  reviewScore?: number;
-  reviewSummary?: string;
+  prUrl?: string | undefined;
+  ciPassed?: boolean | undefined;
+  ciDetails?: string | undefined;
+  reviewScore?: number | undefined;
+  reviewSummary?: string | undefined;
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {

@@ -36,7 +36,7 @@ export interface CodeGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   indexedAt: string;
-  commitHash?: string;
+  commitHash?: string | undefined;
 }
 
 export interface GraphStats {
@@ -67,7 +67,7 @@ export function extractExports(content: string): ExportedSymbol[] {
   for (const { regex, kind } of patterns) {
     let match;
     while ((match = regex.exec(content)) !== null) {
-      const name = match[1];
+      const name = match[1]!;
       if (!seen.has(name)) {
         seen.add(name);
         exports.push({ name, kind });
@@ -78,7 +78,7 @@ export function extractExports(content: string): ExportedSymbol[] {
   // Default export
   const defaultMatch = content.match(/^export\s+default\s+(?:function\s+)?(\w+)?/m);
   if (defaultMatch) {
-    const name = defaultMatch[1] || "default";
+    const name = defaultMatch[1] ?? "default";
     if (!seen.has(name)) {
       exports.push({ name, kind: "default" });
     }
@@ -108,10 +108,10 @@ export function extractImports(
     const fromPath = match[4];
 
     // Only track local imports
-    if (!fromPath.startsWith("./") && !fromPath.startsWith("../")) continue;
+    if (!fromPath || !fromPath.startsWith("./") && !fromPath.startsWith("../")) continue;
 
     // Resolve relative path
-    let resolvedPath = resolve(join(PROJECT_ROOT, sourceDir), fromPath);
+    let resolvedPath = resolve(join(PROJECT_ROOT, sourceDir), fromPath!);
     // Make relative to project root
     let targetRelative = relative(PROJECT_ROOT, resolvedPath);
 

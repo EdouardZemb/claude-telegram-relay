@@ -18,9 +18,9 @@ export interface PipelineState {
   currentStep: number;
   stepsCompleted: StepSnapshot[];
   stepsResults: AgentMessage[];
-  blackboardId?: string;
+  blackboardId?: string | undefined;
   status: "running" | "completed" | "failed" | "paused";
-  error?: string;
+  error?: string | undefined;
 }
 
 export interface StepSnapshot {
@@ -28,9 +28,9 @@ export interface StepSnapshot {
   success: boolean;
   durationMs: number;
   completedAt: string;
-  tokensInput?: number;
-  tokensOutput?: number;
-  costUsd?: number;
+  tokensInput?: number | undefined;
+  tokensOutput?: number | undefined;
+  costUsd?: number | undefined;
 }
 
 // ── In-Memory Fallback ───────────────────────────────────────

@@ -11,14 +11,14 @@ import type { GateEvaluation, RubricDimension, DeterministicCheckResult } from "
 
 export interface GateEvaluationRecord {
   sessionId: string;
-  taskId?: string;
-  sprintId?: string;
+  taskId?: string | undefined;
+  sprintId?: string | undefined;
   agentRole: string;
   gateName: string;
   score: number;
   passed: boolean;
-  rubricDimensions?: RubricDimension[];
-  deterministicChecks?: DeterministicCheckResult[];
+  rubricDimensions?: RubricDimension[] | undefined;
+  deterministicChecks?: DeterministicCheckResult[] | undefined;
   reworkIteration: number;
   reworkTriggered: boolean;
   autoApproved: boolean;

@@ -126,8 +126,8 @@ export function splitIntoSections(content: string): Section[] {
           level: currentLevel,
         });
       }
-      currentTitle = headingMatch[2].trim();
-      currentLevel = headingMatch[1].length;
+      currentTitle = headingMatch[2]!.trim();
+      currentLevel = headingMatch[1]!.length;
       currentLines = [line];
     } else {
       currentLines.push(line);
@@ -187,7 +187,7 @@ export async function shardDocument(
     title: string;
     content: string;
     type: DocumentType;
-    project_id?: string | null;
+    project_id?: string | null | undefined;
   }
 ): Promise<ShardedDocument | null> {
   const sections = splitIntoSections(doc.content);

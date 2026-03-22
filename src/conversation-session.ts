@@ -42,7 +42,7 @@ export interface PendingProposal {
   /** The command to execute (e.g., "prd_workflow", "exec") */
   action: string;
   /** Optional args for the command */
-  args?: string;
+  args?: string | undefined;
   /** When the proposal was made */
   timestamp: number;
   /** The bot message that contained the proposal (truncated) */
@@ -52,7 +52,7 @@ export interface PendingProposal {
 export interface ConversationSession {
   id: string;
   chatId: number;
-  threadId?: number;
+  threadId?: number | undefined;
   createdAt: number;
   lastActivity: number;
   phase: SessionPhase;
@@ -71,7 +71,7 @@ export interface ConversationSession {
   /** Current PRD workflow step */
   prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "spec_preflight" | "implementation" | "done";
   /** Pending action proposal from the bot, awaiting user confirmation */
-  pendingProposal?: PendingProposal;
+  pendingProposal?: PendingProposal | undefined;
 }
 
 // ── Session Store ────────────────────────────────────────────

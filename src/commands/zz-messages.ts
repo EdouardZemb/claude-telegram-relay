@@ -7,6 +7,7 @@
  */
 
 import { Composer, type Context, InputFile } from "grammy";
+import type { Update } from "@grammyjs/types";
 import type { BotContext } from "../bot-context.ts";
 import { BOT_TOKEN, UPLOADS_DIR, ALLOWED_USER_ID } from "../bot-context.ts";
 import { writeFile, unlink } from "fs/promises";
@@ -187,7 +188,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       await ctx.answerCallbackQuery({ text: "Execution..." });
       await ctx.editMessageText(`Execution : ${command}`);
       // Dispatch the command through the bot's handler pipeline
-      const update = buildSyntheticUpdate(ctx, command);
+      const update = buildSyntheticUpdate(ctx, command) as unknown as Update;
       await bctx.bot.handleUpdate(update);
     } else if (data === "intent_cancel") {
       await ctx.answerCallbackQuery({ text: "Annule." });
@@ -249,7 +250,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     // S37: Check if this is a response to a pending clarification
     const clarificationCmd = checkPendingClarification(ctx, input);
     if (clarificationCmd) {
-      const update = buildSyntheticUpdate(ctx, clarificationCmd);
+      const update = buildSyntheticUpdate(ctx, clarificationCmd) as unknown as Update;
       await bctx.bot.handleUpdate(update);
       return;
     }
@@ -311,7 +312,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         }
 
         const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
-        const update = buildSyntheticUpdate(ctx, cmdStr);
+        const update = buildSyntheticUpdate(ctx, cmdStr) as unknown as Update;
         await bctx.bot.handleUpdate(update);
         return;
       }
@@ -323,7 +324,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     // Context assembly (document search only for text messages)
     const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
-    const contextPromises: [Promise<string>, Promise<string>, Promise<any[]>, Promise<any>, Promise<any>, Promise<any[]>] = [
+    const contextPromises: [Promise<string>, Promise<string>, Promise<string>, Promise<any>, Promise<any>, Promise<any[]>] = [
       getRelevantContext(bctx.supabase, input),
       getMemoryContext(bctx.supabase),
       getRecentMessages(bctx.supabase),
@@ -331,7 +332,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       classifyMessage(bctx.supabase, input, "user"),
       options.includeDocumentSearch && isFeatureEnabled("auto_document_search")
         ? Promise.race([
-            searchDocuments(bctx.supabase, input, userId, { matchCount: 3, matchThreshold: 0.5 }),
+            searchDocuments(bctx.supabase!, input, userId, { matchCount: 3, matchThreshold: 0.5 }),
             new Promise<never[]>(resolve => setTimeout(() => resolve([]), 5000)),
           ])
         : Promise.resolve([]),
@@ -350,7 +351,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       getThreadId: bctx.getThreadId,
       threadOpts: bctx.threadOpts,
       dispatchCommand: async (sourceCtx: Context, command: string) => {
-        const update = buildSyntheticUpdate(sourceCtx, command);
+        const update = buildSyntheticUpdate(sourceCtx, command) as unknown as Update;
         await bctx.bot.handleUpdate(update);
       },
     };
@@ -516,7 +517,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       }
 
       const photos = ctx.message.photo;
-      const photo = photos[photos.length - 1];
+      const photo = photos[photos.length - 1]!;
       const file = await ctx.api.getFile(photo.file_id);
       const caption = ctx.message.caption;
       const fileSize = photo.file_size || 0;

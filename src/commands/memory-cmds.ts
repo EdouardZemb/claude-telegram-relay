@@ -362,16 +362,16 @@ Reponds en texte brut, sans markdown.`;
     let timeLabel: string;
 
     if (relativeMatch) {
-      const amount = parseInt(relativeMatch[1]);
-      const unit = relativeMatch[2].toLowerCase();
-      text = relativeMatch[3];
+      const amount = parseInt(relativeMatch[1]!);
+      const unit = relativeMatch[2]!.toLowerCase();
+      text = relativeMatch[3]!;
       const ms = unit === "h" ? amount * 3600_000 : amount * 60_000;
       triggerAt = Date.now() + ms;
       timeLabel = `dans ${amount}${unit}`;
     } else if (absoluteMatch) {
-      const hours = parseInt(absoluteMatch[1]);
+      const hours = parseInt(absoluteMatch[1]!);
       const minutes = parseInt(absoluteMatch[2] || "0");
-      text = absoluteMatch[3];
+      text = absoluteMatch[3]!;
       const now = new Date();
       const target = new Date(now);
       target.setHours(hours, minutes, 0, 0);

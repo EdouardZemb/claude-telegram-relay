@@ -39,7 +39,7 @@ async function transcribeGroq(audioBuffer: Buffer): Promise<string> {
   const Groq = (await import("groq-sdk")).default;
   const groq = new Groq(); // reads GROQ_API_KEY from env
 
-  const file = new File([audioBuffer], "voice.ogg", { type: "audio/ogg" });
+  const file = new File([new Uint8Array(audioBuffer)], "voice.ogg", { type: "audio/ogg" });
 
   const result = await groq.audio.transcriptions.create({
     file,

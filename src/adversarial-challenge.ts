@@ -12,13 +12,13 @@ import type { AdversarialResult, ImpactAnalysisResult, ProtoSpec } from "./agent
 
 export interface AdversarialInput {
   /** Proto-spec from P1 (if available) */
-  protoSpec?: ProtoSpec | null;
+  protoSpec?: ProtoSpec | null | undefined;
   /** Architect or planner output (fallback when P1 is off) */
-  agentOutput?: string;
+  agentOutput?: string | undefined;
   /** Task title for context */
   taskTitle: string;
   /** Task description for context */
-  taskDescription?: string;
+  taskDescription?: string | undefined;
 }
 
 // ── Adversarial Challenge (P2) ───────────────────────────────
@@ -168,19 +168,22 @@ export function parseAdversarialResult(
  * Normalize findings array: validate fields, cap at 10.
  */
 function normalizeFindings(
-  raw: any[]
+  raw: unknown[]
 ): AdversarialResult["findings"] {
   return raw
-    .filter((f: any) => f && typeof f === "object")
-    .map((f: any, i: number) => ({
-      id: typeof f.id === "string" ? f.id : `F-DA-${i + 1}`,
-      severity: ["BLOQUANT", "MAJEUR", "MINEUR"].includes(f.severity)
-        ? (f.severity as "BLOQUANT" | "MAJEUR" | "MINEUR")
-        : "MINEUR",
-      title: typeof f.title === "string" ? f.title : "Finding sans titre",
-      description: typeof f.description === "string" ? f.description : "",
-      source: typeof f.source === "string" ? f.source : "",
-    }))
+    .filter((f: unknown) => f && typeof f === "object")
+    .map((f: unknown, i: number) => {
+      const fe = f as Record<string, unknown>;
+      return {
+        id: typeof fe.id === "string" ? fe.id : `F-DA-${i + 1}`,
+        severity: ["BLOQUANT", "MAJEUR", "MINEUR"].includes(fe.severity as string)
+          ? (fe.severity as "BLOQUANT" | "MAJEUR" | "MINEUR")
+          : "MINEUR",
+        title: typeof fe.title === "string" ? fe.title : "Finding sans titre",
+        description: typeof fe.description === "string" ? fe.description : "",
+        source: typeof fe.source === "string" ? fe.source : "",
+      };
+    })
     .slice(0, 10); // Max 10 findings
 }
 

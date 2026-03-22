@@ -42,7 +42,7 @@ export async function runDeliberation(
   messages: AgentMessage[],
   shardedContext?: string,
   agentContext?: string,
-  options?: { modelOverride?: string; cascade?: boolean; onProgress?: (msg: string) => Promise<void> },
+  options?: { modelOverride?: string | undefined; cascade?: boolean | undefined; onProgress?: ((msg: string) => Promise<void>) | undefined },
 ): Promise<{ output: string; revised: boolean; reviewerFeedback: string }> {
   const proposerAgent = getAgent(proposerRole);
   const reviewerAgent = getAgent(reviewerRole);

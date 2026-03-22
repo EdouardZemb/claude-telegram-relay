@@ -42,13 +42,13 @@ export function getTokenBudget(role: AgentRole | string): number {
 
 export interface AgentContextOptions {
   role: AgentRole | string;
-  projectId?: string;
-  sprintId?: string;
-  taskTitle?: string;
+  projectId?: string | undefined;
+  sprintId?: string | undefined;
+  taskTitle?: string | undefined;
   /** S43: Conversation context from the session that triggered this agent */
-  conversationContext?: string;
+  conversationContext?: string | undefined;
   /** Exploration phase: formatted exploration report to inject into agent context */
-  explorationReport?: string;
+  explorationReport?: string | undefined;
 }
 
 /**
@@ -133,7 +133,7 @@ export async function buildAgentContext(
     if (sections.length === 0) return "";
 
     const parts: string[] = ["--- CONTEXTE PROJET (Supabase) ---"];
-    let totalChars = parts[0].length;
+    let totalChars = parts[0]!.length;
 
     for (const section of sections) {
       const maxChars = section.label === "PROFIL UTILISATEUR"
@@ -304,7 +304,7 @@ export async function fetchTrustContext(role: AgentRole | string): Promise<strin
     const peers = roles.filter((r) => r !== role);
     if (peers.length > 0) {
       const peerSummary = peers
-        .map((r) => `${r}:${allScores[r].score}`)
+        .map((r) => `${r}:${allScores[r]!.score}`)
         .join(", ");
       lines.push(`Pairs: ${peerSummary}`);
     }

@@ -749,11 +749,11 @@ describe("[V15] job-manager prd-preflight with PAUSE generates 3 buttons", () =>
 
 // V-critere: V18
 describe("[V18] prd_maturation_phases flag present in features.json", () => {
-  test("flag exists in config/features.json with default false", () => {
+  test("flag exists in config/features.json with value true", () => {
     const flagsPath = join(__dirname, "../../config/features.json");
     const flags = JSON.parse(readFileSync(flagsPath, "utf-8"));
     expect(flags).toHaveProperty("prd_maturation_phases");
-    expect(flags.prd_maturation_phases).toBe(false);
+    expect(flags.prd_maturation_phases).toBe(true);
   });
 });
 

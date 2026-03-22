@@ -54,7 +54,7 @@ function schedulePendingTimeout(chatId: number, supabase: NonNullable<BotContext
 interface PendingUpload {
   input: DocumentCreateInput;
   chatId: number;
-  threadId?: number;
+  threadId?: number | undefined;
   createdAt: number;
 }
 
@@ -359,8 +359,8 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       const shortDocId = docId.substring(0, 8);
       const keyboard = new InlineKeyboard();
       for (let i = 0; i < categories.length; i++) {
-        const shortCatId = categories[i].id.substring(0, 8);
-        keyboard.text(categories[i].name, `dsc:${shortDocId}:${shortCatId}`);
+        const shortCatId = categories[i]!.id.substring(0, 8);
+        keyboard.text(categories[i]!.name, `dsc:${shortDocId}:${shortCatId}`);
         if (i % 2 === 1 && i < categories.length - 1) keyboard.row();
       }
       // "Autre" always on a new row

@@ -6,7 +6,7 @@
   "exploration_phase": false,
   "exploration_gate": false,
   "llmops_monitoring": true,
-  "spec_phase_lite": false,
-  "adversarial_challenge": false,
-  "prd_maturation_phases": false
+  "spec_phase_lite": true,
+  "adversarial_challenge": true,
+  "prd_maturation_phases": true
 }

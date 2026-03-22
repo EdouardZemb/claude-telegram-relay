@@ -28,13 +28,13 @@ export interface WorkingMemory {
 }
 
 export interface BlackboardSections {
-  spec: any | null;
-  plan: any | null;
-  tasks: any | null;
-  implementation: any | null;
-  verification: any | null;
+  spec: unknown | null;
+  plan: unknown | null;
+  tasks: unknown | null;
+  implementation: unknown | null;
+  verification: unknown | null;
   working_memory: WorkingMemory | null;
-  messages: any | null;
+  messages: unknown | null;
 }
 
 export interface BlackboardRow {
@@ -135,7 +135,7 @@ export async function readSection(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName
-): Promise<any | null> {
+): Promise<unknown | null> {
   const { data, error } = await supabase
     .from("blackboard")
     .select("sections")
@@ -163,7 +163,7 @@ export async function writeSection(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName,
-  data: any,
+  data: unknown,
   role: string,
   expectedVersion: number
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
@@ -179,7 +179,7 @@ export async function writeSection(
 
   // Handle large data (EC-002)
   let sectionData = data;
-  let overflow: any = null;
+  let overflow: unknown = null;
   const serialized = JSON.stringify(data);
   if (serialized.length > MAX_SECTION_SIZE) {
     console.warn(
@@ -348,10 +348,10 @@ export function generateTraceabilityReport(
 ): TraceabilityReport {
   // Extract FR identifiers from spec
   const frIds: string[] = [];
-  const spec = sections.spec;
+  const spec = sections.spec as Record<string, unknown> | null;
   if (spec?.requirements && Array.isArray(spec.requirements)) {
-    for (const req of spec.requirements) {
-      if (req.id) frIds.push(req.id);
+    for (const req of spec.requirements as Record<string, unknown>[]) {
+      if (req.id) frIds.push(req.id as string);
     }
   }
   // Fallback: extract FR-XXX patterns from spec text
@@ -375,32 +375,32 @@ export function generateTraceabilityReport(
 
   // Extract task->FR mappings
   const tasksByFr: Record<string, string[]> = {};
-  const tasksSection = sections.tasks;
+  const tasksSection = sections.tasks as Record<string, unknown> | null;
   if (tasksSection?.items && Array.isArray(tasksSection.items)) {
-    for (const task of tasksSection.items) {
+    for (const task of tasksSection.items as Record<string, unknown>[]) {
       const tracesTo = task.traces_to || task.tracesTo || [];
-      const refs = Array.isArray(tracesTo) ? tracesTo : [tracesTo];
+      const refs = (Array.isArray(tracesTo) ? tracesTo : [tracesTo]) as string[];
       for (const ref of refs) {
         if (!tasksByFr[ref]) tasksByFr[ref] = [];
-        tasksByFr[ref].push(task.title || task.id || "unknown");
+        tasksByFr[ref].push((task.title || task.id || "unknown") as string);
       }
     }
   }
 
   // Extract test->AC mappings
   const testsByFr: Record<string, string[]> = {};
-  const verification = sections.verification;
+  const verification = sections.verification as Record<string, unknown> | null;
   if (verification?.tests && Array.isArray(verification.tests)) {
-    for (const test of verification.tests) {
+    for (const test of verification.tests as Record<string, unknown>[]) {
       const validates = test.validates || [];
-      const refs = Array.isArray(validates) ? validates : [validates];
+      const refs = (Array.isArray(validates) ? validates : [validates]) as string[];
       for (const ref of refs) {
         // Map AC-XXX back to FR-XXX (convention: AC-001..003 -> FR-001, etc.)
         // Also accept direct FR references
         const frRef = ref.startsWith("FR-") ? ref : null;
         if (frRef) {
           if (!testsByFr[frRef]) testsByFr[frRef] = [];
-          testsByFr[frRef].push(test.name || test.description || "unknown");
+          testsByFr[frRef].push((test.name || test.description || "unknown") as string);
         }
       }
     }
@@ -408,14 +408,14 @@ export function generateTraceabilityReport(
 
   // Extract file changes
   const filesByFr: Record<string, string[]> = {};
-  const impl = sections.implementation;
+  const impl = sections.implementation as Record<string, unknown> | null;
   if (impl?.files && Array.isArray(impl.files)) {
-    for (const file of impl.files) {
+    for (const file of impl.files as Record<string, unknown>[]) {
       const tracesTo = file.traces_to || file.tracesTo || [];
-      const refs = Array.isArray(tracesTo) ? tracesTo : [tracesTo];
+      const refs = (Array.isArray(tracesTo) ? tracesTo : [tracesTo]) as string[];
       for (const ref of refs) {
         if (!filesByFr[ref]) filesByFr[ref] = [];
-        filesByFr[ref].push(file.path || file.name || "unknown");
+        filesByFr[ref].push((file.path || file.name || "unknown") as string);
       }
     }
   }
@@ -507,7 +507,7 @@ export class InMemoryBlackboard {
     return row;
   }
 
-  read(sessionId: string, section: SectionName): any | null {
+  read(sessionId: string, section: SectionName): unknown | null {
     const row = this.sessions.get(sessionId);
     if (!row) return null;
     return row.sections[section] ?? null;
@@ -516,7 +516,7 @@ export class InMemoryBlackboard {
   write(
     sessionId: string,
     section: SectionName,
-    data: any,
+    data: unknown,
     role: string,
     expectedVersion: number
   ): { success: boolean; newVersion: number; error?: string } {
@@ -532,7 +532,7 @@ export class InMemoryBlackboard {
       return { success: false, newVersion: row.version, error: "Version conflict" };
     }
 
-    row.sections[section] = data;
+    (row.sections as unknown as Record<string, unknown>)[section] = data;
     row.version = expectedVersion + 1;
     row.updated_at = new Date().toISOString();
     row.history.push({
@@ -559,7 +559,7 @@ export async function writeSectionWithRetry(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName,
-  data: any,
+  data: unknown,
   role: string,
   expectedVersion: number,
   maxRetries: number = 3
@@ -592,21 +592,22 @@ export async function writeSectionWithRetry(
 export async function mergeImplementationSection(
   supabase: SupabaseClient,
   sessionId: string,
-  agentResults: Array<{ structured?: any; output?: string }>,
+  agentResults: Array<{ structured?: unknown; output?: string }>,
   expectedVersion: number
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
-  const existing = await readSection(supabase, sessionId, "implementation") || {};
+  const raw = await readSection(supabase, sessionId, "implementation");
+  const existing = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
 
   const merged = {
-    files_modified: [...(existing.files_modified || [])],
-    tests_added: [...(existing.tests_added || [])],
-    summaries: [...(existing.summaries || [])],
+    files_modified: [...(Array.isArray(existing.files_modified) ? existing.files_modified : [])],
+    tests_added: [...(Array.isArray(existing.tests_added) ? existing.tests_added : [])],
+    summaries: [...(Array.isArray(existing.summaries) ? existing.summaries : [])],
   };
 
   for (const result of agentResults) {
-    const data = result.structured || {};
-    merged.files_modified.push(...(data.files_modified || data.files || []));
-    merged.tests_added.push(...(data.tests_added || data.tests || []));
+    const data = (typeof result.structured === "object" && result.structured !== null ? result.structured : {}) as Record<string, unknown>;
+    merged.files_modified.push(...(Array.isArray(data.files_modified) ? data.files_modified : Array.isArray(data.files) ? data.files : []));
+    merged.tests_added.push(...(Array.isArray(data.tests_added) ? data.tests_added : Array.isArray(data.tests) ? data.tests : []));
     merged.summaries.push(data.summary || (result.output || "").substring(0, 1000));
   }
 

@@ -280,7 +280,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           const result = await promoteIdea(bctx.supabase, id);
           if (result) {
             await ctx.answerCallbackQuery({ text: "Idee promue !" });
-            await ctx.editMessageText(`Idee promue en tache : ${result.title || idea.content?.substring(0, 60)}`);
+            await ctx.editMessageText(`Idee promue en tache : ${result.substring(0, 60) || idea.content?.substring(0, 60)}`);
           } else {
             await ctx.answerCallbackQuery({ text: "Erreur lors de la promotion." });
           }
@@ -302,7 +302,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           if (sprintId) {
             const summary = await getSprintSummary(bctx.supabase, sprintId);
             await ctx.answerCallbackQuery();
-            await ctx.editMessageText(summary ? formatSprintSummary(summary) : "Sprint non trouve.");
+            await ctx.editMessageText(summary ? formatSprintSummary(sprintId, summary) : "Sprint non trouve.");
           } else {
             await ctx.answerCallbackQuery({ text: "Pas de sprint actif." });
           }

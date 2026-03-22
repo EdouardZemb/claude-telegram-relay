@@ -13,9 +13,9 @@ export interface DetectedIntent {
   intent: string;
   command: string;
   confidence: number;
-  args?: string;
+  args?: string | undefined;
   /** The resolved action definition from the registry */
-  action?: ActionDefinition;
+  action?: ActionDefinition | undefined;
   /** Source of detection: "regex" or "llm" */
   source: "regex" | "llm";
 }
@@ -251,9 +251,9 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
     argExtractor: (text) => {
       const match = text.match(/(?:prd|PRD)\s+(?:pour|sur|de)\s+(.+)/i);
-      if (match) return match[1].replace(/\s*[?!.]\s*$/, "").trim();
+      if (match) return match[1]!.replace(/\s*[?!.]\s*$/, "").trim();
       const match2 = text.match(/(?:cree|genere|redige)\s+(?:un\s+)?prd\s*:?\s+(.+)/i);
-      if (match2) return match2[1].replace(/\s*[?!.]\s*$/, "").trim();
+      if (match2) return match2[1]!.replace(/\s*[?!.]\s*$/, "").trim();
       return undefined;
     },
   },

@@ -104,7 +104,7 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
       if (task) {
         await updateTaskStatus(bctx.supabase, task.id, "done");
         await ctx.answerCallbackQuery({ text: `Tache "${task.title}" terminee !` });
-        await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+        await ctx.editMessageReplyMarkup({});
       } else {
         await ctx.answerCallbackQuery({ text: "Tache introuvable." });
       }

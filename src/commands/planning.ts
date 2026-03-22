@@ -386,7 +386,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           await ctx.editMessageText("Generation du PRD en cours...");
           try {
             const resultTag = await prdCreateFn();
-            const prdId = resultTag.replace("PRD_CREATED:", "").split("|")[0];
+            const prdId = resultTag.replace("PRD_CREATED:", "").split("|")[0]!;
             const prd = await getPRD(bctx.supabase, prdId);
             if (prd) {
               const detail = formatPRDDetail(prd);

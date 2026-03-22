@@ -377,11 +377,11 @@ export async function pulse(): Promise<{
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   // Collect delta and triage
-  const triage = await collectAndTriage(supabase, state);
+  const triage = await collectAndTriage(supabase as any, state);
 
   // Update state with latest data regardless
   const gitSha = git("rev-parse", "HEAD");
-  const sprintDelta = await getSprintDelta(supabase, state.lastSprintSnapshot);
+  const sprintDelta = await getSprintDelta(supabase as any, state.lastSprintSnapshot);
 
   state.lastPulseAt = timestamp;
   state.lastCommitSha = gitSha;
@@ -470,7 +470,7 @@ export async function pulse(): Promise<{
           console.log(`[${timestamp}] Decision: ${decision.reasoning}`);
           console.log(`[${timestamp}] Observations: ${decision.observations.length}, Actions: ${decision.actions.length}`);
 
-          executed = await executeActions(decision, supabase, state);
+          executed = await executeActions(decision, supabase as any, state);
           state.recentActions = [...state.recentActions, ...executed].slice(-10);
         }
       }
@@ -511,7 +511,7 @@ export async function pulse(): Promise<{
             message: `[Alerte] ${alert.message}`,
             data: {
               alertType: alert.type,
-              taskId: (alert.data?.taskId as string) || undefined,
+              ...((alert.data?.taskId as string) ? { taskId: alert.data?.taskId as string } : {}),
             },
           });
         }

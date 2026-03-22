@@ -236,9 +236,9 @@ function parseAcceptanceCriteria(raw: string): AcceptanceCriterion[] {
   while ((match = gwtPattern.exec(raw)) !== null) {
     criteria.push({
       id: `AC-${index}`,
-      given: match[1].trim(),
-      when: match[2].trim(),
-      then: match[3].trim(),
+      given: match[1]!.trim(),
+      when: match[2]!.trim(),
+      then: match[3]!.trim(),
     });
     index++;
   }
@@ -276,7 +276,7 @@ function buildImplementationSteps(
       acMapping: st.ac_mapping
         ? st.ac_mapping.split(",").map((s) => s.trim())
         : acs.length > 0
-        ? [acs[Math.min(i, acs.length - 1)].id]
+        ? [acs[Math.min(i, acs.length - 1)]!.id]
         : [],
       done: st.done || false,
     }));

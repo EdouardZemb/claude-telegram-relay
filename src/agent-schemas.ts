@@ -232,12 +232,12 @@ export interface AgentMessage {
   structured: StructuredAgentOutput | null;
   rawOutput: string;
   durationMs: number;
-  error?: string;
+  error?: string | undefined;
 }
 
 // ── JSON Schema Descriptions (for injection into prompts) ────
 
-const SCHEMA_DESCRIPTIONS: Record<AgentRole, string> = {
+const SCHEMA_DESCRIPTIONS: Record<AgentRole | "exploration", string> = {
   analyst: `{
   "role": "analyst",
   "analysis": "resume de l'analyse (2-3 paragraphes)",
@@ -708,7 +708,7 @@ export function parseAgentOutput(
   );
   if (markerMatch) {
     try {
-      const parsed = JSON.parse(markerMatch[1].trim());
+      const parsed = JSON.parse(markerMatch[1]!.trim());
       if (validateAgentOutput(parsed, role)) {
         return { ...parsed, role } as StructuredAgentOutput;
       }
@@ -763,56 +763,57 @@ function findJsonObjects(text: string): string[] {
  * Checks for required fields — lenient validation (missing optional fields are OK).
  */
 export function validateAgentOutput(
-  obj: any,
+  obj: unknown,
   role: AgentRole
 ): boolean {
   if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
 
   switch (role) {
     case "analyst":
       return (
-        typeof obj.analysis === "string" &&
-        Array.isArray(obj.risks) &&
-        Array.isArray(obj.recommendations)
+        typeof o.analysis === "string" &&
+        Array.isArray(o.risks) &&
+        Array.isArray(o.recommendations)
       );
     case "pm":
       return (
-        Array.isArray(obj.subtasks) &&
-        Array.isArray(obj.priorities)
+        Array.isArray(o.subtasks) &&
+        Array.isArray(o.priorities)
       );
     case "architect":
       return (
-        typeof obj.design === "string" &&
-        Array.isArray(obj.files_impacted)
+        typeof o.design === "string" &&
+        Array.isArray(o.files_impacted)
       );
     case "dev":
       return (
-        Array.isArray(obj.files_modified) &&
-        typeof obj.summary === "string"
+        Array.isArray(o.files_modified) &&
+        typeof o.summary === "string"
       );
     case "qa":
       return (
-        typeof obj.score === "number" &&
-        Array.isArray(obj.findings) &&
-        typeof obj.summary === "string"
+        typeof o.score === "number" &&
+        Array.isArray(o.findings) &&
+        typeof o.summary === "string"
       );
     case "sm":
       return (
-        typeof obj.summary === "string" &&
-        Array.isArray(obj.next_steps)
+        typeof o.summary === "string" &&
+        Array.isArray(o.next_steps)
       );
     case "explorer":
       return (
-        typeof obj.etat_des_lieux === "string" &&
-        Array.isArray(obj.options) &&
-        Array.isArray(obj.recommandations)
+        typeof o.etat_des_lieux === "string" &&
+        Array.isArray(o.options) &&
+        Array.isArray(o.recommandations)
       );
     case "planner":
       return (
-        typeof obj.feasibility === "string" &&
-        typeof obj.analysis === "string" &&
-        Array.isArray(obj.subtasks) &&
-        Array.isArray(obj.priorities)
+        typeof o.feasibility === "string" &&
+        typeof o.analysis === "string" &&
+        Array.isArray(o.subtasks) &&
+        Array.isArray(o.priorities)
       );
     default:
       return false;
@@ -976,23 +977,27 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         .join("\n");
 
     case "explorer":
-      return [
-        `Etat des lieux: ${output.etat_des_lieux}`,
-        output.options.length > 0
-          ? `Options: ${output.options.map((o) => `${o.label} — ${o.description}`).join("; ")}`
-          : "",
-        output.recommandations.length > 0
-          ? `Recommandations: ${output.recommandations.map((r) => `[${r.effort}/${r.impact}] ${r.action}`).join("; ")}`
-          : "",
-        output.effort_estimate
-          ? `Effort: ${output.effort_estimate.total}`
-          : "",
-        output.references.length > 0
-          ? `References: ${output.references.join(", ")}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      if ("etat_des_lieux" in output) {
+        const explorerOut = output as ExplorerOutput;
+        return [
+          `Etat des lieux: ${explorerOut.etat_des_lieux}`,
+          explorerOut.options.length > 0
+            ? `Options: ${explorerOut.options.map((o: { label: string; description: string }) => `${o.label} — ${o.description}`).join("; ")}`
+            : "",
+          explorerOut.recommandations.length > 0
+            ? `Recommandations: ${explorerOut.recommandations.map((r: { effort: string; impact: string; action: string }) => `[${r.effort}/${r.impact}] ${r.action}`).join("; ")}`
+            : "",
+          explorerOut.effort_estimate
+            ? `Effort: ${explorerOut.effort_estimate.total}`
+            : "",
+          explorerOut.references.length > 0
+            ? `References: ${explorerOut.references.join(", ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+      return formatExplorationPhaseOutput(output as ExplorationPhaseOutput);
 
     default:
       return JSON.stringify(output, null, 2);
@@ -1005,16 +1010,17 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
  * Validate that an object is a valid ExplorationPhaseOutput.
  * Checks required fields: domain, findings, alternatives, recommendation, confidence.
  */
-export function validateExplorationPhaseOutput(obj: any): obj is ExplorationPhaseOutput {
+export function validateExplorationPhaseOutput(obj: unknown): obj is ExplorationPhaseOutput {
   if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
   return (
-    typeof obj.domain === "string" &&
-    Array.isArray(obj.findings) &&
-    Array.isArray(obj.alternatives) &&
-    typeof obj.recommendation === "string" &&
-    typeof obj.confidence === "number" &&
-    obj.confidence >= 0 &&
-    obj.confidence <= 1
+    typeof o.domain === "string" &&
+    Array.isArray(o.findings) &&
+    Array.isArray(o.alternatives) &&
+    typeof o.recommendation === "string" &&
+    typeof o.confidence === "number" &&
+    o.confidence >= 0 &&
+    o.confidence <= 1
   );
 }
 
@@ -1038,7 +1044,7 @@ export function parseExplorationPhaseOutput(rawOutput: string): ExplorationPhase
   const markerMatch = rawOutput.match(/<<<JSON>>>\s*([\s\S]*?)\s*<<<END>>>/);
   if (markerMatch) {
     try {
-      const parsed = JSON.parse(markerMatch[1].trim());
+      const parsed = JSON.parse(markerMatch[1]!.trim());
       if (validateExplorationPhaseOutput(parsed)) {
         return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
       }

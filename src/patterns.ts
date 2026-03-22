@@ -137,15 +137,15 @@ export async function analyzePatterns(
   // ── Pattern 5: Trend analysis ──────────────────────────────
   if (metrics.length >= minSprints) {
     const completionRates = metrics
-      .filter((m: any) => m.tasks_planned > 0)
-      .map((m: any) => ({
+      .filter((m: Record<string, unknown>) => (m.tasks_planned as number) > 0)
+      .map((m: Record<string, unknown>) => ({
         sprint: m.sprint_id,
-        rate: m.tasks_completed / m.tasks_planned,
+        rate: (m.tasks_completed as number) / (m.tasks_planned as number),
       }));
 
     if (completionRates.length >= 2) {
       const recent = completionRates.slice(-3);
-      const trend = computeTrend(recent.map((r: any) => r.rate));
+      const trend = computeTrend(recent.map((r) => r.rate));
 
       if (trend > 0.05) {
         patterns.push({
@@ -180,7 +180,7 @@ export async function analyzePatterns(
 
 function generateSuggestions(
   patterns: DetectedPattern[],
-  retros: any[]
+  retros: Record<string, unknown>[]
 ): WorkflowSuggestion[] {
   const suggestions: WorkflowSuggestion[] = [];
   const config = loadWorkflowConfig();
@@ -254,8 +254,8 @@ function generateSuggestions(
 
   // Deduplicate suggestions that were already proposed in past retros
   const pastActions = new Set(
-    retros.flatMap((r: any) =>
-      (r.actions_accepted ?? []).map((a: any) => a.action)
+    retros.flatMap((r: Record<string, unknown>) =>
+      (Array.isArray(r.actions_accepted) ? r.actions_accepted : []).map((a: unknown) => (a as Record<string, unknown>).action)
     )
   );
 
@@ -264,43 +264,45 @@ function generateSuggestions(
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function computeStepDurations(logs: any[]): Record<string, number[]> {
+function computeStepDurations(logs: Record<string, unknown>[]): Record<string, number[]> {
   const durations: Record<string, number[]> = {};
   for (const log of logs) {
     if (log.duration_seconds && log.step_from !== log.step_to) {
-      if (!durations[log.step_from]) durations[log.step_from] = [];
-      durations[log.step_from].push(log.duration_seconds);
+      const stepFrom = log.step_from as string;
+      if (!durations[stepFrom]) durations[stepFrom] = [];
+      durations[stepFrom]!.push(log.duration_seconds as number);
     }
   }
   return durations;
 }
 
 function computeCheckpointStats(
-  logs: any[]
+  logs: Record<string, unknown>[]
 ): Record<string, { total: number; pass: number; fail: number; corrected: number; skipped: number }> {
   const stats: Record<string, { total: number; pass: number; fail: number; corrected: number; skipped: number }> = {};
   for (const log of logs) {
     if (!log.checkpoint_result) continue;
-    const step = log.step_from;
-    if (!stats[step]) stats[step] = { total: 0, pass: 0, fail: 0, corrected: 0, skipped: 0 };
-    stats[step].total++;
+    const stepName = log.step_from as string;
+    const stepEntry = stats[stepName] ??= { total: 0, pass: 0, fail: 0, corrected: 0, skipped: 0 };
+    stepEntry.total++;
     const result = log.checkpoint_result as string;
-    if (result in stats[step]) {
-      (stats[step] as any)[result]++;
+    if (result === "pass" || result === "fail" || result === "corrected" || result === "skipped") {
+      stepEntry[result]++;
     }
   }
   return stats;
 }
 
 function computeSprintRework(
-  logs: any[]
+  logs: Record<string, unknown>[]
 ): Record<string, { total: number; reworkCount: number }> {
   const sprints: Record<string, { total: number; reworkCount: number }> = {};
   for (const log of logs) {
     if (!log.sprint_id) continue;
-    if (!sprints[log.sprint_id]) sprints[log.sprint_id] = { total: 0, reworkCount: 0 };
-    sprints[log.sprint_id].total++;
-    if (log.had_rework) sprints[log.sprint_id].reworkCount++;
+    const sid = log.sprint_id as string;
+    if (!sprints[sid]) sprints[sid] = { total: 0, reworkCount: 0 };
+    sprints[sid]!.total++;
+    if (log.had_rework) sprints[sid]!.reworkCount++;
   }
   return sprints;
 }
@@ -314,7 +316,7 @@ function computeTrend(values: number[]): number {
   let numerator = 0;
   let denominator = 0;
   for (let i = 0; i < n; i++) {
-    numerator += (i - xMean) * (values[i] - yMean);
+    numerator += (i - xMean) * (values[i]! - yMean);
     denominator += (i - xMean) ** 2;
   }
   return denominator === 0 ? 0 : numerator / denominator;
@@ -323,7 +325,7 @@ function computeTrend(values: number[]): number {
 function sortedMedian(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 !== 0 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
 function formatDuration(seconds: number): string {

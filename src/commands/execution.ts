@@ -107,7 +107,7 @@ export default function execution(bctx: BotContext): Composer<Context> {
         : undefined;
       await ctx.reply(
         `GATE BLOQUEE\n\n${gateFailure.gate}\n${gateFailure.reason}`,
-        { ...bctx.threadOpts(ctx), reply_markup: keyboard }
+        { ...bctx.threadOpts(ctx), ...(keyboard !== undefined ? { reply_markup: keyboard } : {}) }
       );
       return;
     }

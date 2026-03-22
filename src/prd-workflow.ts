@@ -120,6 +120,19 @@ export async function triageDescription(
       priority: 3,
       project: "telegram-relay",
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      sprint: null,
+      tags: [] as string[],
+      estimated_hours: null,
+      actual_hours: null,
+      blocked_by: null,
+      notes: null,
+      completed_at: null,
+      acceptance_criteria: null,
+      dev_notes: null,
+      architecture_ref: null,
+      subtasks: [] as import("./tasks.ts").Subtask[],
+      project_id: null,
     };
     const difficulty = await computeDifficultyScore(pseudoTask, supabase);
     score = difficulty.score;
@@ -312,7 +325,7 @@ export async function decomposePRDIntoTasks(
     throw new Error("Aucune sous-tache generee depuis le PRD.");
   }
 
-  const added: Array<{ id: string; title: string; priority: number; acceptance_criteria?: string }> = [];
+  const added: Array<{ id: string; title: string; priority: number; acceptance_criteria?: string | undefined }> = [];
   for (const st of subtasks) {
     const task = await addTask(supabase, st.title, {
       description: st.description,
@@ -330,7 +343,7 @@ export async function decomposePRDIntoTasks(
       }
       const story = buildStoryFile(task);
       await enrichTaskWithStory(supabase, task.id, story);
-      added.push(task);
+      added.push({ id: task.id, title: task.title, priority: task.priority, acceptance_criteria: task.acceptance_criteria ?? undefined });
     }
   }
 
@@ -455,14 +468,14 @@ export function clearPendingDescription(chatKey: string): void {
 /**
  * Store pending revision state.
  */
-const pendingRevisions = new Map<string, { prdId: string; constraints?: PRDSessionConstraints }>();
+const pendingRevisions = new Map<string, { prdId: string; constraints?: PRDSessionConstraints | undefined }>();
 
 export function storePendingRevision(chatKey: string, prdId: string, constraints?: PRDSessionConstraints): void {
   pendingRevisions.set(chatKey, { prdId, constraints });
   setTimeout(() => pendingRevisions.delete(chatKey), 5 * 60 * 1000);
 }
 
-export function getPendingRevision(chatKey: string): { prdId: string; constraints?: PRDSessionConstraints } | undefined {
+export function getPendingRevision(chatKey: string): { prdId: string; constraints?: PRDSessionConstraints | undefined } | undefined {
   return pendingRevisions.get(chatKey);
 }
 

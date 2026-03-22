@@ -84,11 +84,11 @@ Description detaillee du comportement attendu.
 
 /** Session constraints to inject into PRD generation */
 export interface PRDSessionConstraints {
-  speed?: string;
-  quality?: string;
-  budget?: string;
-  scope?: string;
-  deadline?: string;
+  speed?: string | undefined;
+  quality?: string | undefined;
+  budget?: string | undefined;
+  scope?: string | undefined;
+  deadline?: string | undefined;
 }
 
 export async function generatePRD(
@@ -173,7 +173,7 @@ export async function generatePRD(
     let contentStart = 0;
 
     for (let i = 0; i < Math.min(5, lines.length); i++) {
-      const line = lines[i].trim();
+      const line = lines[i]!.trim();
       if (line.startsWith("{")) {
         try {
           const meta = JSON.parse(line);

@@ -50,14 +50,14 @@ export interface PipelineResult {
   task: Task;
   durationMs: number;
   message: string;
-  summary?: string;
+  summary?: string | undefined;
   blocked?: {
     reason: string;
-    gate?: string;
+    gate?: string | undefined;
     overridable: boolean;
-  };
-  prUrl?: string;
-  reviewScore?: number;
+  } | undefined;
+  prUrl?: string | undefined;
+  reviewScore?: number | undefined;
 }
 
 export interface PipelineOptions {
@@ -191,7 +191,13 @@ export async function runAutoPipeline(
   if (isFeatureEnabled("spec_phase_lite") && (pipelineType === "DEFAULT" || pipelineType === "LIGHT")) {
     await progress("Phase 2b: Generation de la proto-spec (spec-lite)...");
     const { generateProtoSpec } = await import("./spec-lite.ts");
-    const protoSpec = await generateProtoSpec(task, story);
+    const storyInput: import("./spec-lite.ts").StoryFileInput = {
+      acceptanceCriteria: story.acceptanceCriteria.map((ac) => `${ac.id}: Given ${ac.given} When ${ac.when} Then ${ac.then}`),
+      implementationSteps: story.implementationSteps.map((s) => s.description),
+      testStubs: story.testStubs.map((t) => t.description),
+      impactedFiles: story.impactedFiles,
+    };
+    const protoSpec = await generateProtoSpec(task, storyInput);
     const vcCount = protoSpec.v_criteria.length;
     await progress(
       `Proto-spec generee: ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`
@@ -361,7 +367,7 @@ export async function runBatchPipeline(
     return {
       success: false,
       phase: "blocked" as PipelinePhase,
-      task: tasks[i],
+      task: tasks[i]!,
       durationMs: 0,
       message: `Erreur: ${String(r.reason)}`,
     };

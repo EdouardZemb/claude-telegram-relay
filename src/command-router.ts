@@ -178,7 +178,7 @@ export async function routeIntent(
   const missingParams = action.params.filter((p) => p.required && !args.trim());
 
   if (missingParams.length > 0) {
-    const paramName = missingParams[0].name;
+    const paramName = missingParams[0]!.name;
 
     // Try contextual resolution
     if (paramName === "taskId") {
@@ -194,7 +194,7 @@ export async function routeIntent(
     }
 
     // Still missing — ask for clarification (S37-06)
-    if (!args.trim() && missingParams[0].required) {
+    if (!args.trim() && missingParams[0]!.required) {
       const key = confirmationKey(ctx);
       pendingClarifications.set(key, {
         command: action.command,

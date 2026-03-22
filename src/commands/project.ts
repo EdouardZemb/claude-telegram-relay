@@ -105,7 +105,7 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
         await ctx.reply("Aucun projet actif.", bctx.threadOpts(ctx));
       }
     } else {
-      const project = await getProject(bctx.supabase, subcommand);
+      const project = await getProject(bctx.supabase, subcommand!);
       if (project) {
         await bctx.sendResponse(ctx, formatProjectDetail(project));
       } else {

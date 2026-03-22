@@ -143,7 +143,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         `Serveur: ${hostname()}`,
         `Uptime bot: ${uptimeStr}`,
         `Uptime systeme: ${Math.floor(osUptime() / 3600)}h`,
-        `CPU: ${cpus().length} cores, load ${load[0].toFixed(1)} / ${load[1].toFixed(1)} / ${load[2].toFixed(1)}`,
+        `CPU: ${cpus().length} cores, load ${load[0]!.toFixed(1)} / ${load[1]!.toFixed(1)} / ${load[2]!.toFixed(1)}`,
         `Memoire: ${memUsed}/${memTotal} MB (${memPct}%)`,
       ];
 

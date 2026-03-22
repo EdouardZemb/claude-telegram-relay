@@ -357,9 +357,9 @@ export function getResponseTimeStats(): { p50: number; p95: number; p99: number;
   const sorted = [...responseTimeBuffer].sort((a, b) => a - b);
   const len = sorted.length;
   return {
-    p50: sorted[Math.floor(len * 0.5)],
-    p95: sorted[Math.floor(len * 0.95)],
-    p99: sorted[Math.floor(len * 0.99)],
+    p50: sorted[Math.floor(len * 0.5)] ?? 0,
+    p95: sorted[Math.floor(len * 0.95)] ?? 0,
+    p99: sorted[Math.floor(len * 0.99)] ?? 0,
     count: len,
   };
 }
@@ -396,7 +396,7 @@ export function recordModuleError(moduleName: string): void {
   moduleErrors.push({ module: moduleName, timestamp: Date.now() });
   // Prune entries older than 1 hour
   const cutoff = Date.now() - 60 * 60 * 1000;
-  while (moduleErrors.length > 0 && moduleErrors[0].timestamp < cutoff) {
+  while (moduleErrors.length > 0 && moduleErrors[0]!.timestamp < cutoff) {
     moduleErrors.shift();
   }
 }

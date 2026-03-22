@@ -136,7 +136,7 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const updated = await updateTaskStatus(bctx.supabase, matches[0].id, "done");
+    const updated = await updateTaskStatus(bctx.supabase, matches[0]!.id, "done");
     if (updated) {
       await ctx.reply(`Fait: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
@@ -184,7 +184,7 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const updated = await updateTaskStatus(bctx.supabase, startMatches[0].id, "in_progress");
+    const updated = await updateTaskStatus(bctx.supabase, startMatches[0]!.id, "in_progress");
     if (updated) {
       await ctx.reply(`En cours: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it

@@ -135,7 +135,7 @@ export async function runCodeReview(
     // S28: Use centralized spawnClaude with optional --from-pr
     const result = await spawnClaude({
       prompt,
-      fromPr: prNumber,
+      ...(prNumber !== undefined ? { fromPr: prNumber } : {}),
       useWorktree: true,
     });
 

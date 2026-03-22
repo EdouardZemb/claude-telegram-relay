@@ -23,25 +23,25 @@ export interface TokenUsage {
 }
 
 export interface CostEntry {
-  taskId?: string;
-  sprintId?: string;
-  agentRole?: string;
-  agentName?: string;
+  taskId?: string | undefined;
+  sprintId?: string | undefined;
+  agentRole?: string | undefined;
+  agentName?: string | undefined;
   tokensInput: number;
   tokensOutput: number;
   costUsd: number;
   durationMs: number;
-  retryAttempt?: number;
-  context?: string;
-  metadata?: Record<string, unknown>;
+  retryAttempt?: number | undefined;
+  context?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
   /** S28: model used for this execution */
-  model?: string;
+  model?: string | undefined;
   /** S34: Number of cascade escalations (0 = direct, >0 = escalated) */
-  cascadeEscalations?: number;
+  cascadeEscalations?: number | undefined;
   /** LLM-Ops: synthetic span ID (format: session:role:step) */
-  span_id?: string;
+  span_id?: string | undefined;
   /** LLM-Ops: pipeline session ID for cost attribution */
-  session_id?: string;
+  session_id?: string | undefined;
 }
 
 export interface SprintCostSummary {
@@ -72,7 +72,7 @@ const DEFAULT_PRICING = MODEL_PRICING["claude-sonnet-4-6"];
  * S28: Accepts optional model to use model-specific pricing.
  */
 export function estimateCost(tokensInput: number, tokensOutput: number, model?: string): number {
-  const pricing = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;
+  const pricing = (model && MODEL_PRICING[model]) || DEFAULT_PRICING!;
   const inputCost = (tokensInput / 1_000_000) * pricing.input;
   const outputCost = (tokensOutput / 1_000_000) * pricing.output;
   return Math.round((inputCost + outputCost) * 10000) / 10000; // 4 decimal places
@@ -99,8 +99,8 @@ export function parseTokenUsage(
   );
 
   if (usageMatch) {
-    const tokensInput = parseInt(usageMatch[1], 10);
-    const tokensOutput = parseInt(usageMatch[2], 10);
+    const tokensInput = parseInt(usageMatch[1]!, 10);
+    const tokensOutput = parseInt(usageMatch[2]!, 10);
     return {
       tokensInput,
       tokensOutput,
@@ -208,15 +208,15 @@ export async function getSprintCostSummary(
       // By agent
       const role = row.agent_role || "unknown";
       if (!costByAgent[role]) costByAgent[role] = { tokens: 0, cost: 0, count: 0 };
-      costByAgent[role].tokens += input + output;
-      costByAgent[role].cost += cost;
-      costByAgent[role].count += 1;
+      costByAgent[role]!.tokens += input + output;
+      costByAgent[role]!.cost += cost;
+      costByAgent[role]!.count += 1;
 
       // By task
       if (row.task_id) {
         if (!taskCosts[row.task_id]) taskCosts[row.task_id] = { tokens: 0, cost: 0 };
-        taskCosts[row.task_id].tokens += input + output;
-        taskCosts[row.task_id].cost += cost;
+        taskCosts[row.task_id]!.tokens += input + output;
+        taskCosts[row.task_id]!.cost += cost;
       }
     }
 

@@ -62,7 +62,7 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
     }
 
     const parts = args.split(/\s+/);
-    const action = parts[0];
+    const action = parts[0]!;
 
     if (action === "quiet" && parts[1]) {
       const match = parts[1].match(/^(\d{1,2})h?-(\d{1,2})h?$/);
@@ -71,8 +71,8 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
         return;
       }
       const prefs = getPrefs();
-      prefs.quietStart = parseInt(match[1]);
-      prefs.quietEnd = parseInt(match[2]);
+      prefs.quietStart = parseInt(match[1]!);
+      prefs.quietEnd = parseInt(match[2]!);
       await savePrefs(prefs);
       await ctx.reply(`Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`, bctx.threadOpts(ctx));
       return;

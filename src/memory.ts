@@ -218,13 +218,13 @@ export async function processMemoryIntents(
 
   // [REMEMBER: fact to store] — with S36-03/04/05 conflict resolution
   for (const match of response.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)) {
-    const resolution = await resolveMemoryConflict(supabase, match[1]);
+    const resolution = await resolveMemoryConflict(supabase, match[1]!);
     if (resolution.action === "skip") {
       // Duplicate found, access already bumped
     } else if (resolution.action === "update") {
-      await updateMemoryWithRevision(supabase, resolution.existingId, match[1], "update");
+      await updateMemoryWithRevision(supabase, resolution.existingId, match[1]!, "update");
     } else if (resolution.action === "merge") {
-      await updateMemoryWithRevision(supabase, resolution.existingId, match[1], "merge");
+      await updateMemoryWithRevision(supabase, resolution.existingId, match[1]!, "merge");
     } else {
       const { error } = await supabase.from("memory").insert({
         type: "fact",
@@ -251,7 +251,7 @@ export async function processMemoryIntents(
   // [IDEA: idea to capture]
   for (const match of response.matchAll(/\[IDEA:\s*(.+?)\]/gi)) {
     // Semantic deduplication (S21-04)
-    const duplicate = await findDuplicateIdea(supabase, match[1]);
+    const duplicate = await findDuplicateIdea(supabase, match[1]!);
     if (duplicate) {
       console.log(`Idea deduplicated (similar to: "${duplicate}")`);
       clean = clean.replace(match[0], "");
@@ -265,7 +265,7 @@ export async function processMemoryIntents(
     });
     if (error) console.error("memory insert (idea) error:", error);
     else {
-      const ideaPreview = match[1].length > 80 ? match[1].slice(0, 80) + "..." : match[1];
+      const ideaPreview = match[1]!.length > 80 ? match[1]!.slice(0, 80) + "..." : match[1]!;
       const ts = new Date().toLocaleTimeString("fr-FR", {
         hour: "2-digit", minute: "2-digit",
         timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
@@ -1434,7 +1434,7 @@ export async function clusterMemories(
 
         clusters.push({
           id: clusterId++,
-          label: memories[0].content.slice(0, 80),
+          label: memories[0]!.content.slice(0, 80),
           memories,
           size: memories.length,
         });

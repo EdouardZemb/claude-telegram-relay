@@ -232,8 +232,8 @@ export function detectConflicts(workingMemory: WorkingMemory | null): DetectedCo
 
   for (let i = 0; i < workingMemory.decisions.length; i++) {
     for (let j = i + 1; j < workingMemory.decisions.length; j++) {
-      const d1 = workingMemory.decisions[i];
-      const d2 = workingMemory.decisions[j];
+      const d1 = workingMemory.decisions[i]!;
+      const d2 = workingMemory.decisions[j]!;
 
       // Skip same agent
       if (d1.agent === d2.agent) continue;
@@ -393,7 +393,7 @@ export function formatMessageFlow(summary: MessageFlowSummary): string {
     `MESSAGES INTER-AGENTS: ${summary.totalMessages} total`,
   ];
 
-  if (summary.totalMessages === 0) return lines[0];
+  if (summary.totalMessages === 0) return lines[0]!;
 
   const types = Object.entries(summary.byType)
     .map(([t, n]) => `${t}: ${n}`)

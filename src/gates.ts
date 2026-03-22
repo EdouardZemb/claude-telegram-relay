@@ -46,7 +46,7 @@ export async function checkGate1_PRD(
     return {
       passed: true,
       gate: "GATE 1 — PRD",
-      reason: `PRD approuve: ${prds[0].title} [${prds[0].id.substring(0, 8)}]`,
+      reason: `PRD approuve: ${prds[0]!.title} [${prds[0]!.id.substring(0, 8)}]`,
       overridable: false,
     };
   }

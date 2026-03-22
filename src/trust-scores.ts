@@ -242,6 +242,7 @@ export function formatTrustScores(): string {
   const lines: string[] = ["Trust scores par role:"];
   for (const role of roles.sort()) {
     const ts = trustScoreCache[role];
+    if (!ts) continue;
     const passRate = ts.totalEvaluations > 0
       ? Math.round((ts.totalPasses / ts.totalEvaluations) * 100)
       : 0;

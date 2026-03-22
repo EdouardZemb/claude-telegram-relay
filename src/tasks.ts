@@ -48,16 +48,16 @@ export async function addTask(
   supabase: SupabaseClient,
   title: string,
   opts?: {
-    description?: string;
-    project?: string;
-    project_id?: string;
-    priority?: number;
-    sprint?: string;
-    tags?: string[];
-    acceptance_criteria?: string;
-    dev_notes?: string;
-    architecture_ref?: string;
-    subtasks?: Subtask[];
+    description?: string | undefined;
+    project?: string | undefined;
+    project_id?: string | undefined;
+    priority?: number | undefined;
+    sprint?: string | undefined;
+    tags?: string[] | undefined;
+    acceptance_criteria?: string | undefined;
+    dev_notes?: string | undefined;
+    architecture_ref?: string | undefined;
+    subtasks?: Subtask[] | undefined;
   }
 ): Promise<Task | null> {
   const { data, error } = await supabase

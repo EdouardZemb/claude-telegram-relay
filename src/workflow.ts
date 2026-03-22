@@ -53,16 +53,16 @@ export interface WorkflowConfig {
 }
 
 export interface WorkflowLogEntry {
-  task_id?: string;
-  sprint_id?: string;
+  task_id?: string | undefined;
+  sprint_id?: string | undefined;
   step_from: string;
   step_to: string;
-  duration_seconds?: number;
-  had_rework?: boolean;
-  checkpoint_mode?: string;
-  checkpoint_result?: "pass" | "fail" | "skipped" | "corrected";
-  checkpoint_notes?: string;
-  agent_notes?: string;
+  duration_seconds?: number | undefined;
+  had_rework?: boolean | undefined;
+  checkpoint_mode?: string | undefined;
+  checkpoint_result?: "pass" | "fail" | "skipped" | "corrected" | undefined;
+  checkpoint_notes?: string | undefined;
+  agent_notes?: string | undefined;
 }
 
 // ── Load Config ──────────────────────────────────────────────
@@ -188,7 +188,7 @@ export class WorkflowTracker {
 
   constructor(
     supabase: SupabaseClient,
-    opts?: { taskId?: string; sprintId?: string; startStep?: string }
+    opts?: { taskId?: string | undefined; sprintId?: string | undefined; startStep?: string | undefined }
   ) {
     this.supabase = supabase;
     this.taskId = opts?.taskId;
@@ -292,14 +292,14 @@ export async function collectSprintMetrics(
   }
 
   const planned = tasks.length;
-  const completed = tasks.filter((t: any) => t.status === "done").length;
+  const completed = tasks.filter((t: Record<string, unknown>) => t.status === "done").length;
 
   // Avg delivery time (hours from created to completed)
   const deliveryTimes = tasks
-    .filter((t: any) => t.status === "done" && t.completed_at)
-    .map((t: any) => {
-      const created = new Date(t.created_at).getTime();
-      const done = new Date(t.completed_at).getTime();
+    .filter((t: Record<string, unknown>) => t.status === "done" && t.completed_at)
+    .map((t: Record<string, unknown>) => {
+      const created = new Date(t.created_at as string).getTime();
+      const done = new Date(t.completed_at as string).getTime();
       return (done - created) / (1000 * 60 * 60);
     });
   const avgDeliveryHours =
@@ -313,18 +313,18 @@ export async function collectSprintMetrics(
     .select("had_rework, checkpoint_result")
     .eq("sprint_id", sprintId);
 
-  const reworkCount = logs?.filter((l: any) => l.had_rework).length ?? 0;
+  const reworkCount = logs?.filter((l: Record<string, unknown>) => l.had_rework).length ?? 0;
 
   // First pass rate: tasks that went through review without rework
-  const taskIds = tasks.map((t: any) => t.id);
+  const taskIds = tasks.map((t: Record<string, unknown>) => t.id);
   const { data: reviewLogs } = await supabase
     .from("workflow_logs")
     .select("task_id, had_rework")
     .eq("step_to", "review")
     .in("task_id", taskIds.length > 0 ? taskIds : ["none"]);
 
-  const reviewedTasks = new Set(reviewLogs?.map((l: any) => l.task_id) ?? []);
-  const firstPassTasks = reviewLogs?.filter((l: any) => !l.had_rework) ?? [];
+  const reviewedTasks = new Set(reviewLogs?.map((l: Record<string, unknown>) => l.task_id) ?? []);
+  const firstPassTasks = reviewLogs?.filter((l: Record<string, unknown>) => !l.had_rework) ?? [];
   const firstPassRate =
     reviewedTasks.size > 0
       ? (firstPassTasks.length / reviewedTasks.size) * 100
@@ -488,7 +488,7 @@ export async function generateRetroData(
   for (const log of logs ?? []) {
     if (log.duration_seconds && log.step_from !== log.step_to) {
       if (!stepDurations[log.step_from]) stepDurations[log.step_from] = [];
-      stepDurations[log.step_from].push(log.duration_seconds);
+      stepDurations[log.step_from]!.push(log.duration_seconds);
     }
   }
   const avgStepDuration: Record<string, number> = {};

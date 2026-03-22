@@ -58,7 +58,7 @@ function splitTextForGroq(text: string, maxLen = 190): string[] {
     // Try to split at sentence boundary (. ! ? followed by space)
     let splitAt = -1;
     for (let i = maxLen; i >= 40; i--) {
-      if (".!?".includes(remaining[i - 1]) && (i >= remaining.length || remaining[i] === " " || remaining[i] === "\n")) {
+      if (".!?".includes(remaining[i - 1]!) && (i >= remaining.length || remaining[i] === " " || remaining[i] === "\n")) {
         splitAt = i;
         break;
       }
@@ -142,14 +142,14 @@ async function synthesizeGroq(text: string): Promise<Buffer | null> {
 
       if (wavBuffers.length === 1) {
         wavPath = join(tmpDir, `tts_groq_${timestamp}.wav`);
-        await writeFile(wavPath, wavBuffers[0]);
+        await writeFile(wavPath, wavBuffers[0]!);
         tempFiles.push(wavPath);
       } else {
         // Write each chunk WAV and concatenate with ffmpeg
         const chunkPaths: string[] = [];
         for (let i = 0; i < wavBuffers.length; i++) {
           const p = join(tmpDir, `tts_groq_${timestamp}_${i}.wav`);
-          await writeFile(p, wavBuffers[i]);
+          await writeFile(p, wavBuffers[i]!);
           chunkPaths.push(p);
           tempFiles.push(p);
         }
