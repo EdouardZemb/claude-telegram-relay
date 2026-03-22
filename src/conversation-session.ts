@@ -69,7 +69,7 @@ export interface ConversationSession {
   /** PRD ID when in a PRD-to-deploy workflow */
   activePrdId?: string;
   /** Current PRD workflow step */
-  prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "implementation" | "done";
+  prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "spec_preflight" | "implementation" | "done";
   /** Pending action proposal from the bot, awaiting user confirmation */
   pendingProposal?: PendingProposal;
 }
