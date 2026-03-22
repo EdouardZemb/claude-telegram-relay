@@ -26,7 +26,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/project.ts` | Composer: /projects, /project |
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
-| `commands/jobs.ts` | Composer: /jobs (list, cancel) |
+| `commands/jobs.ts` | Composer: /jobs (list, cancel, batch retry) |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
@@ -71,7 +71,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
 | `autonomy-scanner.ts` | Proactive task creation from codebase scanning |
-| `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence |
+| `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence, batch result parsing, progress messaging |
 | `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets |
 | `mcp-config.ts` | Per-role MCP tool configuration and allowlists |
@@ -184,7 +184,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3242 tests (unit + integration + E2E)
+tests/                  3307 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports

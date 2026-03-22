@@ -6,7 +6,15 @@
 
 import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { cancel, formatJobList, get, isJobManagerEnabled, list } from "../job-manager.ts";
+import {
+  cancel,
+  formatJobList,
+  get,
+  isJobManagerEnabled,
+  launch,
+  list,
+  parseBatchResult,
+} from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
 import { formatPRDDetail, getPRD } from "../prd.ts";
 import { getBacklog, getCurrentSprint, updateTaskStatus } from "../tasks.ts";
@@ -187,6 +195,85 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
             /* already answered */
           }
         }
+      }
+      return;
+    }
+
+    // R8/R10: Batch retry handler — relaunch failed tasks
+    if (action === "jc_batch_retry" && param) {
+      const originalJob = await get(param);
+      // R14: Guard for expired jobs (> 24h cleanup)
+      if (!originalJob) {
+        await ctx.answerCallbackQuery({
+          text: "Ce batch a expire (> 24h). Relance depuis /backlog.",
+          show_alert: true,
+        });
+        return;
+      }
+      const batch = originalJob.result ? parseBatchResult(originalJob.result) : null;
+      if (!batch || batch.failedIds.length === 0) {
+        await ctx.answerCallbackQuery({ text: "Aucune tache echouee a relancer." });
+        return;
+      }
+
+      // Resolve failed tasks from Supabase by short ID prefix
+      if (!bctx.supabase) {
+        await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+        return;
+      }
+
+      const failedTasks: any[] = [];
+      for (const shortId of batch.failedIds) {
+        const { data: matches } = await bctx.supabase
+          .from("tasks")
+          .select("*")
+          .ilike("id", `${shortId}%`)
+          .limit(1);
+        if (matches?.[0]) failedTasks.push(matches[0]);
+      }
+
+      if (failedTasks.length === 0) {
+        await ctx.answerCallbackQuery({ text: "Taches echouees introuvables dans le backlog." });
+        return;
+      }
+
+      // Launch new batch for failed tasks
+      const chatId = ctx.chat?.id || 0;
+      const threadId = ctx.callbackQuery.message?.message_thread_id;
+      const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
+      const { sendProgressMessage } = await import("../job-manager.ts");
+
+      const launchFn = async (): Promise<string> => {
+        const onProgress = async (msg: string) => {
+          await sendProgressMessage(chatId, threadId, msg);
+        };
+        const results = await runBatchPipeline(bctx.supabase!, failedTasks, {
+          autoPipeline: true,
+          onProgress,
+        });
+        const ok = results.filter((r: any) => r.success).length;
+        const newFailedIds = results
+          .filter((r: any) => !r.success)
+          .map((r: any) => r.task.id.substring(0, 8));
+        const lines = results.map((r: any) => formatPipelineResult(r));
+        return `BATCH_COMPLETE:${ok}/${results.length}:failed=${newFailedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
+      };
+
+      const jobId = await launch("autopipeline-batch", chatId, launchFn, {
+        messageThreadId: threadId,
+      });
+      await ctx.answerCallbackQuery({ text: "Relance en cours..." });
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      try {
+        const taskList = failedTasks
+          .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+          .join("\n");
+        await ctx.reply(
+          `Relance de ${failedTasks.length} taches echouees (job: ${jobId})\n\n${taskList}`,
+          bctx.threadOpts(ctx),
+        );
+      } catch (e) {
+        log.error("jc_batch_retry reply failed", { error: String(e) });
       }
       return;
     }

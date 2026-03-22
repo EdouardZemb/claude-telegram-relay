@@ -388,6 +388,70 @@ describe("Heartbeat Actions", () => {
   });
 });
 
+// ── V5/V6: Supabase error handling ──────────────────────────
+
+/**
+ * Helper: creates a chainable mock object that resolves any method chain
+ * to the given result (used for Supabase query chain mocking).
+ */
+function chainResult(result: { data: any; error: any }): any {
+  const handler: ProxyHandler<object> = {
+    get(_, prop) {
+      if (prop === "then") {
+        return (resolve: (v: any) => any, reject?: (e: any) => any) =>
+          Promise.resolve(result).then(resolve, reject);
+      }
+      // Any method call returns a new chainable proxy
+      return (..._args: any[]) => new Proxy({}, handler);
+    },
+  };
+  return new Proxy({}, handler);
+}
+
+describe("V5: getSprintDelta Supabase error handling", () => {
+  it("returns changed:false when Supabase returns error", async () => {
+    const { getSprintDelta } = await import("../../src/heartbeat");
+
+    let taskQueryCount = 0;
+    const supabase = {
+      from: (table: string) => {
+        if (table === "tasks") {
+          taskQueryCount++;
+          if (taskQueryCount === 1) {
+            // getCurrentSprint query — return a valid sprint
+            return chainResult({ data: { sprint: "S44" }, error: null });
+          }
+          // Second tasks query (in getSprintDelta) — return error
+          return chainResult({ data: null, error: { message: "RLS" } });
+        }
+        return chainResult({ data: [], error: null });
+      },
+    };
+
+    const lastSnapshot = { sprint: "S44", done: 0, total: 2 };
+    const result = await getSprintDelta(supabase as any, lastSnapshot);
+
+    expect(result.changed).toBe(false);
+    expect(result.summary).toContain("Erreur");
+    expect(result.snapshot).toEqual(lastSnapshot);
+  });
+});
+
+describe("V6: getStaleTasks Supabase error handling", () => {
+  it("returns empty result when Supabase returns error", async () => {
+    const { getStaleTasks } = await import("../../src/heartbeat");
+
+    const supabase = {
+      from: () => chainResult({ data: null, error: { message: "timeout" } }),
+    };
+
+    const result = await getStaleTasks(supabase as any);
+
+    expect(result.tasks).toBe("");
+    expect(result.hasStale).toBe(false);
+  });
+});
+
 describe("Heartbeat Git Delta", () => {
   it("should detect no changes when SHA matches", () => {
     // getGitDelta calls spawnSync which will work in test env

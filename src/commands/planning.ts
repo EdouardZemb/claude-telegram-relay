@@ -12,7 +12,7 @@ import { decomposeTask } from "../agent.ts";
 import type { BotContext } from "../bot-context.ts";
 import { getSession } from "../conversation-session.ts";
 import { shardDocument } from "../document-sharding.ts";
-import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
+import { isJobManagerEnabled, launch as launchJob, sendProgressMessage } from "../job-manager.ts";
 import {
   formatPRDDetail,
   formatPRDList,
@@ -548,17 +548,38 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         // Launch batch pipeline for ALL PRD tasks via job manager
         if (isJobManagerEnabled()) {
           const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
+          // R5: Capture chatId and threadId before closure
+          const capturedChatId = cId;
+          const capturedThreadId = tId;
           const launchFn = async (): Promise<string> => {
-            const results = await runBatchPipeline(bctx.supabase!, tasks, { autoPipeline: true });
+            // R4/R16: onProgress sends one message per completed task
+            const onProgress = async (msg: string) => {
+              await sendProgressMessage(capturedChatId, capturedThreadId, msg);
+            };
+            const results = await runBatchPipeline(bctx.supabase!, tasks, {
+              autoPipeline: true,
+              onProgress,
+            });
             const ok = results.filter((r) => r.success).length;
+            // R9/R15: Collect failed IDs including non-executed tasks
+            const executedIds = new Set(results.map((r) => r.task.id));
+            const failedIds = results
+              .filter((r) => !r.success)
+              .map((r) => r.task.id.substring(0, 8));
+            // R15: Include tasks that were not executed (early stop in sequential mode)
+            for (const t of tasks) {
+              if (!executedIds.has(t.id)) {
+                failedIds.push(t.id.substring(0, 8));
+              }
+            }
             const lines = results.map((r) => formatPipelineResult(r));
-            return `BATCH_COMPLETE:${ok}/${results.length}\n\n${lines.join("\n\n---\n\n")}`;
+            return `BATCH_COMPLETE:${ok}/${tasks.length}:failed=${failedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
           };
           const taskList = tasks
             .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
             .join("\n");
-          const jobId = await launchJob("autopipeline-batch", cId, launchFn, {
-            messageThreadId: tId,
+          const jobId = await launchJob("autopipeline-batch", capturedChatId, launchFn, {
+            messageThreadId: capturedThreadId,
           });
           await ctx.editMessageText(
             `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`,
@@ -622,17 +643,38 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         // Launch batch pipeline via job manager (same pattern as prdwf_launch)
         if (isJobManagerEnabled()) {
           const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
+          // R5: Capture chatId and threadId before closure
+          const capturedChatId = cId;
+          const capturedThreadId = tId;
           const launchFn = async (): Promise<string> => {
-            const results = await runBatchPipeline(bctx.supabase!, tasks, { autoPipeline: true });
+            // R4/R16: onProgress sends one message per completed task
+            const onProgress = async (msg: string) => {
+              await sendProgressMessage(capturedChatId, capturedThreadId, msg);
+            };
+            const results = await runBatchPipeline(bctx.supabase!, tasks, {
+              autoPipeline: true,
+              onProgress,
+            });
             const ok = results.filter((r) => r.success).length;
+            // R9/R15: Collect failed IDs including non-executed tasks
+            const executedIds = new Set(results.map((r) => r.task.id));
+            const failedIds = results
+              .filter((r) => !r.success)
+              .map((r) => r.task.id.substring(0, 8));
+            // R15: Include tasks that were not executed (early stop in sequential mode)
+            for (const t of tasks) {
+              if (!executedIds.has(t.id)) {
+                failedIds.push(t.id.substring(0, 8));
+              }
+            }
             const lines = results.map((r) => formatPipelineResult(r));
-            return `BATCH_COMPLETE:${ok}/${results.length}\n\n${lines.join("\n\n---\n\n")}`;
+            return `BATCH_COMPLETE:${ok}/${tasks.length}:failed=${failedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
           };
           const taskList = tasks
             .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
             .join("\n");
-          const jobId = await launchJob("autopipeline-batch", cId, launchFn, {
-            messageThreadId: tId,
+          const jobId = await launchJob("autopipeline-batch", capturedChatId, launchFn, {
+            messageThreadId: capturedThreadId,
           });
           await ctx.editMessageText(
             `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`,

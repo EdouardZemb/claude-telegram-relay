@@ -54,6 +54,22 @@ describe("doc-freshness integration", () => {
     expect(cmdGaps).toEqual([]);
   });
 
+  test("V9: scripts/doc-utils.ts re-exports everything from src/doc-utils.ts", async () => {
+    const { readFileSync } = require("fs");
+    const content = readFileSync(join(ROOT, "scripts", "doc-utils.ts"), "utf-8");
+
+    // Must contain the re-export directive
+    expect(content).toContain('export * from "../src/doc-utils.ts"');
+
+    // Verify exports are identical: import from both and compare
+    const srcExports = await import("../../src/doc-utils.ts");
+    const scriptsExports = await import("../../scripts/doc-utils.ts");
+
+    const srcKeys = Object.keys(srcExports).sort();
+    const scriptsKeys = Object.keys(scriptsExports).sort();
+    expect(scriptsKeys).toEqual(srcKeys);
+  });
+
   test("whitelist works (no false positives for excluded modules)", async () => {
     const srcModules = await extractModules(SRC_DIR);
     // All modules should be present, none should be whitelisted out incorrectly

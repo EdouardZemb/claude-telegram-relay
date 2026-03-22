@@ -117,6 +117,21 @@ describe("buildFullAgentPrompt", () => {
     expect(prompt).toContain("NOTES DEV");
     expect(prompt).toContain("rate limiting");
   });
+
+  it("V7: exec instructions contain CLAUDE.md, bun build, bun test before 'Commence maintenant.'", () => {
+    const context: AgentPromptContext = { command: "exec", taskTitle: "Test" };
+    const prompt = buildFullAgentPrompt("dev", context);
+
+    expect(prompt).toContain("CLAUDE.md");
+    expect(prompt).toContain("bun build");
+    expect(prompt).toContain("bun test");
+
+    const commenceIdx = prompt.indexOf("Commence maintenant.");
+    expect(commenceIdx).toBeGreaterThan(-1);
+    expect(prompt.indexOf("CLAUDE.md")).toBeLessThan(commenceIdx);
+    expect(prompt.indexOf("bun build")).toBeLessThan(commenceIdx);
+    expect(prompt.indexOf("bun test")).toBeLessThan(commenceIdx);
+  });
 });
 
 describe("getAgentCapabilities", () => {

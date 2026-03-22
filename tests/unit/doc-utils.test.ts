@@ -96,6 +96,18 @@ describe("doc-utils", () => {
     });
   });
 
+  describe("V8: heartbeat.ts imports doc-utils from src/", () => {
+    test("src/heartbeat.ts imports from './doc-utils.ts' not '../scripts/doc-utils.ts'", async () => {
+      const { readFileSync } = require("fs");
+      const heartbeatContent = readFileSync(join(ROOT, "src", "heartbeat.ts"), "utf-8");
+
+      // Must NOT contain the old scripts import
+      expect(heartbeatContent).not.toContain("../scripts/doc-utils");
+      // Must contain the correct relative import
+      expect(heartbeatContent).toContain("./doc-utils");
+    });
+  });
+
   describe("findGaps", () => {
     test("detects missing module", () => {
       const state: DocState = {

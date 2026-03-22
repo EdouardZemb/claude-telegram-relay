@@ -20,6 +20,35 @@ const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claud
 const JOBS_FILE = join(RELAY_DIR, "jobs.json");
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CLEANUP_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const BATCH_RESULT_MAX_CHARS = 4000;
+const TELEGRAM_MSG_MAX_CHARS = 3800;
+
+/** Configurable failure threshold for batch escalation (R7). */
+export const BATCH_FAILURE_THRESHOLD = 0.5;
+
+// ── Batch Result Parsing ─────────────────────────────────────
+
+export interface BatchResult {
+  ok: number;
+  total: number;
+  failedIds: string[];
+  details: string;
+}
+
+/**
+ * Parse the structured BATCH_COMPLETE format into a typed object.
+ * Format: BATCH_COMPLETE:<ok>/<total>:failed=<id1>,<id2>\n\n<details>
+ * Returns null if the input does not match the expected format.
+ */
+export function parseBatchResult(result: string): BatchResult | null {
+  if (!result?.startsWith("BATCH_COMPLETE:")) return null;
+  const afterPrefix = result.replace("BATCH_COMPLETE:", "");
+  const [header, ...rest] = afterPrefix.split("\n\n");
+  const [counts, failedPart] = header.split(":failed=");
+  const [ok, total] = counts.split("/").map(Number);
+  const failedIds = failedPart?.split(",").filter(Boolean) ?? [];
+  return { ok, total, failedIds, details: rest.join("\n\n") };
+}
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -59,6 +88,25 @@ let botInstance: Bot | null = null;
  */
 export function initJobManager(bot: Bot): void {
   botInstance = bot;
+}
+
+/**
+ * Send a progress message to a chat. Catches errors silently (R5, V13).
+ * Used by onProgress callbacks in planning.ts closures.
+ */
+export async function sendProgressMessage(
+  chatId: number | string,
+  messageThreadId: number | undefined,
+  message: string,
+): Promise<void> {
+  if (!botInstance) return;
+  try {
+    const opts: Record<string, unknown> = {};
+    if (messageThreadId) opts.message_thread_id = messageThreadId;
+    await botInstance.api.sendMessage(chatId, message, opts);
+  } catch (error) {
+    log.error("sendProgressMessage failed", { error: String(error) });
+  }
 }
 
 // ── Persistence ────────────────────────────────────────────────
@@ -152,8 +200,11 @@ export async function launch(
       ]);
 
       job.status = "completed";
+      const maxLen = job.type === "autopipeline-batch" ? BATCH_RESULT_MAX_CHARS : 500;
       job.result =
-        typeof result === "string" ? result.substring(0, 500) : String(result).substring(0, 500);
+        typeof result === "string"
+          ? result.substring(0, maxLen)
+          : String(result).substring(0, maxLen);
       job.completedAt = new Date().toISOString();
     } catch (error: any) {
       job.status = "failed";
@@ -209,10 +260,22 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
         hasButtons = true;
       }
       break;
-    case "autopipeline-batch":
+    case "autopipeline-batch": {
+      // R11: conditional retry button + backlog button
+      const batchParsed = job.result ? parseBatchResult(job.result) : null;
+      if (batchParsed && batchParsed.failedIds.length > 0) {
+        const failRate = 1 - batchParsed.ok / batchParsed.total;
+        if (failRate > BATCH_FAILURE_THRESHOLD) {
+          kb.text(
+            `Relancer les ${batchParsed.failedIds.length} echecs`,
+            `jc_batch_retry:${job.id}`,
+          );
+        }
+      }
       kb.text("Voir le backlog", "jc_backlog");
       hasButtons = true;
       break;
+    }
     case "prd-decompose":
     case "plan":
       kb.text("Voir le backlog", "jc_backlog");
@@ -288,8 +351,71 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       const resume = parts.slice(2).join("|");
       message = `Preflight termine (${elapsed})\nVerdict : ${verdict}\n${resume}`;
     } else if (job.type === "autopipeline-batch" && job.result?.startsWith("BATCH_COMPLETE:")) {
-      const summary = job.result.replace("BATCH_COMPLETE:", "").split("\n")[0];
-      message = `Implementation batch terminée (${elapsed})\nResultat : ${summary} taches reussies`;
+      const batch = parseBatchResult(job.result);
+      if (batch) {
+        const failRate = 1 - batch.ok / batch.total;
+        const prefix = failRate > BATCH_FAILURE_THRESHOLD ? "ALERTE — " : "";
+        let body = `${prefix}Implementation batch terminee (${elapsed})\nResultat : ${batch.ok}/${batch.total} taches reussies`;
+
+        // R1: Add per-task detail lines from details section
+        if (batch.details) {
+          const taskBlocks = batch.details.split("\n\n---\n\n");
+          const lines: string[] = [];
+          for (let i = 0; i < taskBlocks.length; i++) {
+            const block = taskBlocks[i].trim();
+            if (!block) continue;
+            // Extract first line as summary (e.g. "PIPELINE OK — Task title")
+            const firstLine = block.split("\n")[0];
+            const lineNum = i + 1;
+            const statusMatch = firstLine.match(/^PIPELINE\s+(OK|ECHEC)\s+—\s+(.*)$/);
+            if (statusMatch) {
+              const [, status, title] = statusMatch;
+              // Extract phase/duration from second line if available
+              const secondLine = block.split("\n")[1] || "";
+              const durationMatch = secondLine.match(/Duree:\s*(\d+)s/);
+              const duration = durationMatch ? `, ${durationMatch[1]}s` : "";
+              // Extract PR URL if present
+              const prMatch = block.match(/PR:\s*(https:\/\/github\.com\/[^\s]+\/pull\/\d+)/);
+              const pr = prMatch ? `, PR ${prMatch[1].match(/pull\/(\d+)/)?.[0] || ""}` : "";
+              lines.push(`${lineNum}. ${status} — ${title}${duration}${pr}`);
+            } else {
+              lines.push(`${lineNum}. ${firstLine}`);
+            }
+
+            // R3: Check if we're exceeding the Telegram limit
+            const tentativeBody = body + "\n\n" + lines.join("\n");
+            if (tentativeBody.length > TELEGRAM_MSG_MAX_CHARS) {
+              const remaining = taskBlocks.length - i;
+              lines.pop(); // Remove the line that would exceed the limit
+              if (remaining > 0) {
+                lines.push(`... +${remaining} autres. /jobs ${job.id} pour les details`);
+              }
+              break;
+            }
+          }
+          // R3: If some task blocks were lost due to result truncation, add a note
+          const totalExpected = batch.total;
+          const linesWithNumbers = lines.filter((l) => /^\d+\./.test(l));
+          if (linesWithNumbers.length < totalExpected && !lines.some((l) => l.startsWith("..."))) {
+            const missing = totalExpected - linesWithNumbers.length;
+            lines.push(`... +${missing} autres. /jobs ${job.id} pour les details`);
+          }
+          if (lines.length > 0) {
+            body += "\n\n" + lines.join("\n");
+          }
+        }
+        // Final safety: hard truncate if still over limit
+        if (body.length > TELEGRAM_MSG_MAX_CHARS) {
+          body =
+            body.substring(0, TELEGRAM_MSG_MAX_CHARS - 60) +
+            `\n... /jobs ${job.id} pour les details`;
+        }
+        message = body;
+      } else {
+        // Fallback for malformed BATCH_COMPLETE
+        const summary = job.result.replace("BATCH_COMPLETE:", "").split("\n")[0].split(":")[0];
+        message = `Implementation batch terminee (${elapsed})\nResultat : ${summary} taches reussies`;
+      }
     } else {
       message = `Job ${job.type} terminé (${elapsed})\n${job.result || ""}`;
     }
@@ -313,9 +439,17 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
   }
 
   // Fallback to notification queue
+  // Determine severity: critical for batch with high failure rate
+  let severity: "normal" | "critical" = "normal";
+  if (job.type === "autopipeline-batch" && job.result) {
+    const batch = parseBatchResult(job.result);
+    if (batch && batch.total > 0 && 1 - batch.ok / batch.total > BATCH_FAILURE_THRESHOLD) {
+      severity = "critical";
+    }
+  }
   await enqueue({
     type: job.status === "completed" ? "task" : "alert",
-    severity: "normal",
+    severity,
     message: `Job ${job.type} termine (${job.id})\n${job.status === "completed" ? job.result || "" : job.error || "Erreur inconnue"}`,
     data: job.taskId ? { taskId: job.taskId } : undefined,
   });
