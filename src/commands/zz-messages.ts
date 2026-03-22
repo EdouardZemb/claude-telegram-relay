@@ -6,70 +6,82 @@
  * S45-T4: Document detection in photo + document handlers with extraction/classification pipeline.
  */
 
-import { Composer, type Context, InputFile } from "grammy";
-import type { BotContext } from "../bot-context.ts";
-import { BOT_TOKEN, UPLOADS_DIR, ALLOWED_USER_ID } from "../bot-context.ts";
-import { writeFile, unlink } from "fs/promises";
+import { unlink, writeFile } from "fs/promises";
+import { Composer, type Context } from "grammy";
 import { join } from "path";
+import { formatActionsForLLM } from "../action-registry.ts";
+import { recordResponseTime } from "../alerts.ts";
+import type { BotContext } from "../bot-context.ts";
+import { ALLOWED_USER_ID, BOT_TOKEN, formatDocumentContext, UPLOADS_DIR } from "../bot-context.ts";
+import {
+  buildSyntheticUpdate,
+  checkPendingClarification,
+  handleConfirmationCallback,
+  routeIntent,
+} from "../command-router.ts";
+import type { PendingProposal } from "../conversation-session.ts";
+import {
+  addConstraint,
+  addIntent as addSessionIntent,
+  addMessage as addSessionMessage,
+  extractConstraints,
+  formatSessionForIntent,
+  getSession,
+} from "../conversation-session.ts";
+import type { DocumentCreateInput } from "../documents.ts";
+import { checkDuplicate, computeFileHash, createDocument, searchDocuments } from "../documents.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
+import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
+import { createLogger } from "../logger.ts";
+import {
+  autoRemember,
+  classifyMessage,
+  getMemoryContext,
+  getRecentMessages,
+  getRelevantContext,
+  processMemoryIntents,
+} from "../memory.ts";
+import { formatPRDDetail, getPRD } from "../prd.ts";
+import {
+  buildEnrichedDescription,
+  buildRevisionKeyboard,
+  buildTriageResponse,
+  clearPendingRevision,
+  getPendingRevision,
+  isPrdWorkflowEnabled,
+  chatKey as prdChatKey,
+  revisePRD,
+  storePendingDescription,
+  triageDescription,
+} from "../prd-workflow.ts";
 import { transcribe } from "../transcribe.ts";
 import {
-  processMemoryIntents,
-  getMemoryContext,
-  getRelevantContext,
-  getRecentMessages,
-  classifyMessage,
-  autoRemember,
-} from "../memory.ts";
-import { recordResponseTime } from "../alerts.ts";
-import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
-import { routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate } from "../command-router.ts";
-import { formatActionsForLLM } from "../action-registry.ts";
-import {
-  getSession,
-  addMessage as addSessionMessage,
-  addIntent as addSessionIntent,
-  extractConstraints,
-  addConstraint,
-  formatSessionForIntent,
-} from "../conversation-session.ts";
-import { createDocument, searchDocuments, checkDuplicate, computeFileHash } from "../documents.ts";
-import type { DocumentCreateInput } from "../documents.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
-import { formatDocumentContext } from "../bot-context.ts";
-import {
   buildClassificationKeyboard,
-  registerPendingClassification,
   buildDuplicateKeyboard,
+  registerPendingClassification,
   storePendingUpload,
 } from "./documents.ts";
-import {
-  isPrdWorkflowEnabled,
-  triageDescription,
-  buildTriageResponse,
-  buildEnrichedDescription,
-  storePendingDescription,
-  getPendingRevision,
-  clearPendingRevision,
-  revisePRD,
-  buildRevisionKeyboard,
-  chatKey as prdChatKey,
-} from "../prd-workflow.ts";
-import { getPRD, formatPRDDetail } from "../prd.ts";
-import type { PendingProposal } from "../conversation-session.ts";
 
+const log = createLogger("zz-messages");
 // ── Proposal detection ───────────────────────────────────────
 
-const PROPOSAL_PATTERNS: Array<{ regex: RegExp; actionExtractor: (m: RegExpMatchArray) => string | null }> = [
+const PROPOSAL_PATTERNS: Array<{
+  regex: RegExp;
+  actionExtractor: (m: RegExpMatchArray) => string | null;
+}> = [
   {
-    regex: /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+    regex:
+      /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
     actionExtractor: (m) => mapProposalAction(m[1]),
   },
   {
-    regex: /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+    regex:
+      /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
     actionExtractor: (m) => mapProposalAction(m[1]),
   },
   {
-    regex: /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i,
+    regex:
+      /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i,
     actionExtractor: (m) => mapProposalAction(m[1]),
   },
 ];
@@ -127,21 +139,35 @@ const DOCUMENT_MIME_TYPES = new Set([
 
 /** Caption keywords hinting a photo is a document (French + English) */
 const DOCUMENT_CAPTION_KEYWORDS = [
-  "facture", "contrat", "recu", "ordonnance", "document", "attestation",
-  "certificat", "devis", "fiche", "releve", "quittance", "bulletin",
-  "invoice", "receipt", "contract", "scan", "archive", "stocke",
-  "enregistre", "classe", "save", "store",
+  "facture",
+  "contrat",
+  "recu",
+  "ordonnance",
+  "document",
+  "attestation",
+  "certificat",
+  "devis",
+  "fiche",
+  "releve",
+  "quittance",
+  "bulletin",
+  "invoice",
+  "receipt",
+  "contract",
+  "scan",
+  "archive",
+  "stocke",
+  "enregistre",
+  "classe",
+  "save",
+  "store",
 ];
 
 /** Keywords that need word-boundary matching to avoid false positives */
-const DOCUMENT_BOUNDARY_KEYWORDS = [
-  "note", "garde",
-];
+const DOCUMENT_BOUNDARY_KEYWORDS = ["note", "garde"];
 
 /** Pre-compiled word-boundary regex for boundary keywords */
-const DOCUMENT_BOUNDARY_REGEX = new RegExp(
-  `\\b(${DOCUMENT_BOUNDARY_KEYWORDS.join("|")})\\b`, "i",
-);
+const DOCUMENT_BOUNDARY_REGEX = new RegExp(`\\b(${DOCUMENT_BOUNDARY_KEYWORDS.join("|")})\\b`, "i");
 
 /** Minimum file size (bytes) heuristic — small photos are likely conversational */
 const DOCUMENT_MIN_FILE_SIZE = 50 * 1024; // 50 KB
@@ -152,10 +178,7 @@ const DOCUMENT_MIN_FILE_SIZE = 50 * 1024; // 50 KB
  * 1. Caption contains a document keyword
  * 2. File size >= threshold AND no conversational caption
  */
-export function isPhotoDocument(
-  caption: string | undefined,
-  fileSize: number,
-): boolean {
+export function isPhotoDocument(caption: string | undefined, fileSize: number): boolean {
   const lowerCaption = (caption || "").toLowerCase();
 
   // Check caption keywords (substring match)
@@ -180,7 +203,10 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
   // ── Intent confirmation callbacks (S37-04) ─────────────────
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("intent_")) { await next(); return; }
+    if (!data.startsWith("intent_")) {
+      await next();
+      return;
+    }
 
     const command = handleConfirmationCallback(ctx, data);
     if (command) {
@@ -281,7 +307,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             await ctx.reply("PRD introuvable.", bctx.threadOpts(ctx));
           }
         } catch (error) {
-          console.error("PRD revision error:", error);
+          log.error("PRD revision error", { error: String(error) });
           await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
         }
         return;
@@ -290,9 +316,17 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     // Check pending proposal confirmation
     if (session.pendingProposal && Date.now() - session.pendingProposal.timestamp < 5 * 60 * 1000) {
-      const trimmed = input.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const isConfirm = /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/.test(trimmed);
-      const isReject = /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/.test(trimmed);
+      const trimmed = input
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      const isConfirm =
+        /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/.test(
+          trimmed,
+        );
+      const isReject =
+        /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/.test(trimmed);
 
       if (isConfirm) {
         const proposal = session.pendingProposal;
@@ -300,7 +334,8 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
         // Fix #1: For prd_workflow, go directly to triage with enriched description
         if (proposal.action === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
-          const rawDescription = proposal.args || session.recentMessages.slice(-3).join("\n") || input;
+          const rawDescription =
+            proposal.args || session.recentMessages.slice(-3).join("\n") || input;
           const description = buildEnrichedDescription(rawDescription, session);
           const triage = await triageDescription(description, bctx.supabase);
           const { message, keyboard } = buildTriageResponse(rawDescription, triage);
@@ -310,7 +345,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           return;
         }
 
-        const cmdStr = proposal.args ? `/${proposal.action} ${proposal.args}` : `/${proposal.action}`;
+        const cmdStr = proposal.args
+          ? `/${proposal.action} ${proposal.args}`
+          : `/${proposal.action}`;
         const update = buildSyntheticUpdate(ctx, cmdStr);
         await bctx.bot.handleUpdate(update);
         return;
@@ -323,7 +360,14 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     // Context assembly (document search only for text messages)
     const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
-    const contextPromises: [Promise<string>, Promise<string>, Promise<any[]>, Promise<any>, Promise<any>, Promise<any[]>] = [
+    const contextPromises: [
+      Promise<string>,
+      Promise<string>,
+      Promise<any[]>,
+      Promise<any>,
+      Promise<any>,
+      Promise<any[]>,
+    ] = [
       getRelevantContext(bctx.supabase, input),
       getMemoryContext(bctx.supabase),
       getRecentMessages(bctx.supabase),
@@ -332,11 +376,12 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       options.includeDocumentSearch && isFeatureEnabled("auto_document_search")
         ? Promise.race([
             searchDocuments(bctx.supabase, input, userId, { matchCount: 3, matchThreshold: 0.5 }),
-            new Promise<never[]>(resolve => setTimeout(() => resolve([]), 5000)),
+            new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)),
           ])
         : Promise.resolve([]),
     ];
-    const [relevantContext, memoryContext, recentMessages, dynProfile, classification, docResults] = await Promise.all(contextPromises);
+    const [relevantContext, memoryContext, recentMessages, dynProfile, classification, docResults] =
+      await Promise.all(contextPromises);
 
     if (classification?.is_memorable) {
       autoRemember(bctx.supabase, input, classification).catch(() => {});
@@ -357,8 +402,19 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
       // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
-      if ((regexResult.detected.intent === "suggest_prd" || regexResult.detected.intent === "create_prd") && isPrdWorkflowEnabled() && bctx.supabase) {
-        addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+      if (
+        (regexResult.detected.intent === "suggest_prd" ||
+          regexResult.detected.intent === "create_prd") &&
+        isPrdWorkflowEnabled() &&
+        bctx.supabase
+      ) {
+        addSessionIntent(
+          session,
+          regexResult.detected.intent,
+          regexResult.detected.command,
+          regexResult.detected.confidence,
+          true,
+        );
         const rawDescription = regexResult.detected.args || input;
         const enrichedDescription = buildEnrichedDescription(rawDescription, session);
         const triage = await triageDescription(enrichedDescription, bctx.supabase);
@@ -369,7 +425,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         return;
       }
       // High-confidence regex match — route to command
-      addSessionIntent(session, regexResult.detected.intent, regexResult.detected.command, regexResult.detected.confidence, true);
+      addSessionIntent(
+        session,
+        regexResult.detected.intent,
+        regexResult.detected.command,
+        regexResult.detected.confidence,
+        true,
+      );
       const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
       if (routeResult.handled) return;
     } else {
@@ -383,8 +445,18 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       });
       if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
         // PRD Workflow: intercept suggest_prd or create_prd from LLM
-        if ((llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") && isPrdWorkflowEnabled() && bctx.supabase) {
-          addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+        if (
+          (llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") &&
+          isPrdWorkflowEnabled() &&
+          bctx.supabase
+        ) {
+          addSessionIntent(
+            session,
+            llmResult.detected.intent,
+            llmResult.detected.command,
+            llmResult.detected.confidence,
+            true,
+          );
           const rawDescription = llmResult.detected.args || input;
           const enrichedDescription = buildEnrichedDescription(rawDescription, session);
           const triage = await triageDescription(enrichedDescription, bctx.supabase);
@@ -394,7 +466,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
           return;
         }
-        addSessionIntent(session, llmResult.detected.intent, llmResult.detected.command, llmResult.detected.confidence, true);
+        addSessionIntent(
+          session,
+          llmResult.detected.intent,
+          llmResult.detected.command,
+          llmResult.detected.confidence,
+          true,
+        );
         const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
         if (routeResult.handled) return;
       }
@@ -405,8 +483,19 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     const promptText = options.promptPrefix ? `${options.promptPrefix}${input}` : input;
     const documentContext = formatDocumentContext(docResults) || undefined;
-    const enrichedPrompt = bctx.buildPrompt(promptText, relevantContext, memoryContext + actionContext, recentMessages, topicName, dynProfile, documentContext);
-    const rawResponse = await bctx.callClaude(enrichedPrompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
+    const enrichedPrompt = bctx.buildPrompt(
+      promptText,
+      relevantContext,
+      memoryContext + actionContext,
+      recentMessages,
+      topicName,
+      dynProfile,
+      documentContext,
+    );
+    const rawResponse = await bctx.callClaude(enrichedPrompt, {
+      resume: true,
+      heartbeat: bctx.heartbeatOpts(ctx),
+    });
 
     const finalResponse = await processMemoryIntents(bctx.supabase, rawResponse);
 
@@ -428,7 +517,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     const threadId = bctx.getThreadId(ctx);
     const topicName = bctx.getTopicName(ctx);
-    console.log(`Message: ${text.substring(0, 50)}...${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
+    log.info(
+      `Message: ${text.substring(0, 50)}...${threadId ? ` [topic:${topicName || threadId}]` : ""}`,
+    );
 
     try {
       await ctx.replyWithChatAction("typing");
@@ -443,9 +534,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       recordResponseTime(Date.now() - handlerStart);
       bctx.clearError(messageId);
     } catch (error) {
-      console.error("Text handler error:", error);
+      log.error("Text handler error", { error: String(error) });
       if (!bctx.recordError(messageId)) {
-        await ctx.reply("Erreur lors du traitement du message. Reessaie.", bctx.threadOpts(ctx)).catch(() => {});
+        await ctx
+          .reply("Erreur lors du traitement du message. Reessaie.", bctx.threadOpts(ctx))
+          .catch(() => {});
       }
     }
   });
@@ -457,7 +550,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const handlerStart = Date.now();
     const threadId = bctx.getThreadId(ctx);
     const topicName = bctx.getTopicName(ctx);
-    console.log(`Voice message: ${voice.duration}s${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
+    log.info(
+      `Voice message: ${voice.duration}s${threadId ? ` [topic:${topicName || threadId}]` : ""}`,
+    );
 
     try {
       await ctx.replyWithChatAction("typing");
@@ -492,9 +587,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       recordResponseTime(Date.now() - handlerStart);
       bctx.clearError(messageId);
     } catch (error) {
-      console.error("Voice error:", error);
+      log.error("Voice error", { error: String(error) });
       if (!bctx.recordError(messageId)) {
-        await ctx.reply("Erreur lors du traitement du vocal. Reessaie.", bctx.threadOpts(ctx)).catch(() => {});
+        await ctx
+          .reply("Erreur lors du traitement du vocal. Reessaie.", bctx.threadOpts(ctx))
+          .catch(() => {});
       }
     }
   });
@@ -504,7 +601,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const messageId = ctx.message.message_id;
     const threadId = bctx.getThreadId(ctx);
     const topicName = bctx.getTopicName(ctx);
-    console.log(`Image received${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
+    log.info(`Image received${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
 
     try {
       await ctx.replyWithChatAction("typing");
@@ -535,18 +632,25 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           const dupCheck = await checkDuplicate(bctx.supabase, userId, fileName, contentHash);
           if (dupCheck.found && dupCheck.existingDocument) {
             const existing = dupCheck.existingDocument;
-            const matchLabel = dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
+            const matchLabel =
+              dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
             const existingDate = new Date(existing.created_at).toLocaleDateString("fr-FR");
-            const uploadInput: DocumentCreateInput = { userId, filePath: fileName, fileType: "image/jpeg", fileSize, buffer };
+            const uploadInput: DocumentCreateInput = {
+              userId,
+              filePath: fileName,
+              fileType: "image/jpeg",
+              fileSize,
+              buffer,
+            };
             const uploadKey = storePendingUpload(ctx.chat?.id || 0, uploadInput);
             const keyboard = buildDuplicateKeyboard(uploadKey);
 
             await bctx.saveMessage("user", `[Document photo]: ${caption || "photo"}`, meta);
             await ctx.reply(
-              `Doublon detecte (${matchLabel}) :\n`
-              + `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n`
-              + `Ajoute le : ${existingDate}\n\n`
-              + `Veux-tu quand meme l'ajouter ?`,
+              `Doublon detecte (${matchLabel}) :\n` +
+                `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n` +
+                `Ajoute le : ${existingDate}\n\n` +
+                `Veux-tu quand meme l'ajouter ?`,
               { ...bctx.threadOpts(ctx), reply_markup: keyboard },
             );
             bctx.clearError(messageId);
@@ -564,7 +668,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           await bctx.saveMessage("user", `[Document photo]: ${caption || "photo"}`, meta);
 
           const catName = (doc.metadata as Record<string, unknown>)?.classification_confidence
-            ? (doc.description || "non classifie")
+            ? doc.description || "non classifie"
             : "non classifie";
           const keyboard = buildClassificationKeyboard(doc.id, catName);
 
@@ -578,14 +682,19 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             );
           }
 
-          const extractionFailed2 = (doc.metadata as Record<string, unknown>)?.extraction_failed === true;
+          const extractionFailed2 =
+            (doc.metadata as Record<string, unknown>)?.extraction_failed === true;
           const resultText = [
             `Document enregistre [${doc.id.substring(0, 8)}]`,
             doc.title ? `Titre: ${doc.title}` : "",
             doc.description ? `Description: ${doc.description}` : "",
             doc.document_date ? `Date: ${doc.document_date}` : "",
-            extractionFailed2 ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
-          ].filter(Boolean).join("\n");
+            extractionFailed2
+              ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche."
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
 
           await ctx.reply(resultText, {
             ...bctx.threadOpts(ctx),
@@ -594,7 +703,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           bctx.clearError(messageId);
           return;
         } catch (docError) {
-          console.error("Document pipeline error on photo, falling back to conversation:", docError);
+          log.error("Document pipeline error on photo, falling back to conversation", {
+            error: String(docError),
+          });
           // Fall through to conversational photo handling
         }
       }
@@ -614,7 +725,10 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       await bctx.saveMessage("user", `[Image]: ${captionText}`, meta);
 
-      const claudeResponse = await bctx.callClaude(prompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
+      const claudeResponse = await bctx.callClaude(prompt, {
+        resume: true,
+        heartbeat: bctx.heartbeatOpts(ctx),
+      });
 
       await unlink(filePath).catch(() => {});
 
@@ -623,9 +737,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       await bctx.sendResponse(ctx, cleanResponse);
       bctx.clearError(messageId);
     } catch (error) {
-      console.error("Image error:", error);
+      log.error("Image error", { error: String(error) });
       if (!bctx.recordError(messageId)) {
-        await ctx.reply("Erreur lors du traitement de l'image. Reessaie.", bctx.threadOpts(ctx)).catch(() => {});
+        await ctx
+          .reply("Erreur lors du traitement de l'image. Reessaie.", bctx.threadOpts(ctx))
+          .catch(() => {});
       }
     }
   });
@@ -636,7 +752,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const messageId = ctx.message.message_id;
     const threadId = bctx.getThreadId(ctx);
     const topicName = bctx.getTopicName(ctx);
-    console.log(`Document: ${doc.file_name}${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
+    log.info(`Document: ${doc.file_name}${threadId ? ` [topic:${topicName || threadId}]` : ""}`);
 
     try {
       await ctx.replyWithChatAction("typing");
@@ -664,7 +780,8 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           const dupCheck = await checkDuplicate(bctx.supabase, userId, fileName, contentHash);
           if (dupCheck.found && dupCheck.existingDocument) {
             const existing = dupCheck.existingDocument;
-            const matchLabel = dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
+            const matchLabel =
+              dupCheck.matchType === "content" ? "contenu identique" : "meme nom de fichier";
             const existingDate = new Date(existing.created_at).toLocaleDateString("fr-FR");
             const uploadInput: DocumentCreateInput = {
               userId,
@@ -677,12 +794,16 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             const uploadKey = storePendingUpload(ctx.chat?.id || 0, uploadInput);
             const keyboard = buildDuplicateKeyboard(uploadKey);
 
-            await bctx.saveMessage("user", `[Document: ${fileName}]: ${ctx.message.caption || "fichier"}`, meta);
+            await bctx.saveMessage(
+              "user",
+              `[Document: ${fileName}]: ${ctx.message.caption || "fichier"}`,
+              meta,
+            );
             await ctx.reply(
-              `Doublon detecte (${matchLabel}) :\n`
-              + `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n`
-              + `Ajoute le : ${existingDate}\n\n`
-              + `Veux-tu quand meme l'ajouter ?`,
+              `Doublon detecte (${matchLabel}) :\n` +
+                `Document existant : ${existing.title || "Sans titre"} [${existing.id.substring(0, 8)}]\n` +
+                `Ajoute le : ${existingDate}\n\n` +
+                `Veux-tu quand meme l'ajouter ?`,
               { ...bctx.threadOpts(ctx), reply_markup: keyboard },
             );
             bctx.clearError(messageId);
@@ -698,7 +819,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             buffer,
           });
 
-          await bctx.saveMessage("user", `[Document: ${fileName}]: ${ctx.message.caption || "fichier"}`, meta);
+          await bctx.saveMessage(
+            "user",
+            `[Document: ${fileName}]: ${ctx.message.caption || "fichier"}`,
+            meta,
+          );
 
           const catName = createdDoc.description || "non classifie";
           const keyboard = buildClassificationKeyboard(createdDoc.id, catName);
@@ -713,15 +838,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
             );
           }
 
-          const extractionFailed = (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
+          const extractionFailed =
+            (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
           const resultText = [
             `Document enregistre [${createdDoc.id.substring(0, 8)}]`,
             createdDoc.title ? `Titre: ${createdDoc.title}` : "",
             createdDoc.description ? `Description: ${createdDoc.description}` : "",
             createdDoc.document_date ? `Date: ${createdDoc.document_date}` : "",
             `Type: ${mimeType}`,
-            extractionFailed ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
-          ].filter(Boolean).join("\n");
+            extractionFailed
+              ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche."
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
 
           await ctx.reply(resultText, {
             ...bctx.threadOpts(ctx),
@@ -730,7 +860,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           bctx.clearError(messageId);
           return;
         } catch (docError) {
-          console.error("Document pipeline error, falling back to Claude analysis:", docError);
+          log.error("Document pipeline error, falling back to Claude analysis", {
+            error: String(docError),
+          });
           // Fall through to standard Claude analysis
         }
       }
@@ -751,7 +883,10 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
       await bctx.saveMessage("user", `[Document: ${doc.file_name}]: ${caption}`, meta);
 
-      const claudeResponse = await bctx.callClaude(prompt, { resume: true, heartbeat: bctx.heartbeatOpts(ctx) });
+      const claudeResponse = await bctx.callClaude(prompt, {
+        resume: true,
+        heartbeat: bctx.heartbeatOpts(ctx),
+      });
 
       await unlink(filePath).catch(() => {});
 
@@ -760,9 +895,11 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       await bctx.sendResponse(ctx, cleanResponse);
       bctx.clearError(messageId);
     } catch (error) {
-      console.error("Document error:", error);
+      log.error("Document error", { error: String(error) });
       if (!bctx.recordError(messageId)) {
-        await ctx.reply("Erreur lors du traitement du document. Reessaie.", bctx.threadOpts(ctx)).catch(() => {});
+        await ctx
+          .reply("Erreur lors du traitement du document. Reessaie.", bctx.threadOpts(ctx))
+          .catch(() => {});
       }
     }
   });

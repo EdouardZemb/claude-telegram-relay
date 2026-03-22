@@ -4,8 +4,14 @@
  * Tests for Supabase context assembly for BMad agents (S32 + S40).
  */
 
-import { describe, it, expect, mock } from "bun:test";
-import { buildAgentContext, getTokenBudget, fetchTrustContext, fetchSprintMetrics, fetchDocumentContext, type AgentContextOptions } from "../../src/agent-context";
+import { describe, expect, it } from "bun:test";
+import {
+  buildAgentContext,
+  fetchDocumentContext,
+  fetchSprintMetrics,
+  fetchTrustContext,
+  getTokenBudget,
+} from "../../src/agent-context";
 
 // ── Token Budget Tests ───────────────────────────────────────
 
@@ -39,7 +45,7 @@ describe("buildAgentContext", () => {
   it("returns gracefully when Supabase fetches fail", async () => {
     const mockSupabase = {
       rpc: () => Promise.resolve({ data: null, error: { message: "rpc failed" } }),
-      from: (table: string) => ({
+      from: (_table: string) => ({
         select: () => ({
           neq: () => ({
             order: () => ({
@@ -99,9 +105,9 @@ describe("buildAgentContext", () => {
         }
         return Promise.resolve({ data: null, error: null });
       },
-      from: (table: string) => ({
+      from: (_table: string) => ({
         select: () => ({
-          neq: (col: string, val: string) => ({
+          neq: (_col: string, _val: string) => ({
             neq: () => ({
               order: () => ({
                 limit: () => ({
@@ -110,7 +116,11 @@ describe("buildAgentContext", () => {
               }),
             }),
             order: () => ({
-              limit: () => Promise.resolve({ data: [{ title: "Task 1", status: "in_progress", priority: 2, sprint: "S32" }], error: null }),
+              limit: () =>
+                Promise.resolve({
+                  data: [{ title: "Task 1", status: "in_progress", priority: 2, sprint: "S32" }],
+                  error: null,
+                }),
             }),
           }),
           not: () => ({
@@ -155,7 +165,7 @@ describe("buildAgentContext", () => {
         if (fn === "get_sprint_summary") return Promise.resolve({ data: null, error: null });
         return Promise.resolve({ data: null, error: null });
       },
-      from: (table: string) => ({
+      from: (_table: string) => ({
         select: () => ({
           neq: () => ({
             order: () => ({
@@ -193,7 +203,7 @@ describe("buildAgentContext", () => {
 
   it("includes sprint context when sprintId is provided", async () => {
     const mockSupabase = {
-      rpc: (fn: string, params: any) => {
+      rpc: (fn: string, _params: any) => {
         if (fn === "get_facts") return Promise.resolve({ data: [], error: null });
         if (fn === "get_active_goals") return Promise.resolve({ data: [], error: null });
         if (fn === "get_sprint_summary") {
@@ -204,7 +214,7 @@ describe("buildAgentContext", () => {
         }
         return Promise.resolve({ data: null, error: null });
       },
-      from: (table: string) => ({
+      from: (_table: string) => ({
         select: () => ({
           neq: () => ({
             order: () => ({
@@ -251,17 +261,23 @@ describe("buildAgentContext", () => {
         if (fn === "get_active_goals") return Promise.resolve({ data: [], error: null });
         return Promise.resolve({ data: null, error: null });
       },
-      from: (table: string) => ({
+      from: (_table: string) => ({
         select: () => ({
           neq: () => ({
             order: () => ({
-              limit: () => Promise.resolve({
-                data: [
-                  { title: "Build context module", status: "in_progress", priority: 1, sprint: "S32" },
-                  { title: "Write tests", status: "backlog", priority: 2, sprint: "S32" },
-                ],
-                error: null,
-              }),
+              limit: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      title: "Build context module",
+                      status: "in_progress",
+                      priority: 1,
+                      sprint: "S32",
+                    },
+                    { title: "Write tests", status: "backlog", priority: 2, sprint: "S32" },
+                  ],
+                  error: null,
+                }),
             }),
           }),
           not: () => ({
@@ -334,13 +350,26 @@ describe("fetchSprintMetrics", () => {
       from: () => ({
         select: () => ({
           order: () => ({
-            limit: () => Promise.resolve({
-              data: [
-                { sprint_id: "S39", velocity: 8, rework_rate: 0.12, cycle_time_avg: 4.5, created_at: "2026-03-17" },
-                { sprint_id: "S38", velocity: 10, rework_rate: 0.05, cycle_time_avg: 3.2, created_at: "2026-03-16" },
-              ],
-              error: null,
-            }),
+            limit: () =>
+              Promise.resolve({
+                data: [
+                  {
+                    sprint_id: "S39",
+                    velocity: 8,
+                    rework_rate: 0.12,
+                    cycle_time_avg: 4.5,
+                    created_at: "2026-03-17",
+                  },
+                  {
+                    sprint_id: "S38",
+                    velocity: 10,
+                    rework_rate: 0.05,
+                    cycle_time_avg: 3.2,
+                    created_at: "2026-03-16",
+                  },
+                ],
+                error: null,
+              }),
           }),
         }),
       }),
@@ -359,12 +388,19 @@ describe("fetchSprintMetrics", () => {
       from: () => ({
         select: () => ({
           order: () => ({
-            limit: () => Promise.resolve({
-              data: [
-                { sprint_id: "S39", velocity: null, rework_rate: null, cycle_time_avg: null, created_at: "2026-03-17" },
-              ],
-              error: null,
-            }),
+            limit: () =>
+              Promise.resolve({
+                data: [
+                  {
+                    sprint_id: "S39",
+                    velocity: null,
+                    rework_rate: null,
+                    cycle_time_avg: null,
+                    created_at: "2026-03-17",
+                  },
+                ],
+                error: null,
+              }),
           }),
         }),
       }),
@@ -433,7 +469,8 @@ describe("buildAgentContext — S40 enhanced sections", () => {
   it("includes METRIQUES SPRINT section when data available", async () => {
     const mockSupabase = {
       rpc: (fn: string) => {
-        if (fn === "get_facts") return Promise.resolve({ data: [{ content: "Un fait" }], error: null });
+        if (fn === "get_facts")
+          return Promise.resolve({ data: [{ content: "Un fait" }], error: null });
         if (fn === "get_active_goals") return Promise.resolve({ data: [], error: null });
         if (fn === "get_sprint_summary") {
           return Promise.resolve({
@@ -448,12 +485,19 @@ describe("buildAgentContext — S40 enhanced sections", () => {
           return {
             select: () => ({
               order: () => ({
-                limit: () => Promise.resolve({
-                  data: [
-                    { sprint_id: "S39", velocity: 7, rework_rate: 0.10, cycle_time_avg: 5, created_at: "2026-03-17" },
-                  ],
-                  error: null,
-                }),
+                limit: () =>
+                  Promise.resolve({
+                    data: [
+                      {
+                        sprint_id: "S39",
+                        velocity: 7,
+                        rework_rate: 0.1,
+                        cycle_time_avg: 5,
+                        created_at: "2026-03-17",
+                      },
+                    ],
+                    error: null,
+                  }),
               }),
             }),
           };
@@ -509,7 +553,8 @@ describe("buildAgentContext — S40 enhanced sections", () => {
   it("includes all available sections without exceeding budget", async () => {
     const mockSupabase = {
       rpc: (fn: string) => {
-        if (fn === "get_facts") return Promise.resolve({ data: [{ content: "Fait important" }], error: null });
+        if (fn === "get_facts")
+          return Promise.resolve({ data: [{ content: "Fait important" }], error: null });
         if (fn === "get_active_goals") return Promise.resolve({ data: [], error: null });
         if (fn === "get_sprint_summary") {
           return Promise.resolve({
@@ -524,12 +569,19 @@ describe("buildAgentContext — S40 enhanced sections", () => {
           return {
             select: () => ({
               order: () => ({
-                limit: () => Promise.resolve({
-                  data: [
-                    { sprint_id: "S40", velocity: 12, rework_rate: 0.08, cycle_time_avg: 3, created_at: "2026-03-17" },
-                  ],
-                  error: null,
-                }),
+                limit: () =>
+                  Promise.resolve({
+                    data: [
+                      {
+                        sprint_id: "S40",
+                        velocity: 12,
+                        rework_rate: 0.08,
+                        cycle_time_avg: 3,
+                        created_at: "2026-03-17",
+                      },
+                    ],
+                    error: null,
+                  }),
               }),
             }),
           };
@@ -545,12 +597,18 @@ describe("buildAgentContext — S40 enhanced sections", () => {
           select: () => ({
             neq: () => ({
               order: () => ({
-                limit: () => Promise.resolve({
-                  data: [
-                    { title: "Impl context enrichi", status: "in_progress", priority: 2, sprint: "S40" },
-                  ],
-                  error: null,
-                }),
+                limit: () =>
+                  Promise.resolve({
+                    data: [
+                      {
+                        title: "Impl context enrichi",
+                        status: "in_progress",
+                        priority: 2,
+                        sprint: "S40",
+                      },
+                    ],
+                    error: null,
+                  }),
               }),
             }),
             not: () => ({

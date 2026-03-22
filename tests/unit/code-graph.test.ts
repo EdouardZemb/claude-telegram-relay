@@ -2,29 +2,27 @@
  * Tests for code-graph module (S39)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, rmSync } from "fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { unlinkSync } from "fs";
 import { join } from "path";
 import {
+  type CodeGraph,
+  clearGraphCache,
+  estimateComplexity,
   extractExports,
   extractImports,
-  indexCodebase,
-  saveGraph,
-  loadGraph,
-  clearGraphCache,
-  getModuleDependencies,
-  getDependents,
-  getImpactRadius,
-  getRelatedModules,
+  findAffectedModules,
   findNode,
-  getGraphStats,
   formatGraphContext,
   formatGraphStatsForMonitor,
-  estimateComplexity,
-  findAffectedModules,
-  type CodeGraph,
-  type GraphNode,
-  type GraphEdge,
+  getDependents,
+  getGraphStats,
+  getImpactRadius,
+  getModuleDependencies,
+  getRelatedModules,
+  indexCodebase,
+  loadGraph,
+  saveGraph,
 } from "../../src/code-graph.ts";
 
 // ── extractExports ──────────────────────────────────────────
@@ -188,7 +186,9 @@ describe("save and load graph", () => {
 
   afterEach(() => {
     clearGraphCache();
-    try { unlinkSync(tempPath); } catch {}
+    try {
+      unlinkSync(tempPath);
+    } catch {}
   });
 
   it("saves and loads a graph", () => {
@@ -315,12 +315,17 @@ describe("graph queries", () => {
 describe("getGraphStats", () => {
   const graph: CodeGraph = {
     nodes: [
-      { id: "src/a.ts", exports: [{ name: "a1", kind: "function" }, { name: "a2", kind: "const" }], lineCount: 50 },
+      {
+        id: "src/a.ts",
+        exports: [
+          { name: "a1", kind: "function" },
+          { name: "a2", kind: "const" },
+        ],
+        lineCount: 50,
+      },
       { id: "src/b.ts", exports: [{ name: "b1", kind: "function" }], lineCount: 100 },
     ],
-    edges: [
-      { source: "src/a.ts", target: "src/b.ts", imports: ["b1"], isTypeOnly: false },
-    ],
+    edges: [{ source: "src/a.ts", target: "src/b.ts", imports: ["b1"], isTypeOnly: false }],
     indexedAt: "2026-01-01T00:00:00Z",
   };
 
@@ -346,10 +351,19 @@ describe("formatGraphContext", () => {
   const graph: CodeGraph = {
     nodes: [
       { id: "src/relay.ts", exports: [{ name: "createBot", kind: "function" }], lineCount: 243 },
-      { id: "src/orchestrator.ts", exports: [{ name: "orchestrate", kind: "function" }], lineCount: 500 },
+      {
+        id: "src/orchestrator.ts",
+        exports: [{ name: "orchestrate", kind: "function" }],
+        lineCount: 500,
+      },
     ],
     edges: [
-      { source: "src/relay.ts", target: "src/orchestrator.ts", imports: ["orchestrate"], isTypeOnly: false },
+      {
+        source: "src/relay.ts",
+        target: "src/orchestrator.ts",
+        imports: ["orchestrate"],
+        isTypeOnly: false,
+      },
     ],
     indexedAt: "2026-01-01T00:00:00Z",
   };
@@ -376,9 +390,7 @@ describe("formatGraphContext", () => {
 describe("formatGraphStatsForMonitor", () => {
   it("formats stats for display", () => {
     const graph: CodeGraph = {
-      nodes: [
-        { id: "src/a.ts", exports: [{ name: "a", kind: "function" }], lineCount: 50 },
-      ],
+      nodes: [{ id: "src/a.ts", exports: [{ name: "a", kind: "function" }], lineCount: 50 }],
       edges: [],
       indexedAt: "2026-03-17T08:00:00Z",
     };
@@ -395,10 +407,14 @@ describe("estimateComplexity", () => {
   const graph: CodeGraph = {
     nodes: [
       { id: "src/simple.ts", exports: [{ name: "fn", kind: "function" }], lineCount: 20 },
-      { id: "src/complex.ts", exports: [
-        { name: "a", kind: "function" },
-        { name: "b", kind: "function" },
-      ], lineCount: 600 },
+      {
+        id: "src/complex.ts",
+        exports: [
+          { name: "a", kind: "function" },
+          { name: "b", kind: "function" },
+        ],
+        lineCount: 600,
+      },
       { id: "src/dep1.ts", exports: [{ name: "d1", kind: "function" }], lineCount: 50 },
       { id: "src/dep2.ts", exports: [{ name: "d2", kind: "function" }], lineCount: 50 },
     ],

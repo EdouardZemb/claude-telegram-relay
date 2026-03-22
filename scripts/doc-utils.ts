@@ -5,7 +5,7 @@
  */
 
 import { readdir, readFile } from "fs/promises";
-import { join, basename } from "path";
+import { join } from "path";
 
 /** Modules to exclude from freshness checks (internal utilities) */
 const WHITELIST: string[] = [];
@@ -30,9 +30,7 @@ export interface DocGap {
  */
 export async function extractModules(srcDir: string): Promise<string[]> {
   const files = await readdir(srcDir);
-  const modules = files
-    .filter((f) => f.endsWith(".ts"))
-    .filter((f) => !WHITELIST.includes(f));
+  const modules = files.filter((f) => f.endsWith(".ts")).filter((f) => !WHITELIST.includes(f));
 
   // Also include commands/*.ts modules
   try {
@@ -90,7 +88,7 @@ export async function extractCommands(relayPath: string): Promise<string[]> {
  */
 export async function parseClaudeMdModules(claudeMdPath: string): Promise<string[]> {
   const content = await readFile(claudeMdPath, "utf-8");
-  const regex = /\| `([^`]+\.ts)` \|/g;
+  const _regex = /\| `([^`]+\.ts)` \|/g;
   const modules: string[] = [];
   let match;
   // Only match in the Source Modules section

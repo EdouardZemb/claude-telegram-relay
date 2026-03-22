@@ -5,13 +5,13 @@
  * QUICK pipeline skip, and formatting.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  parseDriftReport,
-  formatDriftReport,
-  verifySpecVsImplementation,
   checkConformance,
   type DriftReport,
+  formatDriftReport,
+  parseDriftReport,
+  verifySpecVsImplementation,
 } from "../../src/adversarial-verifier";
 
 // ── parseDriftReport ─────────────────────────────────────────
@@ -61,36 +61,44 @@ End of report.`;
   });
 
   it("clamps coverage score to 0-100", () => {
-    const report = parseDriftReport(JSON.stringify({
-      coverage_score: 200,
-      drift_items: [],
-      overall_verdict: "pass",
-    }));
+    const report = parseDriftReport(
+      JSON.stringify({
+        coverage_score: 200,
+        drift_items: [],
+        overall_verdict: "pass",
+      }),
+    );
 
     expect(report.coverage_score).toBe(100);
   });
 
   it("normalizes invalid status values", () => {
-    const report = parseDriftReport(JSON.stringify({
-      coverage_score: 50,
-      drift_items: [{ fr_id: "FR-001", status: "unknown", details: "Test" }],
-      overall_verdict: "pass",
-    }));
+    const report = parseDriftReport(
+      JSON.stringify({
+        coverage_score: 50,
+        drift_items: [{ fr_id: "FR-001", status: "unknown", details: "Test" }],
+        overall_verdict: "pass",
+      }),
+    );
 
     expect(report.drift_items[0].status).toBe("partial"); // normalized
   });
 
   it("infers verdict from coverage when not provided", () => {
-    const report = parseDriftReport(JSON.stringify({
-      coverage_score: 90,
-      drift_items: [],
-    }));
+    const report = parseDriftReport(
+      JSON.stringify({
+        coverage_score: 90,
+        drift_items: [],
+      }),
+    );
     expect(report.overall_verdict).toBe("pass"); // 90 >= 80
 
-    const report2 = parseDriftReport(JSON.stringify({
-      coverage_score: 30,
-      drift_items: [],
-    }));
+    const report2 = parseDriftReport(
+      JSON.stringify({
+        coverage_score: 30,
+        drift_items: [],
+      }),
+    );
     expect(report2.overall_verdict).toBe("fail"); // 30 < 50
   });
 });
@@ -102,7 +110,7 @@ describe("verifySpecVsImplementation", () => {
     const result = await verifySpecVsImplementation(
       { requirements: ["FR-001"] },
       { files: ["test.ts"] },
-      "QUICK"
+      "QUICK",
     );
 
     expect(result).toBeNull();
@@ -112,7 +120,7 @@ describe("verifySpecVsImplementation", () => {
     const result = await verifySpecVsImplementation(
       { requirements: ["FR-001"] },
       { files: ["test.ts"] },
-      "quick"
+      "quick",
     );
 
     expect(result).toBeNull();

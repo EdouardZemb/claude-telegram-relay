@@ -5,14 +5,23 @@
  * conflict with src/memory.ts.
  */
 
-import { Composer, Context } from "grammy";
+import { Composer, type Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
-import { listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList, getLinkedMemoriesBatch, clusterMemories, formatClusters } from "../memory.ts";
-import type { LinkedMemory } from "../memory.ts";
+import { createLogger } from "../logger.ts";
+import {
+  archiveIdea,
+  clusterMemories,
+  formatClusters,
+  formatIdeasList,
+  listIdeas,
+  promoteIdea,
+  reviewIdea,
+} from "../memory.ts";
 import { enqueue } from "../notification-queue.ts";
-import { addTask } from "../tasks.ts";
 import { resolveProjectContext } from "../projects.ts";
+import { addTask } from "../tasks.ts";
 
+const log = createLogger("memory-cmds");
 export default function memoryCmds(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
@@ -22,7 +31,10 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
 
   composer.command("brain", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "brain");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -33,21 +45,26 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
     try {
       // Gather recent facts, goals, ideas, memory stats, and signal/noise data (S36-06)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const [factsResult, goalsResult, recentFacts, activeIdeas, allIdeas, recentMessages, recentMemories] = await Promise.all([
+      const [
+        factsResult,
+        goalsResult,
+        recentFacts,
+        activeIdeas,
+        allIdeas,
+        recentMessages,
+        recentMemories,
+      ] = await Promise.all([
         bctx.supabase.rpc("get_facts"),
         bctx.supabase.rpc("get_active_goals"),
-        bctx.supabase.from("memory")
+        bctx.supabase
+          .from("memory")
           .select("type, content, metadata, created_at")
           .order("created_at", { ascending: false })
           .limit(50),
         listIdeas(bctx.supabase, ["new", "reviewed"]),
         listIdeas(bctx.supabase, ["new", "reviewed", "promoted", "archived"]),
-        bctx.supabase.from("messages")
-          .select("id")
-          .gte("created_at", sevenDaysAgo),
-        bctx.supabase.from("memory")
-          .select("id")
-          .gte("created_at", sevenDaysAgo),
+        bctx.supabase.from("messages").select("id").gte("created_at", sevenDaysAgo),
+        bctx.supabase.from("memory").select("id").gte("created_at", sevenDaysAgo),
       ]);
 
       const facts = factsResult.data || [];
@@ -84,9 +101,7 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         .join(", ");
 
       // Recent auto-classified facts
-      const autoFacts = recent
-        .filter((r: any) => r.metadata?.auto_classified)
-        .slice(0, 5);
+      const autoFacts = recent.filter((r: any) => r.metadata?.auto_classified).slice(0, 5);
 
       // Fetch memory clusters (S41-03): connected components clustering
       const clusters = await clusterMemories(bctx.supabase!);
@@ -95,9 +110,10 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
       // Signal/noise ratio (S36-06)
       const msgCount = recentMessages.data?.length || 0;
       const memCount = recentMemories.data?.length || 0;
-      const signalNoiseRatio = msgCount > 0
-        ? `${memCount}/${msgCount} (${Math.round((memCount / msgCount) * 100)}%)`
-        : "N/A";
+      const signalNoiseRatio =
+        msgCount > 0
+          ? `${memCount}/${msgCount} (${Math.round((memCount / msgCount) * 100)}%)`
+          : "N/A";
 
       // Build the synthesis prompt
       const contextParts = [
@@ -118,15 +134,24 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
         ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
         "",
-        `IDEES (${allIdeas.length} total: ${Object.entries(ideaStatusCounts).map(([s, c]) => `${c} ${s}`).join(", ") || "aucune"})`,
+        `IDEES (${allIdeas.length} total: ${
+          Object.entries(ideaStatusCounts)
+            .map(([s, c]) => `${c} ${s}`)
+            .join(", ") || "aucune"
+        })`,
         ...(activeIdeas.length > 0
-          ? [`IDEES ACTIVES (new + reviewed):`, ...activeIdeas.slice(0, 10).map((idea: any) => {
-              const status = idea.idea_status || "new";
-              const topics = idea.metadata?.topics?.join(", ") || "";
-              return `- [${status}] ${idea.content}${topics ? ` (${topics})` : ""}`;
-            })]
+          ? [
+              `IDEES ACTIVES (new + reviewed):`,
+              ...activeIdeas.slice(0, 10).map((idea: any) => {
+                const status = idea.idea_status || "new";
+                const topics = idea.metadata?.topics?.join(", ") || "";
+                return `- [${status}] ${idea.content}${topics ? ` (${topics})` : ""}`;
+              }),
+            ]
           : ["Aucune idee active."]),
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const prompt = `Tu es un assistant de synthese memoire. Analyse les donnees suivantes et produis une synthese hebdomadaire concise en francais.
 
@@ -146,7 +171,7 @@ Reponds en texte brut, sans markdown.`;
       const synthesis = await bctx.callClaude(prompt, { heartbeat: bctx.heartbeatOpts(ctx) });
       await bctx.sendResponse(ctx, synthesis);
     } catch (error) {
-      console.error("Brain review error:", error);
+      log.error("Brain review error", { error: String(error) });
       await ctx.reply("Erreur lors de la synthese memoire.", bctx.threadOpts(ctx));
     }
   });
@@ -157,7 +182,10 @@ Reponds en texte brut, sans markdown.`;
 
   composer.command("ideas", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "ideas");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -195,13 +223,14 @@ Reponds en texte brut, sans markdown.`;
         metadata: { source: "manual" },
       });
       if (error) {
-        console.error("ideas add error:", error);
+        log.error("ideas add error", { error: String(error) });
         await ctx.reply("Erreur lors de l'ajout de l'idee.", bctx.threadOpts(ctx));
       } else {
         await ctx.reply(`Idee ajoutee : ${arg}`, bctx.threadOpts(ctx));
         const preview = arg.length > 80 ? arg.slice(0, 80) + "..." : arg;
         const ts = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
           timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
         });
         await enqueue({
@@ -226,8 +255,10 @@ Reponds en texte brut, sans markdown.`;
       }
       const ok = await reviewIdea(bctx.supabase, idea.id);
       await ctx.reply(
-        ok ? `Idee "${idea.content.slice(0, 60)}" marquee comme reviewed.` : "Erreur lors du review.",
-        bctx.threadOpts(ctx)
+        ok
+          ? `Idee "${idea.content.slice(0, 60)}" marquee comme reviewed.`
+          : "Erreur lors du review.",
+        bctx.threadOpts(ctx),
       );
       return;
     }
@@ -249,7 +280,10 @@ Reponds en texte brut, sans markdown.`;
         return;
       }
       // Create a task from the promoted idea
-      const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+      const currentProject = await resolveProjectContext(
+        bctx.supabase,
+        ctx.message?.message_thread_id,
+      );
       const task = await addTask(bctx.supabase, content, {
         ...(currentProject ? { project_id: currentProject.id } : {}),
         tags: ["from-idea"],
@@ -257,11 +291,12 @@ Reponds en texte brut, sans markdown.`;
       if (task) {
         await ctx.reply(
           `Idee promue en tache !\nTache: ${task.title}\nID: ${task.id.slice(0, 8)}`,
-          bctx.threadOpts(ctx)
+          bctx.threadOpts(ctx),
         );
         const promotePreview = content.length > 80 ? content.slice(0, 80) + "..." : content;
         const promoteTs = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
           timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
         });
         await enqueue({
@@ -270,7 +305,10 @@ Reponds en texte brut, sans markdown.`;
           message: `[${promoteTs}] Idee promue en tache: ${promotePreview}\nTache: ${task.title}`,
         });
       } else {
-        await ctx.reply(`Idee promue mais erreur creation tache. Contenu : ${content}`, bctx.threadOpts(ctx));
+        await ctx.reply(
+          `Idee promue mais erreur creation tache. Contenu : ${content}`,
+          bctx.threadOpts(ctx),
+        );
       }
       return;
     }
@@ -289,7 +327,7 @@ Reponds en texte brut, sans markdown.`;
       const ok = await archiveIdea(bctx.supabase, idea.id);
       await ctx.reply(
         ok ? `Idee "${idea.content.slice(0, 60)}" archivee.` : "Erreur lors de l'archivage.",
-        bctx.threadOpts(ctx)
+        bctx.threadOpts(ctx),
       );
       return;
     }
@@ -310,7 +348,9 @@ Reponds en texte brut, sans markdown.`;
         idea.content,
         topics ? `Topics: ${topics}` : "",
         `Date: ${date}`,
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
       await bctx.sendResponse(ctx, detail);
       return;
     }
@@ -323,13 +363,14 @@ Reponds en texte brut, sans markdown.`;
       metadata: { source: "manual" },
     });
     if (error) {
-      console.error("ideas add error:", error);
+      log.error("ideas add error", { error: String(error) });
       await ctx.reply("Erreur lors de l'ajout de l'idee.", bctx.threadOpts(ctx));
     } else {
       await ctx.reply(`Idee ajoutee : ${input}`, bctx.threadOpts(ctx));
       const fallbackPreview = input.length > 80 ? input.slice(0, 80) + "..." : input;
       const fallbackTs = new Date().toLocaleTimeString("fr-FR", {
-        hour: "2-digit", minute: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
         timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
       });
       await enqueue({
@@ -346,10 +387,16 @@ Reponds en texte brut, sans markdown.`;
 
   composer.command("remind", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "remind");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     const input = ctx.match?.trim();
     if (!input) {
-      await ctx.reply("Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Usage: /remind 14h30 Appeler le client\nOu: /remind 2h Verifier les logs",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -362,15 +409,15 @@ Reponds en texte brut, sans markdown.`;
     let timeLabel: string;
 
     if (relativeMatch) {
-      const amount = parseInt(relativeMatch[1]);
+      const amount = parseInt(relativeMatch[1], 10);
       const unit = relativeMatch[2].toLowerCase();
       text = relativeMatch[3];
       const ms = unit === "h" ? amount * 3600_000 : amount * 60_000;
       triggerAt = Date.now() + ms;
       timeLabel = `dans ${amount}${unit}`;
     } else if (absoluteMatch) {
-      const hours = parseInt(absoluteMatch[1]);
-      const minutes = parseInt(absoluteMatch[2] || "0");
+      const hours = parseInt(absoluteMatch[1], 10);
+      const minutes = parseInt(absoluteMatch[2] || "0", 10);
       text = absoluteMatch[3];
       const now = new Date();
       const target = new Date(now);
@@ -381,7 +428,10 @@ Reponds en texte brut, sans markdown.`;
       triggerAt = target.getTime();
       timeLabel = `a ${hours}h${minutes.toString().padStart(2, "0")}`;
     } else {
-      await ctx.reply("Format non reconnu. Exemples:\n/remind 14h30 Appeler le client\n/remind 2h Verifier les logs\n/remind 30m Pause cafe", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Format non reconnu. Exemples:\n/remind 14h30 Appeler le client\n/remind 2h Verifier les logs\n/remind 30m Pause cafe",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 

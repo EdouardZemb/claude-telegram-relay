@@ -1,16 +1,16 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
+import type { AgentMessage } from "../../src/agent-schemas.ts";
 import {
+  _clearMemoryStore,
+  buildResumeContext,
   createPipelineRun,
+  findLatestPipelineRun,
+  loadPipelineState,
+  type PipelineState,
+  type StepSnapshot,
   savePipelineStep,
   updatePipelineStatus,
-  loadPipelineState,
-  findLatestPipelineRun,
-  buildResumeContext,
-  _clearMemoryStore,
-  type StepSnapshot,
-  type PipelineState,
 } from "../../src/pipeline-state.ts";
-import type { AgentMessage } from "../../src/agent-schemas.ts";
 
 // All tests use in-memory mode (supabase = null)
 
@@ -21,13 +21,11 @@ describe("pipeline-state", () => {
 
   describe("createPipelineRun", () => {
     it("creates a new pipeline run in memory", async () => {
-      const sessionId = await createPipelineRun(
-        null,
-        "task-1",
-        "session-1",
-        "DEFAULT",
-        ["analyst", "pm", "dev"]
-      );
+      const sessionId = await createPipelineRun(null, "task-1", "session-1", "DEFAULT", [
+        "analyst",
+        "pm",
+        "dev",
+      ]);
       expect(sessionId).toBe("session-1");
 
       const state = await loadPipelineState(null, "session-1");
@@ -76,19 +74,24 @@ describe("pipeline-state", () => {
       await createPipelineRun(null, "task-1", "session-4", "DEFAULT", ["analyst", "pm", "dev"]);
 
       for (const agentId of ["analyst", "pm"] as const) {
-        await savePipelineStep(null, "session-4", {
-          agentId,
-          success: true,
-          durationMs: 3000,
-          completedAt: new Date().toISOString(),
-        }, {
-          agentId,
-          agentName: agentId,
-          success: true,
-          structured: null,
-          rawOutput: `${agentId} output`,
-          durationMs: 3000,
-        });
+        await savePipelineStep(
+          null,
+          "session-4",
+          {
+            agentId,
+            success: true,
+            durationMs: 3000,
+            completedAt: new Date().toISOString(),
+          },
+          {
+            agentId,
+            agentName: agentId,
+            success: true,
+            structured: null,
+            rawOutput: `${agentId} output`,
+            durationMs: 3000,
+          },
+        );
       }
 
       const state = await loadPipelineState(null, "session-4");
@@ -160,8 +163,22 @@ describe("pipeline-state", () => {
           { agentId: "pm", success: true, durationMs: 4000, completedAt: "2026-01-01" },
         ],
         stepsResults: [
-          { agentId: "analyst", agentName: "Mary", success: true, structured: null, rawOutput: "out1", durationMs: 5000 },
-          { agentId: "pm", agentName: "John", success: true, structured: null, rawOutput: "out2", durationMs: 4000 },
+          {
+            agentId: "analyst",
+            agentName: "Mary",
+            success: true,
+            structured: null,
+            rawOutput: "out1",
+            durationMs: 5000,
+          },
+          {
+            agentId: "pm",
+            agentName: "John",
+            success: true,
+            structured: null,
+            rawOutput: "out2",
+            durationMs: 4000,
+          },
         ],
         status: "failed",
       };

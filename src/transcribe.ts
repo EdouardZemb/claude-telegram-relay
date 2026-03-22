@@ -10,9 +10,11 @@
  */
 
 import { spawn } from "bun";
-import { writeFile, readFile, unlink } from "fs/promises";
+import { readFile, unlink, writeFile } from "fs/promises";
 import { join } from "path";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("transcribe");
 const VOICE_PROVIDER = process.env.VOICE_PROVIDER || "";
 const WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE || "auto";
 
@@ -31,7 +33,7 @@ export async function transcribe(audioBuffer: Buffer): Promise<string> {
     return transcribeLocal(audioBuffer);
   }
 
-  console.error(`Unknown VOICE_PROVIDER: ${VOICE_PROVIDER}`);
+  log.error(`Unknown VOICE_PROVIDER: ${VOICE_PROVIDER}`);
   return "";
 }
 
@@ -70,7 +72,7 @@ async function transcribeLocal(audioBuffer: Buffer): Promise<string> {
     // Convert OGG → WAV via ffmpeg
     const ffmpeg = spawn(
       ["ffmpeg", "-i", oggPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wavPath, "-y"],
-      { stdout: "pipe", stderr: "pipe" }
+      { stdout: "pipe", stderr: "pipe" },
     );
     const ffmpegExit = await ffmpeg.exited;
     if (ffmpegExit !== 0) {
@@ -80,8 +82,20 @@ async function transcribeLocal(audioBuffer: Buffer): Promise<string> {
 
     // Transcribe via whisper.cpp
     const whisper = spawn(
-      [whisperBinary, "--model", modelPath, "--language", WHISPER_LANGUAGE, "--file", wavPath, "--output-txt", "--output-file", join(tmpDir, `voice_${timestamp}`), "--no-prints"],
-      { stdout: "pipe", stderr: "pipe" }
+      [
+        whisperBinary,
+        "--model",
+        modelPath,
+        "--language",
+        WHISPER_LANGUAGE,
+        "--file",
+        wavPath,
+        "--output-txt",
+        "--output-file",
+        join(tmpDir, `voice_${timestamp}`),
+        "--no-prints",
+      ],
+      { stdout: "pipe", stderr: "pipe" },
     );
     const whisperExit = await whisper.exited;
     if (whisperExit !== 0) {

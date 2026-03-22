@@ -6,29 +6,34 @@
  * Validates no regressions in the core workflow pipeline.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // Set PROJECT_DIR before importing workflow modules
 process.env.PROJECT_DIR = import.meta.dir + "/../fixtures";
 
-import {
-  WorkflowTracker,
-  collectSprintMetrics,
-  getSprintMetrics,
-  generateRetroData,
-  saveRetro,
-  formatMetrics,
-  formatRetro,
-  reloadWorkflowConfig,
-  applyWorkflowSuggestions,
-} from "../../src/workflow";
-import { addTask, updateTaskStatus, getBacklog, getCurrentSprint } from "../../src/tasks";
-import { analyzePatterns, formatPatterns } from "../../src/patterns";
-import { runAllChecks, formatAlerts, checkStuckTasks, checkReworkRate, checkSprintPace, resetMonitoringState } from "../../src/alerts";
-import { processMemoryIntents, getMemoryContext, getRecentMessages } from "../../src/memory";
 import { readFileSync as _readFileSync, writeFileSync as _writeFileSync } from "fs";
 import { join as _join } from "path";
+import {
+  checkSprintPace,
+  formatAlerts,
+  resetMonitoringState,
+  runAllChecks,
+} from "../../src/alerts";
+import { getMemoryContext, getRecentMessages, processMemoryIntents } from "../../src/memory";
+import { analyzePatterns, formatPatterns } from "../../src/patterns";
+import { addTask, getBacklog, getCurrentSprint, updateTaskStatus } from "../../src/tasks";
+import {
+  applyWorkflowSuggestions,
+  collectSprintMetrics,
+  formatMetrics,
+  formatRetro,
+  generateRetroData,
+  getSprintMetrics,
+  reloadWorkflowConfig,
+  saveRetro,
+  WorkflowTracker,
+} from "../../src/workflow";
 
 const _FIXTURE_WORKFLOW_PATH = _join(import.meta.dir, "../fixtures/config/workflow.yaml");
 const _FIXTURE_WORKFLOW_ORIGINAL = _readFileSync(_FIXTURE_WORKFLOW_PATH, "utf-8");
@@ -276,7 +281,7 @@ describe("System: Multi-Sprint Trend Analysis", () => {
 
     // 2. Slow execution step should be detected
     const slowExec = analysis.patterns.find(
-      (p) => p.type === "slow_step" && p.data.step === "execution"
+      (p) => p.type === "slow_step" && p.data.step === "execution",
     );
     expect(slowExec).toBeDefined();
 
@@ -311,16 +316,16 @@ describe("System: Memory Lifecycle Integrity", () => {
   it("facts and goals survive across simulated conversations", async () => {
     const supabase = createMockSupabase();
     supabase._registerRpc("get_facts", () =>
-      supabase._getTable("memory").filter((m: any) => m.type === "fact")
+      supabase._getTable("memory").filter((m: any) => m.type === "fact"),
     );
     supabase._registerRpc("get_active_goals", () =>
-      supabase._getTable("memory").filter((m: any) => m.type === "goal")
+      supabase._getTable("memory").filter((m: any) => m.type === "goal"),
     );
 
     // Conversation 1: store fact and goal
     const response1 = await processMemoryIntents(
       supabase,
-      "OK! [REMEMBER: Le projet utilise Bun et TypeScript] [GOAL: Livrer le S13 avant le 20 fevrier | DEADLINE: 2026-02-20] Je m'en occupe."
+      "OK! [REMEMBER: Le projet utilise Bun et TypeScript] [GOAL: Livrer le S13 avant le 20 fevrier | DEADLINE: 2026-02-20] Je m'en occupe.",
     );
     expect(response1).not.toContain("[REMEMBER:");
     expect(response1).not.toContain("[GOAL:");
@@ -329,7 +334,7 @@ describe("System: Memory Lifecycle Integrity", () => {
     // Conversation 2: add another fact
     const response2 = await processMemoryIntents(
       supabase,
-      "Compris! [REMEMBER: Edouard prefere les reponses detaillees] Voila les details."
+      "Compris! [REMEMBER: Edouard prefere les reponses detaillees] Voila les details.",
     );
     expect(response2).not.toContain("[REMEMBER:");
 
@@ -351,7 +356,7 @@ describe("System: Memory Lifecycle Integrity", () => {
     // Conversation 4: complete the goal
     const response3 = await processMemoryIntents(
       supabase,
-      "Le sprint est fini! [DONE: Livrer le S13 avant le 20 fevrier]"
+      "Le sprint est fini! [DONE: Livrer le S13 avant le 20 fevrier]",
     );
     expect(response3).not.toContain("[DONE:");
 
@@ -374,9 +379,27 @@ describe("System: Alert Cron End-to-End Simulation", () => {
     const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const supabase = createMockSupabase({
       tasks: [
-        { id: "stuck1", title: "Bloquer sur le deploy", status: "in_progress", updated_at: twoDaysAgo, sprint: "S13" },
-        { id: "stuck2", title: "Config CI cassee", status: "in_progress", updated_at: twoDaysAgo, sprint: "S13" },
-        { id: "ok1", title: "Task OK", status: "done", updated_at: new Date().toISOString(), sprint: "S13" },
+        {
+          id: "stuck1",
+          title: "Bloquer sur le deploy",
+          status: "in_progress",
+          updated_at: twoDaysAgo,
+          sprint: "S13",
+        },
+        {
+          id: "stuck2",
+          title: "Config CI cassee",
+          status: "in_progress",
+          updated_at: twoDaysAgo,
+          sprint: "S13",
+        },
+        {
+          id: "ok1",
+          title: "Task OK",
+          status: "done",
+          updated_at: new Date().toISOString(),
+          sprint: "S13",
+        },
       ],
       workflow_logs: Array.from({ length: 8 }, (_, i) => ({
         sprint_id: "S13",
@@ -421,8 +444,20 @@ describe("System: Alert Cron End-to-End Simulation", () => {
     resetMonitoringState(); // S29: clear accumulated monitoring state from other tests
     const supabase = createMockSupabase({
       tasks: [
-        { id: "ok1", title: "Done task", status: "done", updated_at: new Date().toISOString(), sprint: "S13" },
-        { id: "ok2", title: "Fresh task", status: "in_progress", updated_at: new Date().toISOString(), sprint: "S13" },
+        {
+          id: "ok1",
+          title: "Done task",
+          status: "done",
+          updated_at: new Date().toISOString(),
+          sprint: "S13",
+        },
+        {
+          id: "ok2",
+          title: "Fresh task",
+          status: "in_progress",
+          updated_at: new Date().toISOString(),
+          sprint: "S13",
+        },
       ],
       workflow_logs: Array.from({ length: 10 }, (_, i) => ({
         sprint_id: "S13",
@@ -448,8 +483,16 @@ describe("System: Workflow Suggestion Safety", () => {
 
   it("only applies valid suggestions", () => {
     const changes = applyWorkflowSuggestions([
-      { action: "Valid change", target_step: "execution", suggested_change: "checkpoint.mode: light" },
-      { action: "Invalid step", target_step: "nonexistent", suggested_change: "checkpoint.mode: off" },
+      {
+        action: "Valid change",
+        target_step: "execution",
+        suggested_change: "checkpoint.mode: light",
+      },
+      {
+        action: "Invalid step",
+        target_step: "nonexistent",
+        suggested_change: "checkpoint.mode: off",
+      },
       { action: "Invalid format", target_step: "review", suggested_change: "something wrong" },
       { action: "No target", suggested_change: "checkpoint.mode: off" },
     ]);
@@ -471,7 +514,11 @@ describe("System: Workflow Suggestion Safety", () => {
 
     // Re-apply same change — should be idempotent
     const changes2 = applyWorkflowSuggestions([
-      { action: "Same change", target_step: "decomposition", suggested_change: "checkpoint.mode: off" },
+      {
+        action: "Same change",
+        target_step: "decomposition",
+        suggested_change: "checkpoint.mode: off",
+      },
     ]);
     expect(changes2.length).toBe(0);
 
@@ -493,7 +540,11 @@ describe("System: Conversation Context Pipeline", () => {
         { role: "user", content: "Lance le sprint S13", created_at: "2026-02-12T09:00:00Z" },
         { role: "assistant", content: "Sprint S13 demarre!", created_at: "2026-02-12T09:00:01Z" },
         { role: "user", content: "Cree 3 taches", created_at: "2026-02-12T09:01:00Z" },
-        { role: "assistant", content: "3 taches creees dans le backlog.", created_at: "2026-02-12T09:01:01Z" },
+        {
+          role: "assistant",
+          content: "3 taches creees dans le backlog.",
+          created_at: "2026-02-12T09:01:01Z",
+        },
       ],
     });
 

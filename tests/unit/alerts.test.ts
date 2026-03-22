@@ -4,26 +4,36 @@
  * Tests for proactive alert detection and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import {
-  checkStuckTasks,
   checkReworkRate,
   checkSprintPace,
-  runAllChecks,
+  checkStuckTasks,
   formatAlerts,
+  runAllChecks,
 } from "../../src/alerts";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("Stuck Task Detection", () => {
   it("detects tasks stuck for too long", async () => {
     const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const supabase = createMockSupabase({
       tasks: [
-        { id: "t1", title: "Stuck task", status: "in_progress", updated_at: twoDaysAgo, sprint: "S12" },
+        {
+          id: "t1",
+          title: "Stuck task",
+          status: "in_progress",
+          updated_at: twoDaysAgo,
+          sprint: "S12",
+        },
       ],
     });
 
-    const alerts = await checkStuckTasks(supabase, { stuckThresholdHours: 24, reworkThresholdPercent: 40, scheduleCheckEnabled: true });
+    const alerts = await checkStuckTasks(supabase, {
+      stuckThresholdHours: 24,
+      reworkThresholdPercent: 40,
+      scheduleCheckEnabled: true,
+    });
     expect(alerts.length).toBe(1);
     expect(alerts[0].type).toBe("stuck_task");
     expect(alerts[0].data.title).toBe("Stuck task");
@@ -37,7 +47,11 @@ describe("Stuck Task Detection", () => {
       ],
     });
 
-    const alerts = await checkStuckTasks(supabase, { stuckThresholdHours: 24, reworkThresholdPercent: 40, scheduleCheckEnabled: true });
+    const alerts = await checkStuckTasks(supabase, {
+      stuckThresholdHours: 24,
+      reworkThresholdPercent: 40,
+      scheduleCheckEnabled: true,
+    });
     expect(alerts.length).toBe(0);
   });
 
@@ -46,7 +60,13 @@ describe("Stuck Task Detection", () => {
     const supabase = createMockSupabase({
       tasks: [
         { id: "t1", title: "Done task", status: "done", updated_at: twoDaysAgo, sprint: "S12" },
-        { id: "t2", title: "Backlog task", status: "backlog", updated_at: twoDaysAgo, sprint: "S12" },
+        {
+          id: "t2",
+          title: "Backlog task",
+          status: "backlog",
+          updated_at: twoDaysAgo,
+          sprint: "S12",
+        },
       ],
     });
 
@@ -67,7 +87,11 @@ describe("Rework Rate Detection", () => {
       ],
     });
 
-    const alerts = await checkReworkRate(supabase, "S12", { stuckThresholdHours: 24, reworkThresholdPercent: 40, scheduleCheckEnabled: true });
+    const alerts = await checkReworkRate(supabase, "S12", {
+      stuckThresholdHours: 24,
+      reworkThresholdPercent: 40,
+      scheduleCheckEnabled: true,
+    });
     expect(alerts.length).toBe(1);
     expect(alerts[0].type).toBe("high_rework");
     expect(alerts[0].data.reworkRate).toBe(60);

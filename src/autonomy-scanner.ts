@@ -18,7 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readdir } from "fs/promises";
-import { join, basename } from "path";
+import { join } from "path";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -150,7 +150,7 @@ export async function scanStuckTasks(supabase: SupabaseClient): Promise<Opportun
 
   for (const task of stuckTasks || []) {
     const hoursStuck = Math.round(
-      (Date.now() - new Date(task.updated_at).getTime()) / (60 * 60 * 1000)
+      (Date.now() - new Date(task.updated_at).getTime()) / (60 * 60 * 1000),
     );
 
     opportunities.push({
@@ -199,7 +199,7 @@ export async function scanStaleBacklog(supabase: SupabaseClient): Promise<Opport
  */
 export async function runAllScanners(
   projectRoot: string,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
 ): Promise<ScanResult> {
   const allOpportunities: Opportunity[] = [];
 
@@ -215,9 +215,10 @@ export async function runAllScanners(
   // Sort by priority (lower = higher priority)
   allOpportunities.sort((a, b) => a.priority - b.priority);
 
-  const summary = allOpportunities.length === 0
-    ? "Aucune opportunite detectee. Projet en bon etat."
-    : `${allOpportunities.length} opportunite(s): ${missingTests.length} tests manquants, ${todos.length} TODOs, ${stuck.length} taches bloquees, ${stale.length} backlog.`;
+  const summary =
+    allOpportunities.length === 0
+      ? "Aucune opportunite detectee. Projet en bon etat."
+      : `${allOpportunities.length} opportunite(s): ${missingTests.length} tests manquants, ${todos.length} TODOs, ${stuck.length} taches bloquees, ${stale.length} backlog.`;
 
   return {
     opportunities: allOpportunities,
@@ -229,10 +230,7 @@ export async function runAllScanners(
 /**
  * Check if a task with this dedup_key already exists in the backlog.
  */
-export async function isDuplicate(
-  supabase: SupabaseClient,
-  dedupKey: string
-): Promise<boolean> {
+export async function isDuplicate(supabase: SupabaseClient, dedupKey: string): Promise<boolean> {
   const { data } = await supabase
     .from("tasks")
     .select("id")
@@ -250,7 +248,9 @@ export async function isDuplicate(
 export function formatScanResult(result: ScanResult): string {
   const lines: string[] = [];
 
-  lines.push(`[Scan Autonome] ${new Date(result.scannedAt).toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}`);
+  lines.push(
+    `[Scan Autonome] ${new Date(result.scannedAt).toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}`,
+  );
   lines.push("");
   lines.push(result.summary);
 

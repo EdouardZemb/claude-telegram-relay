@@ -1,25 +1,24 @@
-import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  isPrdWorkflowEnabled,
-  triageDescription,
-  buildTriageResponse,
-  extractSessionConstraints,
-  getRevisionCount,
-  canRevise,
-  buildRevisionKeyboard,
-  buildLaunchConfirmation,
-  notifyGateResult,
-  buildPRCompletionKeyboard,
-  storePendingDescription,
-  getPendingDescription,
-  clearPendingDescription,
-  storePendingRevision,
-  getPendingRevision,
-  clearPendingRevision,
-  chatKey,
-} from "../../src/prd-workflow.ts";
-import type { PRD } from "../../src/prd.ts";
+import { describe, expect, it } from "bun:test";
 import type { DetectedConstraint } from "../../src/conversation-session.ts";
+import type { PRD } from "../../src/prd.ts";
+import {
+  buildLaunchConfirmation,
+  buildPRCompletionKeyboard,
+  buildRevisionKeyboard,
+  buildTriageResponse,
+  canRevise,
+  chatKey,
+  clearPendingDescription,
+  clearPendingRevision,
+  extractSessionConstraints,
+  getPendingDescription,
+  getPendingRevision,
+  getRevisionCount,
+  isPrdWorkflowEnabled,
+  storePendingDescription,
+  storePendingRevision,
+  triageDescription,
+} from "../../src/prd-workflow.ts";
 
 // ── Helper ────────────────────────────────────────────────────
 
@@ -136,7 +135,8 @@ describe("prd-workflow", () => {
       const triage = {
         score: 0.45,
         pipeline: "LIGHT",
-        pipelineExplanation: "Pipeline : planner -> dev -> qa (difficulte: 45%)\nComplexite moyenne.",
+        pipelineExplanation:
+          "Pipeline : planner -> dev -> qa (difficulte: 45%)\nComplexite moyenne.",
         label: "moyenne",
       };
       const { message, keyboard } = buildTriageResponse("ajouter un cache", triage);
@@ -152,7 +152,12 @@ describe("prd-workflow", () => {
 
     it("truncates long descriptions", () => {
       const longDesc = "a".repeat(200);
-      const triage = { score: 0.5, pipeline: "DEFAULT", pipelineExplanation: "test", label: "moyenne" };
+      const triage = {
+        score: 0.5,
+        pipeline: "DEFAULT",
+        pipelineExplanation: "test",
+        label: "moyenne",
+      };
       const { message } = buildTriageResponse(longDesc, triage);
       expect(message.length).toBeLessThan(longDesc.length + 200);
     });
@@ -255,8 +260,8 @@ describe("prd-workflow", () => {
     it("classifies complex descriptions higher", async () => {
       const result = await triageDescription(
         "refactorer le systeme d'orchestration multi-agents avec un pipeline parallele " +
-        "et une architecture de microservices avec migration de base de donnees et " +
-        "implementation d'un protocole de securite avance avec authentification"
+          "et une architecture de microservices avec migration de base de donnees et " +
+          "implementation d'un protocole de securite avance avec authentification",
       );
       expect(result.score).toBeGreaterThan(0.3);
     });

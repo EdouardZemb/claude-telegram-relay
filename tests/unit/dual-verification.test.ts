@@ -5,12 +5,8 @@
  * on implementation gates.
  */
 
-import { describe, it, expect } from "bun:test";
-import {
-  runSingleCheck,
-  runDeterministicChecks,
-  type DeterministicCheckResult,
-} from "../../src/gate-evaluator";
+import { describe, expect, it } from "bun:test";
+import { runDeterministicChecks, runSingleCheck } from "../../src/gate-evaluator";
 
 // ── runSingleCheck ──────────────────────────────────────────
 
@@ -99,7 +95,7 @@ describe("evaluateGate deterministic path", () => {
     const { parseEvaluationOutput } = await import("../../src/gate-evaluator");
     const specResult = parseEvaluationOutput(
       JSON.stringify({ pass: true, score: 80, issues: [], gate_name: "spec" }),
-      "spec"
+      "spec",
     );
     expect(specResult.deterministicChecks).toBeUndefined();
   });

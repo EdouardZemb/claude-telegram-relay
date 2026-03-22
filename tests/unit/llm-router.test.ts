@@ -6,19 +6,17 @@
  * and difficulty scoring for adaptive pipeline selection.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import type { CodeGraph } from "../../src/code-graph";
 import {
-  parseRouterResponse,
-  routerPipelineToRoles,
   analyzeDescription,
+  computeDifficultyScore,
   computeGraphScoreFromGraph,
   computeHistoricalScore,
+  parseRouterResponse,
+  routerPipelineToRoles,
   scoreToPipeline,
-  computeDifficultyScore,
-  type RouterDecision,
-  type DifficultyScore,
 } from "../../src/llm-router";
-import type { CodeGraph } from "../../src/code-graph";
 
 // ── parseRouterResponse ──────────────────────────────────────
 
@@ -120,7 +118,7 @@ That's my recommendation.`;
     const decision = parseRouterResponse(output);
     expect(decision).not.toBeNull();
     expect(decision!.models.dev).toBe("claude-sonnet-4-6"); // fallback
-    expect(decision!.models.qa).toBe("claude-sonnet-4-6");  // unchanged
+    expect(decision!.models.qa).toBe("claude-sonnet-4-6"); // unchanged
   });
 
   it("handles missing models gracefully", () => {
@@ -281,9 +279,7 @@ describe("analyzeDescription", () => {
 
   it("increases score for complex keywords", () => {
     const base = analyzeDescription("implement the new feature for users");
-    const complex = analyzeDescription(
-      "implement the new architecture for users",
-    );
+    const complex = analyzeDescription("implement the new architecture for users");
     expect(complex).toBeGreaterThan(base);
   });
 
@@ -297,7 +293,9 @@ describe("analyzeDescription", () => {
 
   it("clamps score between 0 and 1", () => {
     // Many simple keywords should not go below 0
-    const low = analyzeDescription("fix typo rename label message comment readme changelog version bump");
+    const low = analyzeDescription(
+      "fix typo rename label message comment readme changelog version bump",
+    );
     expect(low).toBeGreaterThanOrEqual(0);
 
     // Many complex keywords should not go above 1
@@ -357,10 +355,7 @@ describe("computeGraphScoreFromGraph", () => {
 
   it("returns score based on module complexity when modules match", () => {
     const graph = buildMockGraph();
-    const result = computeGraphScoreFromGraph(
-      graph,
-      "modify the orchestrator pipeline",
-    );
+    const result = computeGraphScoreFromGraph(graph, "modify the orchestrator pipeline");
     expect(result.score).toBeGreaterThan(0.3);
     expect(result.modules).toContain("src/orchestrator.ts");
   });
@@ -368,20 +363,14 @@ describe("computeGraphScoreFromGraph", () => {
   it("boosts score for multiple affected modules", () => {
     const graph = buildMockGraph();
     const single = computeGraphScoreFromGraph(graph, "update tasks module");
-    const multi = computeGraphScoreFromGraph(
-      graph,
-      "update relay and orchestrator and tasks",
-    );
+    const multi = computeGraphScoreFromGraph(graph, "update relay and orchestrator and tasks");
     expect(multi.score).toBeGreaterThanOrEqual(single.score);
     expect(multi.modules.length).toBeGreaterThan(single.modules.length);
   });
 
   it("caps score at 1.0", () => {
     const graph = buildMockGraph();
-    const result = computeGraphScoreFromGraph(
-      graph,
-      "relay orchestrator tasks",
-    );
+    const result = computeGraphScoreFromGraph(graph, "relay orchestrator tasks");
     expect(result.score).toBeLessThanOrEqual(1.0);
   });
 });

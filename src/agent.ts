@@ -11,13 +11,16 @@
  * then creates a PR for review before merging to master.
  */
 
-import { spawn, spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { updateTaskStatus, type Task } from "./tasks.ts";
-import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
-import { runCodeReview, saveReviewResult, formatReviewResult } from "./code-review.ts";
+import { spawn, spawnSync } from "bun";
 import { buildAgentContext } from "./agent-context.ts";
+import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
+import { formatReviewResult, runCodeReview, saveReviewResult } from "./code-review.ts";
+import { createLogger } from "./logger.ts";
 import { buildMcpToolInstructions } from "./mcp-config.ts";
+import { type Task, updateTaskStatus } from "./tasks.ts";
+
+const log = createLogger("agent");
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -54,11 +57,7 @@ export interface SpawnClaudeResult {
 }
 
 /** S34: Model cascade order — cheapest to most expensive */
-export const CASCADE_MODELS = [
-  "claude-haiku-4-5",
-  "claude-sonnet-4-6",
-  "claude-opus-4-6",
-] as const;
+export const CASCADE_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-6"] as const;
 
 /**
  * S34 FR-003: Run spawnClaude with model cascade.
@@ -67,7 +66,9 @@ export const CASCADE_MODELS = [
  * EC-003: Stops after exhausting all 3 tiers.
  * EC-006: Explicit model override disables cascade.
  */
-export async function spawnClaudeWithCascade(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
+export async function spawnClaudeWithCascade(
+  options: SpawnClaudeOptions,
+): Promise<SpawnClaudeResult> {
   // EC-006: If explicit model is set, use it directly (no cascade)
   if (options.model) {
     const result = await spawnClaudeCore(options);
@@ -190,8 +191,11 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
   args.push("--dangerously-skip-permissions");
 
   // Log spawn command for debugging
-  const cmdSummary = args.slice(0, 3).join(" ") + (args.length > 3 ? ` ... (${args.length} args)` : "");
-  console.log(`[spawnClaude] Spawning: ${cmdSummary} | model=${options.model || "default"} | effort=${options.effort || "default"}`);
+  const cmdSummary =
+    args.slice(0, 3).join(" ") + (args.length > 3 ? ` ... (${args.length} args)` : "");
+  log.info(
+    `Spawning: ${cmdSummary} | model=${options.model || "default"} | effort=${options.effort || "default"}`,
+  );
 
   try {
     const proc = spawn(args, {
@@ -206,12 +210,12 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-      console.error(`[spawnClaude] Exit code ${exitCode} | stderr: ${stderr.substring(0, 500)}`);
+      log.error(`Exit code ${exitCode} | stderr: ${stderr.substring(0, 500)}`);
     }
 
     return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode };
   } catch (error) {
-    console.error(`[spawnClaude] Spawn failed:`, error);
+    log.error(`Spawn failed: ${error}`);
     return { stdout: "", stderr: String(error), exitCode: 1 };
   }
 }
@@ -254,7 +258,8 @@ function git(...args: string[]): { ok: boolean; stdout: string; stderr: string }
 function sanitizeBranchName(title: string): string {
   return title
     .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .substring(0, 50);
@@ -277,7 +282,7 @@ function sanitizeShellArg(input: string): string {
  */
 async function waitForCIChecks(
   branchName: string,
-  onProgress?: (message: string) => Promise<void>
+  onProgress?: (message: string) => Promise<void>,
 ): Promise<{ passed: boolean; details: string }> {
   const maxWaitMs = 10 * 60 * 1000; // 10 minutes
   const pollIntervalMs = 15_000; // 15 seconds
@@ -286,7 +291,7 @@ async function waitForCIChecks(
   while (Date.now() - startTime < maxWaitMs) {
     const result = spawnSync(
       ["gh", "pr", "checks", branchName, "-R", GITHUB_REPO, "--json", "name,state,bucket"],
-      { cwd: PROJECT_DIR }
+      { cwd: PROJECT_DIR },
     );
     const output = new TextDecoder().decode(result.stdout).trim();
 
@@ -310,7 +315,7 @@ async function waitForCIChecks(
       }
 
       const allCompleted = checks.every(
-        (c) => c.bucket === "pass" || c.bucket === "fail" || c.bucket === "skipping"
+        (c) => c.bucket === "pass" || c.bucket === "fail" || c.bucket === "skipping",
       );
 
       if (!allCompleted) {
@@ -318,13 +323,9 @@ async function waitForCIChecks(
         continue;
       }
 
-      const allPassed = checks.every(
-        (c) => c.bucket === "pass" || c.bucket === "skipping"
-      );
+      const allPassed = checks.every((c) => c.bucket === "pass" || c.bucket === "skipping");
 
-      const details = checks
-        .map((c) => `${c.name}: ${c.bucket}`)
-        .join(", ");
+      const details = checks.map((c) => `${c.name}: ${c.bucket}`).join(", ");
 
       if (allPassed) {
         if (onProgress) {
@@ -333,9 +334,7 @@ async function waitForCIChecks(
         return { passed: true, details };
       } else {
         const failed = checks.filter((c) => c.bucket === "fail");
-        const failDetails = failed
-          .map((c) => `${c.name}: ${c.bucket}`)
-          .join(", ");
+        const failDetails = failed.map((c) => `${c.name}: ${c.bucket}`).join(", ");
         if (onProgress) {
           await onProgress(`CI echouee: ${failDetails}`);
         }
@@ -343,7 +342,6 @@ async function waitForCIChecks(
       }
     } catch {
       await Bun.sleep(pollIntervalMs);
-      continue;
     }
   }
 
@@ -362,7 +360,7 @@ async function waitForCIChecks(
 export async function executeTask(
   supabase: SupabaseClient | null,
   task: Task,
-  onProgress?: (message: string) => Promise<void>
+  onProgress?: (message: string) => Promise<void>,
 ): Promise<AgentResult> {
   const startTime = Date.now();
 
@@ -467,7 +465,7 @@ export async function executeTask(
           output: output.trim(),
           durationMs: Date.now() - startTime,
           reviewScore: reviewResult.score,
-          reviewSummary: `Code review bloquee (score: ${reviewResult.score}/100). ${reviewResult.findings.filter(f => f.severity === "critical").length} findings critiques.`,
+          reviewSummary: `Code review bloquee (score: ${reviewResult.score}/100). ${reviewResult.findings.filter((f) => f.severity === "critical").length} findings critiques.`,
         };
       }
 
@@ -477,16 +475,25 @@ export async function executeTask(
         // Create PR via gh CLI (sanitize user-controlled strings)
         const safeTitle = sanitizeShellArg(task.title);
         const safeDesc = sanitizeShellArg(task.description || "");
-        const prBody = `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${safeDesc}`.trim();
+        const prBody =
+          `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${safeDesc}`.trim();
         const prResult = spawnSync(
-          ["gh", "pr", "create",
-            "-R", GITHUB_REPO,
-            "--title", safeTitle,
-            "--body", prBody,
-            "--base", "master",
-            "--head", branchName,
+          [
+            "gh",
+            "pr",
+            "create",
+            "-R",
+            GITHUB_REPO,
+            "--title",
+            safeTitle,
+            "--body",
+            prBody,
+            "--base",
+            "master",
+            "--head",
+            branchName,
           ],
-          { cwd: PROJECT_DIR }
+          { cwd: PROJECT_DIR },
         );
         const prOutput = new TextDecoder().decode(prResult.stdout).trim();
         if (prResult.exitCode === 0 && prOutput.startsWith("http")) {
@@ -558,8 +565,10 @@ function buildAgentPrompt(task: Task): string {
  * Returns a list of task titles + descriptions that can be added to the backlog.
  */
 export async function decomposeTask(
-  request: string
-): Promise<Array<{ title: string; description: string; priority: number; acceptance_criteria?: string }>> {
+  request: string,
+): Promise<
+  Array<{ title: string; description: string; priority: number; acceptance_criteria?: string }>
+> {
   const taskPrompt = [
     "Decompose cette demande en sous-taches techniques concretes.",
     "Chaque tache doit etre independante et realisable par un agent Claude Code.",
@@ -568,9 +577,9 @@ export async function decomposeTask(
     "",
     "Reponds UNIQUEMENT au format JSON, un array d'objets avec les champs:",
     '  title: string (court, imperatif, ex: "Ajouter la route /api/tasks")',
-    '  description: string (1-2 phrases de contexte technique)',
+    "  description: string (1-2 phrases de contexte technique)",
     "  priority: number (1=critique, 2=important, 3=normal)",
-    '  acceptance_criteria: string (criteres d\'acceptation au format Given/When/Then, separes par des retours a la ligne)',
+    "  acceptance_criteria: string (criteres d'acceptation au format Given/When/Then, separes par des retours a la ligne)",
     "",
     "Exemple de reponse:",
     '[{"title": "Creer le composant Button", "description": "Composant React reutilisable avec variantes primary/secondary.", "priority": 2, "acceptance_criteria": "Given le composant Button existe\\nWhen l\'utilisateur clique dessus\\nThen l\'action onClick est declenchee"}]',
@@ -590,11 +599,9 @@ export async function decomposeTask(
     if (!jsonMatch) return [];
 
     const tasks = JSON.parse(jsonMatch[0]);
-    return tasks.filter(
-      (t: { title?: string }) => t && typeof t.title === "string"
-    );
+    return tasks.filter((t: { title?: string }) => t && typeof t.title === "string");
   } catch (error) {
-    console.error("decomposeTask error:", error);
+    log.error(`decomposeTask error: ${error}`);
     return [];
   }
 }

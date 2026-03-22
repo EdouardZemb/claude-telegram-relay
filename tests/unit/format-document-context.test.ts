@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { formatDocumentContext } from "../../src/bot-context.ts";
 import type { DocumentSearchResult } from "../../src/documents.ts";
 

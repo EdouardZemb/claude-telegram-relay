@@ -16,15 +16,22 @@ import { formatTrustScores } from "./trust-scores.ts";
 // ── Types ────────────────────────────────────────────────────
 
 export interface Alert {
-  type: "stuck_task" | "high_rework" | "behind_schedule" | "long_running_step" | "review_score_drop" | "agent_failure_pattern" | "stale_task";
+  type:
+    | "stuck_task"
+    | "high_rework"
+    | "behind_schedule"
+    | "long_running_step"
+    | "review_score_drop"
+    | "agent_failure_pattern"
+    | "stale_task";
   severity: "info" | "warning" | "critical";
   message: string;
   data: Record<string, unknown>;
 }
 
 export interface AlertConfig {
-  stuckThresholdHours: number;     // Hours before a task is considered stuck
-  reworkThresholdPercent: number;   // % rework rate that triggers alert
+  stuckThresholdHours: number; // Hours before a task is considered stuck
+  reworkThresholdPercent: number; // % rework rate that triggers alert
   scheduleCheckEnabled: boolean;
 }
 
@@ -41,7 +48,7 @@ const DEFAULT_CONFIG: AlertConfig = {
  */
 export async function checkStuckTasks(
   supabase: SupabaseClient,
-  config: AlertConfig = DEFAULT_CONFIG
+  config: AlertConfig = DEFAULT_CONFIG,
 ): Promise<Alert[]> {
   const alerts: Alert[] = [];
   const thresholdMs = config.stuckThresholdHours * 60 * 60 * 1000;
@@ -75,7 +82,7 @@ export async function checkStuckTasks(
 export async function checkReworkRate(
   supabase: SupabaseClient,
   sprintId: string,
-  config: AlertConfig = DEFAULT_CONFIG
+  config: AlertConfig = DEFAULT_CONFIG,
 ): Promise<Alert[]> {
   const alerts: Alert[] = [];
 
@@ -94,7 +101,12 @@ export async function checkReworkRate(
       type: "high_rework",
       severity: reworkRate > 60 ? "critical" : "warning",
       message: `Taux de retouche eleve dans ${sprintId}: ${Math.round(reworkRate)}% (${reworkCount}/${logs.length})`,
-      data: { sprintId, reworkRate: Math.round(reworkRate), reworkCount, totalTransitions: logs.length },
+      data: {
+        sprintId,
+        reworkRate: Math.round(reworkRate),
+        reworkCount,
+        totalTransitions: logs.length,
+      },
     });
   }
 
@@ -106,7 +118,7 @@ export async function checkReworkRate(
  */
 export async function checkSprintPace(
   supabase: SupabaseClient,
-  sprintId: string
+  sprintId: string,
 ): Promise<Alert[]> {
   const alerts: Alert[] = [];
 
@@ -123,7 +135,7 @@ export async function checkSprintPace(
 
   // Estimate sprint progress based on earliest task creation
   const firstTask = tasks.reduce((earliest: any, t: any) =>
-    new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest
+    new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest,
   );
 
   const sprintAgeMs = Date.now() - new Date(firstTask.created_at).getTime();
@@ -158,7 +170,7 @@ export async function checkSprintPace(
  */
 export async function checkReviewScoreDrop(
   supabase: SupabaseClient,
-  windowSize: number = 5
+  windowSize: number = 5,
 ): Promise<Alert[]> {
   const alerts: Alert[] = [];
 
@@ -178,7 +190,8 @@ export async function checkReviewScoreDrop(
 
   if (scores.length < windowSize) return alerts;
 
-  const recentAvg = scores.slice(0, windowSize).reduce((a: number, b: number) => a + b, 0) / windowSize;
+  const recentAvg =
+    scores.slice(0, windowSize).reduce((a: number, b: number) => a + b, 0) / windowSize;
   const olderScores = scores.slice(windowSize);
 
   if (olderScores.length > 0) {
@@ -190,7 +203,11 @@ export async function checkReviewScoreDrop(
         type: "review_score_drop",
         severity: drop > 25 ? "critical" : "warning",
         message: `Score review en chute: ${Math.round(recentAvg)} (etait ${Math.round(olderAvg)}, -${Math.round(drop)} pts)`,
-        data: { recentAvg: Math.round(recentAvg), olderAvg: Math.round(olderAvg), drop: Math.round(drop) },
+        data: {
+          recentAvg: Math.round(recentAvg),
+          olderAvg: Math.round(olderAvg),
+          drop: Math.round(drop),
+        },
       });
     }
   }
@@ -210,9 +227,7 @@ export async function checkReviewScoreDrop(
 /**
  * Check for recurring agent failures in orchestration (S16-07).
  */
-export async function checkAgentFailurePatterns(
-  supabase: SupabaseClient
-): Promise<Alert[]> {
+export async function checkAgentFailurePatterns(supabase: SupabaseClient): Promise<Alert[]> {
   const alerts: Alert[] = [];
 
   const { data: logs } = await supabase
@@ -247,8 +262,8 @@ export async function checkAgentFailurePatterns(
       alerts.push({
         type: "agent_failure_pattern",
         severity: failures / runs > 0.75 ? "critical" : "warning",
-        message: `Agent ${agent} echoue frequemment: ${failures}/${runs} echecs (${Math.round(failures / runs * 100)}%)`,
-        data: { agent, failures, runs, failureRate: Math.round(failures / runs * 100) },
+        message: `Agent ${agent} echoue frequemment: ${failures}/${runs} echecs (${Math.round((failures / runs) * 100)}%)`,
+        data: { agent, failures, runs, failureRate: Math.round((failures / runs) * 100) },
       });
     }
   }
@@ -259,9 +274,7 @@ export async function checkAgentFailurePatterns(
 /**
  * Check for stale tasks in backlog > 48h without being picked up (S16-07).
  */
-export async function checkStaleTasks(
-  supabase: SupabaseClient
-): Promise<Alert[]> {
+export async function checkStaleTasks(supabase: SupabaseClient): Promise<Alert[]> {
   const alerts: Alert[] = [];
   const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
@@ -274,7 +287,9 @@ export async function checkStaleTasks(
     .limit(10);
 
   for (const task of staleTasks || []) {
-    const hoursOld = Math.round((Date.now() - new Date(task.created_at).getTime()) / (60 * 60 * 1000));
+    const hoursOld = Math.round(
+      (Date.now() - new Date(task.created_at).getTime()) / (60 * 60 * 1000),
+    );
     alerts.push({
       type: "stale_task",
       severity: hoursOld > 96 ? "warning" : "info",
@@ -292,7 +307,7 @@ export async function checkStaleTasks(
 export async function runAllChecks(
   supabase: SupabaseClient,
   sprintId?: string,
-  config?: AlertConfig
+  config?: AlertConfig,
 ): Promise<Alert[]> {
   const alerts: Alert[] = [];
   const cfg = config ?? DEFAULT_CONFIG;
@@ -375,7 +390,10 @@ export function recordSpawnResult(role: string, success: boolean): void {
   else spawnCounters[role].failure++;
 }
 
-export function getSpawnStats(): Record<string, { success: number; failure: number; failureRate: number }> {
+export function getSpawnStats(): Record<
+  string,
+  { success: number; failure: number; failureRate: number }
+> {
   const stats: Record<string, { success: number; failure: number; failureRate: number }> = {};
   for (const [role, counts] of Object.entries(spawnCounters)) {
     const total = counts.success + counts.failure;
@@ -497,7 +515,9 @@ export function formatMonitoringStats(): string {
   if (rtStats.count === 0) {
     lines.push("  Pas de mesures");
   } else {
-    lines.push(`  p50: ${Math.round(rtStats.p50 / 1000)}s, p95: ${Math.round(rtStats.p95 / 1000)}s, p99: ${Math.round(rtStats.p99 / 1000)}s`);
+    lines.push(
+      `  p50: ${Math.round(rtStats.p50 / 1000)}s, p95: ${Math.round(rtStats.p95 / 1000)}s, p99: ${Math.round(rtStats.p99 / 1000)}s`,
+    );
     lines.push(`  ${rtStats.count} mesures`);
   }
 
@@ -518,7 +538,9 @@ export function formatMonitoringStats(): string {
   const modErrors = getModuleErrorCounts();
   lines.push("");
   lines.push("Erreurs modules (derniere heure):");
-  const sorted = Object.entries(modErrors).sort(([, a], [, b]) => b - a).slice(0, 5);
+  const sorted = Object.entries(modErrors)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
   if (sorted.length === 0) {
     lines.push("  Aucune erreur");
   } else {
@@ -539,7 +561,10 @@ export function formatMonitoringStats(): string {
 export function formatAlerts(alerts: Alert[]): string {
   if (alerts.length === 0) return "Aucune alerte active. Tout est nominal.";
 
-  const lines = [`${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""} :`, ""];
+  const lines = [
+    `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""} :`,
+    "",
+  ];
 
   for (const alert of alerts) {
     const icon = alert.severity === "critical" ? "!!" : alert.severity === "warning" ? "!" : "~";

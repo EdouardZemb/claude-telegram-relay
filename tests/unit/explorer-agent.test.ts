@@ -4,25 +4,17 @@
  * Tests for explorer agent definition, schema, validation, and MCP config.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  getAgent,
-  getAgentForCommand,
-  buildAgentSystemPrompt,
-} from "../../src/bmad-agents";
-import {
-  getSchemaForRole,
-  getJsonSchemaForRole,
-  validateAgentOutput,
-  parseAgentOutput,
-  formatStructuredOutput,
   type ExplorerOutput,
+  formatStructuredOutput,
+  getJsonSchemaForRole,
+  getSchemaForRole,
+  parseAgentOutput,
+  validateAgentOutput,
 } from "../../src/agent-schemas";
-import {
-  getMcpToolsForRole,
-  buildMcpToolInstructions,
-  isToolAllowed,
-} from "../../src/mcp-config";
+import { buildAgentSystemPrompt, getAgent, getAgentForCommand } from "../../src/bmad-agents";
+import { buildMcpToolInstructions, getMcpToolsForRole, isToolAllowed } from "../../src/mcp-config";
 
 // ── Agent Definition ────────────────────────────────────────────
 
@@ -67,7 +59,11 @@ describe("Explorer Agent Definition", () => {
   it("has critical actions for read-only behavior", () => {
     const explorer = getAgent("explorer");
     expect(explorer!.criticalActions.length).toBeGreaterThan(0);
-    expect(explorer!.criticalActions.some(a => a.toLowerCase().includes("read-only") || a.toLowerCase().includes("never modify"))).toBe(true);
+    expect(
+      explorer!.criticalActions.some(
+        (a) => a.toLowerCase().includes("read-only") || a.toLowerCase().includes("never modify"),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -188,4 +184,3 @@ describe("Explorer MCP Config", () => {
     expect(instructions).toContain("search_thoughts");
   });
 });
-

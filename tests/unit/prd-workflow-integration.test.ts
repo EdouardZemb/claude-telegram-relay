@@ -1,8 +1,8 @@
-import { describe, it, expect } from "bun:test";
-import { explainPipelineChoice } from "../../src/pipeline-selection.ts";
-import { detectIntent } from "../../src/intent-detection.ts";
-import { getSession, _resetSessions } from "../../src/conversation-session.ts";
+import { describe, expect, it } from "bun:test";
 import { getAction } from "../../src/action-registry.ts";
+import { _resetSessions, getSession } from "../../src/conversation-session.ts";
+import { detectIntent } from "../../src/intent-detection.ts";
+import { explainPipelineChoice } from "../../src/pipeline-selection.ts";
 import type { PRDSessionConstraints } from "../../src/prd.ts";
 
 // ── Pipeline Explanation Tests ────────────────────────────────

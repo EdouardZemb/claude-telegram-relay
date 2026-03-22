@@ -5,16 +5,16 @@
  * and retry policy resolution from workflow.yaml.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 process.env.PROJECT_DIR = import.meta.dir + "/../fixtures/..";
 
 import {
-  WorkflowTracker,
-  getRetryPolicy,
   getExecutionRetryPolicy,
+  getRetryPolicy,
   reloadWorkflowConfig,
+  WorkflowTracker,
 } from "../../src/workflow";
 
 // ── Workflow Transition Enforcement (S23-08) ─────────────────

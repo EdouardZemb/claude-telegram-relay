@@ -7,57 +7,52 @@
  * PRD-to-Deploy workflow callbacks (prdwf_*).
  */
 
-import { Composer, Context, InlineKeyboard } from "grammy";
-import type { BotContext } from "../bot-context.ts";
+import { Composer, type Context, InlineKeyboard } from "grammy";
 import { decomposeTask } from "../agent.ts";
-import { addTask, getCurrentSprint } from "../tasks.ts";
-import { buildStoryFile, enrichTaskWithStory } from "../story-files.ts";
+import type { BotContext } from "../bot-context.ts";
+import { getSession } from "../conversation-session.ts";
+import { shardDocument } from "../document-sharding.ts";
+import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
 import {
+  formatPRDDetail,
+  formatPRDList,
   generatePRD,
-  savePRD,
   getPRD,
   getPRDs,
+  savePRD,
   updatePRDStatus,
-  formatPRDList,
-  formatPRDDetail,
 } from "../prd.ts";
-import { WorkflowTracker } from "../workflow.ts";
-import { resolveProjectContext } from "../projects.ts";
-import { shardDocument } from "../document-sharding.ts";
+import {
+  buildPreflightResultTag,
+  buildRevisionKeyboard,
+  buildTriageResponse,
+  canRevise,
+  chatKey,
+  clearPendingDescription,
+  clearPendingProtoSpec,
+  clearPendingRevision,
+  decomposePRDIntoTasks,
+  extractSessionConstraints,
+  generateAndSavePRD,
+  getPendingDescription,
+  getPendingProtoSpec,
+  getRevisionCount,
+  isPrdMaturationEnabled,
+  isPrdWorkflowEnabled,
+  runPrdPreflightChecks,
+  storePendingDescription,
+  storePendingProtoSpec,
+  storePendingRevision,
+  triageDescription,
+} from "../prd-workflow.ts";
 import {
   analyzeBacklog as analyzeBacklogProactive,
   formatPlannerResult as formatPlannerResultTg,
 } from "../proactive-planner.ts";
-import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
-import {
-  isPrdWorkflowEnabled,
-  isPrdMaturationEnabled,
-  triageDescription,
-  buildTriageResponse,
-  extractSessionConstraints,
-  generateAndSavePRD,
-  decomposePRDIntoTasks,
-  buildRevisionKeyboard,
-  canRevise,
-  getRevisionCount,
-  revisePRD,
-  buildLaunchConfirmation,
-  storePendingDescription,
-  getPendingDescription,
-  clearPendingDescription,
-  storePendingRevision,
-  getPendingRevision,
-  clearPendingRevision,
-  storePendingProtoSpec,
-  getPendingProtoSpec,
-  clearPendingProtoSpec,
-  chatKey,
-  runPrdPreflightChecks,
-  formatPreflightReport,
-  buildPreflightResultTag,
-} from "../prd-workflow.ts";
-import { getSession } from "../conversation-session.ts";
-import { explainPipelineChoice } from "../pipeline-selection.ts";
+import { resolveProjectContext } from "../projects.ts";
+import { buildStoryFile, enrichTaskWithStory } from "../story-files.ts";
+import { addTask, getCurrentSprint } from "../tasks.ts";
+import { WorkflowTracker } from "../workflow.ts";
 
 export default function planningCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -65,7 +60,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
   // /prd_workflow — conversational PRD-to-Deploy workflow entry point
   composer.command("prd_workflow", async (ctx) => {
     if (!isPrdWorkflowEnabled()) {
-      await ctx.reply("Le workflow PRD-to-Deploy n'est pas active. Utilisez /feature enable prd_to_deploy", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Le workflow PRD-to-Deploy n'est pas active. Utilisez /feature enable prd_to_deploy",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
     if (!bctx.supabase) {
@@ -74,7 +72,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     }
     const description = ctx.match?.trim();
     if (!description) {
-      await ctx.reply("Usage: /prd_workflow description de la fonctionnalite", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Usage: /prd_workflow description de la fonctionnalite",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
     await ctx.replyWithChatAction("typing");
@@ -90,7 +91,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
   // /plan — decompose a request into subtasks
   composer.command("plan", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "plan");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -102,27 +106,37 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     }
 
     // Resolve project context
-    const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+    const currentProject = await resolveProjectContext(
+      bctx.supabase,
+      ctx.message?.message_thread_id,
+    );
     const projectSlug = currentProject?.slug || "telegram-relay";
 
     // ── Plan function (shared between sync/async) ──────────────
     const planFn = async (): Promise<string> => {
-      const currentSprint = currentProject?.current_sprint || await getCurrentSprint(bctx.supabase!);
+      const currentSprint =
+        currentProject?.current_sprint || (await getCurrentSprint(bctx.supabase!));
       const tracker = new WorkflowTracker(bctx.supabase!, {
         sprintId: currentSprint || undefined,
         startStep: "request",
       });
-      await tracker.transition("decomposition", { agent_notes: `Plan demande: ${request.substring(0, 100)}` });
+      await tracker.transition("decomposition", {
+        agent_notes: `Plan demande: ${request.substring(0, 100)}`,
+      });
 
       const subtasks = await decomposeTask(request);
 
       if (subtasks.length === 0) {
         await tracker.logCheckpoint("fail", "Aucune sous-tache generee");
-        throw new Error("Impossible de decomposer cette demande. Reformule ou ajoute plus de details.");
+        throw new Error(
+          "Impossible de decomposer cette demande. Reformule ou ajoute plus de details.",
+        );
       }
 
       await tracker.logCheckpoint("pass", `${subtasks.length} sous-taches generees`);
-      await tracker.transition("validation", { agent_notes: `${subtasks.length} sous-taches proposees` });
+      await tracker.transition("validation", {
+        agent_notes: `${subtasks.length} sous-taches proposees`,
+      });
 
       const added = [];
       for (const st of subtasks) {
@@ -134,9 +148,12 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         });
         if (task) {
           if (st.acceptance_criteria) {
-            await bctx.supabase!.from("tasks").update({
-              acceptance_criteria: st.acceptance_criteria,
-            }).eq("id", task.id);
+            await bctx
+              .supabase!.from("tasks")
+              .update({
+                acceptance_criteria: st.acceptance_criteria,
+              })
+              .eq("id", task.id);
             task.acceptance_criteria = st.acceptance_criteria;
           }
           const story = buildStoryFile(task);
@@ -146,7 +163,9 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       }
 
       const lines = added.map((t, i) => {
-        const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+        const acCount = (t.acceptance_criteria || "")
+          .split("\n")
+          .filter((l: string) => l.trim()).length;
         return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
       });
       return `${added.length} taches ajoutees au backlog avec story files:\n\n${lines.join("\n")}\n\nUtilise /exec <id> pour lancer l'execution d'une tache.`;
@@ -156,7 +175,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       const chatId = ctx.chat?.id || 0;
       const threadId = bctx.getThreadId(ctx);
       const jobId = await launchJob("plan", chatId, planFn, { messageThreadId: threadId });
-      await ctx.reply(`Job lance plan (id: ${jobId})\nRequete: ${request.substring(0, 100)}`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Job lance plan (id: ${jobId})\nRequete: ${request.substring(0, 100)}`,
+        bctx.threadOpts(ctx),
+      );
     } else {
       await ctx.reply("Decomposition en cours...", bctx.threadOpts(ctx));
       try {
@@ -171,7 +193,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
   // /prd — generate a PRD from a description, or list existing PRDs
   composer.command("prd", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "prd");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -179,14 +204,20 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     const input = ctx.match?.trim();
 
     // Resolve project context
-    const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+    const currentProject = await resolveProjectContext(
+      bctx.supabase,
+      ctx.message?.message_thread_id,
+    );
     const projectSlug = currentProject?.slug || "telegram-relay";
 
     // /prd without args or /prd list → list PRDs for current project
     if (!input || /^(list|lister)$/i.test(input)) {
       const prds = await getPRDs(bctx.supabase, { project: projectSlug });
       if (prds.length === 0) {
-        await ctx.reply("Aucun PRD. Utilise /prd <description> pour en créer un.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          "Aucun PRD. Utilise /prd <description> pour en créer un.",
+          bctx.threadOpts(ctx),
+        );
         return;
       }
       const text = formatPRDList(prds);
@@ -201,7 +232,9 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
     // /prd <id> (8 chars or less, looks like a UUID prefix) → show detail
     // Also extract hex ID from longer text (e.g. "le PRD c495951a")
-    const hexIdMatch = /^[a-f0-9]{4,8}$/.test(input) ? input : input.match(/\b([a-f0-9]{4,8})\b/)?.[1];
+    const hexIdMatch = /^[a-f0-9]{4,8}$/.test(input)
+      ? input
+      : input.match(/\b([a-f0-9]{4,8})\b/)?.[1];
     if (hexIdMatch) {
       const prd = await getPRD(bctx.supabase, hexIdMatch);
       if (!prd) {
@@ -227,13 +260,16 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         }
       } else if (prd.status === "approved") {
         // Check for backlog tasks tagged with this PRD
-        const { data: prdTasks } = await bctx.supabase!.from("tasks")
+        const { data: prdTasks } = await bctx
+          .supabase!.from("tasks")
           .select("id")
           .contains("tags", [`prd:${prd.id}`])
           .eq("status", "backlog");
         if (prdTasks && prdTasks.length > 0) {
-          const keyboard = new InlineKeyboard()
-            .text(`Lancer l'implementation (${prdTasks.length} taches)`, `prdwf_launch:${prd.id.substring(0, 8)}`);
+          const keyboard = new InlineKeyboard().text(
+            `Lancer l'implementation (${prdTasks.length} taches)`,
+            `prdwf_launch:${prd.id.substring(0, 8)}`,
+          );
           if (detail.length > 4000) {
             await bctx.sendResponse(ctx, detail);
             await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
@@ -265,7 +301,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         throw new Error("Erreur lors de la sauvegarde du PRD.");
       }
 
-      const currentProjectForShard = await resolveProjectContext(bctx.supabase!, ctx.message?.message_thread_id);
+      const currentProjectForShard = await resolveProjectContext(
+        bctx.supabase!,
+        ctx.message?.message_thread_id,
+      );
       await shardDocument(bctx.supabase!, {
         id: prd.id,
         title: prd.title,
@@ -281,7 +320,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       const chatId = ctx.chat?.id || 0;
       const threadId = bctx.getThreadId(ctx);
       const jobId = await launchJob("prd", chatId, prdCreateFn, { messageThreadId: threadId });
-      await ctx.reply(`Job lance prd (id: ${jobId})\nDescription: ${input!.substring(0, 100)}`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Job lance prd (id: ${jobId})\nDescription: ${input!.substring(0, 100)}`,
+        bctx.threadOpts(ctx),
+      );
     } else {
       await ctx.reply("Generation du PRD en cours...", bctx.threadOpts(ctx));
       try {
@@ -303,7 +345,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           }
         }
       } catch (error: any) {
-        await ctx.reply(error.message || "Erreur lors de la generation du PRD.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          error.message || "Erreur lors de la generation du PRD.",
+          bctx.threadOpts(ctx),
+        );
       }
     }
   });
@@ -311,14 +356,17 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
   // /planify — proactive backlog analysis and reordering
   composer.command("planify", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "planify");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
     }
 
     const arg = ctx.match?.trim();
-    const sprintId = arg || await getCurrentSprint(bctx.supabase) || undefined;
+    const sprintId = arg || (await getCurrentSprint(bctx.supabase)) || undefined;
 
     const planifyFn = async (): Promise<string> => {
       const result = await analyzeBacklogProactive(bctx.supabase!, sprintId);
@@ -431,7 +479,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
         if (task) {
           await ctx.editMessageText(
-            `Tache creee : ${task.title} [${task.id.substring(0, 8)}]\n\nUtilise /exec ${task.id.substring(0, 8)} pour lancer l'implementation.`
+            `Tache creee : ${task.title} [${task.id.substring(0, 8)}]\n\nUtilise /exec ${task.id.substring(0, 8)} pour lancer l'implementation.`,
           );
         } else {
           await ctx.editMessageText("Erreur lors de la creation de la tache.");
@@ -467,7 +515,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
         await ctx.answerCallbackQuery({ text: "Envoie tes modifications." });
         await ctx.editMessageText(
-          `PRD en révision [${prdId.substring(0, 8)}] (${revCount + 1}/${3})\n\nDécris les modifications souhaitées. Je régénérerai le PRD.`
+          `PRD en révision [${prdId.substring(0, 8)}] (${revCount + 1}/${3})\n\nDécris les modifications souhaitées. Je régénérerai le PRD.`,
         );
         return;
       }
@@ -483,14 +531,17 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         await ctx.answerCallbackQuery({ text: "Lancement..." });
 
         // Get tasks tagged with this PRD (created by decomposePRDIntoTasks)
-        const { data: tasks } = await bctx.supabase.from("tasks")
+        const { data: tasks } = await bctx.supabase
+          .from("tasks")
           .select("*")
           .contains("tags", [`prd:${prd.id}`])
           .eq("status", "backlog")
           .order("priority", { ascending: true });
 
         if (!tasks || tasks.length === 0) {
-          await ctx.editMessageText("Aucune tâche en backlog pour ce PRD. Lance /backlog pour vérifier.");
+          await ctx.editMessageText(
+            "Aucune tâche en backlog pour ce PRD. Lance /backlog pour vérifier.",
+          );
           return;
         }
 
@@ -499,19 +550,23 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
           const launchFn = async (): Promise<string> => {
             const results = await runBatchPipeline(bctx.supabase!, tasks, { autoPipeline: true });
-            const ok = results.filter(r => r.success).length;
-            const lines = results.map(r => formatPipelineResult(r));
+            const ok = results.filter((r) => r.success).length;
+            const lines = results.map((r) => formatPipelineResult(r));
             return `BATCH_COMPLETE:${ok}/${results.length}\n\n${lines.join("\n\n---\n\n")}`;
           };
-          const taskList = tasks.map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`).join("\n");
+          const taskList = tasks
+            .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+            .join("\n");
           const jobId = await launchJob("autopipeline-batch", cId, launchFn, {
             messageThreadId: tId,
           });
           await ctx.editMessageText(
-            `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`
+            `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`,
           );
         } else {
-          await ctx.editMessageText("Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.");
+          await ctx.editMessageText(
+            "Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.",
+          );
         }
         return;
       }
@@ -531,7 +586,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           await ctx.editMessageText(
             success
               ? `PR #${prNumber} mergée avec succès !`
-              : `Erreur lors du merge de la PR #${prNumber}. Vérifie sur GitHub.`
+              : `Erreur lors du merge de la PR #${prNumber}. Vérifie sur GitHub.`,
           );
         } catch {
           await ctx.editMessageText(`Erreur lors du merge de la PR #${prNumber}.`);
@@ -551,7 +606,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         }
 
         // Get tasks tagged with this PRD
-        const { data: tasks } = await bctx.supabase.from("tasks")
+        const { data: tasks } = await bctx.supabase
+          .from("tasks")
           .select("*")
           .contains("tags", [`prd:${pending.prdId}`])
           .eq("status", "backlog")
@@ -568,19 +624,23 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
           const launchFn = async (): Promise<string> => {
             const results = await runBatchPipeline(bctx.supabase!, tasks, { autoPipeline: true });
-            const ok = results.filter(r => r.success).length;
-            const lines = results.map(r => formatPipelineResult(r));
+            const ok = results.filter((r) => r.success).length;
+            const lines = results.map((r) => formatPipelineResult(r));
             return `BATCH_COMPLETE:${ok}/${results.length}\n\n${lines.join("\n\n---\n\n")}`;
           };
-          const taskList = tasks.map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`).join("\n");
+          const taskList = tasks
+            .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+            .join("\n");
           const jobId = await launchJob("autopipeline-batch", cId, launchFn, {
             messageThreadId: tId,
           });
           await ctx.editMessageText(
-            `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`
+            `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`,
           );
         } else {
-          await ctx.editMessageText("Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.");
+          await ctx.editMessageText(
+            "Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.",
+          );
         }
         clearPendingProtoSpec(ck);
         return;
@@ -613,7 +673,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         clearPendingProtoSpec(ck);
 
         await ctx.editMessageText(
-          `PRD en revision [${pending.prdId.substring(0, 8)}]\n\nLe challenge adversarial a identifié des problèmes. Décris les modifications souhaitées. Je régénérerai le PRD.`
+          `PRD en revision [${pending.prdId.substring(0, 8)}]\n\nLe challenge adversarial a identifié des problèmes. Décris les modifications souhaitées. Je régénérerai le PRD.`,
         );
         return;
       }
@@ -663,13 +723,16 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
           await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: actionKeyboard });
         }
       } else if (prd.status === "approved") {
-        const { data: prdTasks } = await bctx.supabase!.from("tasks")
+        const { data: prdTasks } = await bctx
+          .supabase!.from("tasks")
           .select("id")
           .contains("tags", [`prd:${prd.id}`])
           .eq("status", "backlog");
         if (prdTasks && prdTasks.length > 0) {
-          const launchKeyboard = new InlineKeyboard()
-            .text(`Lancer l'implementation (${prdTasks.length} taches)`, `prdwf_launch:${prd.id.substring(0, 8)}`);
+          const launchKeyboard = new InlineKeyboard().text(
+            `Lancer l'implementation (${prdTasks.length} taches)`,
+            `prdwf_launch:${prd.id.substring(0, 8)}`,
+          );
           if (detail.length > 4000) {
             await bctx.sendResponse(ctx, detail);
             await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: launchKeyboard });
@@ -705,14 +768,18 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
                 // Maturation enabled: decompose then preflight (R1)
                 const decomposeThenPreflightFn = async (): Promise<string> => {
                   const result = await decomposePRDIntoTasks(
-                    bctx.supabase!, prd, projectSlug, currentProject?.id,
+                    bctx.supabase!,
+                    prd,
+                    projectSlug,
+                    currentProject?.id,
                   );
                   if (result.tasks.length === 0) {
                     return `PRDWF_DECOMPOSED:${prd.id}|0|Aucune tache generee`;
                   }
 
                   // Fetch full tasks for preflight
-                  const { data: fullTasks } = await bctx.supabase!.from("tasks")
+                  const { data: fullTasks } = await bctx
+                    .supabase!.from("tasks")
                     .select("*")
                     .contains("tags", [`prd:${prd.id}`])
                     .eq("status", "backlog");
@@ -732,22 +799,29 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
                   return buildPreflightResultTag(report);
                 };
 
-                const jobId = await launchJob("prd-preflight", chatId, decomposeThenPreflightFn, { messageThreadId: cbThreadId });
+                const jobId = await launchJob("prd-preflight", chatId, decomposeThenPreflightFn, {
+                  messageThreadId: cbThreadId,
+                });
                 await ctx.editMessageText(
-                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition et verification en cours (job: ${jobId}). Tu recevras un rapport de pre-lancement avec les resultats.`
+                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition et verification en cours (job: ${jobId}). Tu recevras un rapport de pre-lancement avec les resultats.`,
                 );
               } else {
                 // No maturation: decompose then offer launch (existing behavior)
                 const decomposeFn = async (): Promise<string> => {
                   const result = await decomposePRDIntoTasks(
-                    bctx.supabase!, prd, projectSlug, currentProject?.id,
+                    bctx.supabase!,
+                    prd,
+                    projectSlug,
+                    currentProject?.id,
                   );
                   return `PRDWF_DECOMPOSED:${prd.id}|${result.tasks.length}|${result.message}`;
                 };
 
-                const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
+                const jobId = await launchJob("prd-decompose", chatId, decomposeFn, {
+                  messageThreadId: cbThreadId,
+                });
                 await ctx.editMessageText(
-                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee (job: ${jobId}). Tu recevras une notification avec les taches et l'option de lancer l'implementation.`
+                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee (job: ${jobId}). Tu recevras une notification avec les taches et l'option de lancer l'implementation.`,
                 );
               }
             } else {
@@ -770,9 +844,12 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
                   });
                   if (task) {
                     if (st.acceptance_criteria) {
-                      await bctx.supabase!.from("tasks").update({
-                        acceptance_criteria: st.acceptance_criteria,
-                      }).eq("id", task.id);
+                      await bctx
+                        .supabase!.from("tasks")
+                        .update({
+                          acceptance_criteria: st.acceptance_criteria,
+                        })
+                        .eq("id", task.id);
                       task.acceptance_criteria = st.acceptance_criteria;
                     }
                     const story = buildStoryFile(task);
@@ -782,7 +859,9 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
                 }
 
                 const lines = added.map((t, i) => {
-                  const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+                  const acCount = (t.acceptance_criteria || "")
+                    .split("\n")
+                    .filter((l: string) => l.trim()).length;
                   return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
                 });
                 return `${added.length} tâches créées depuis le PRD "${prd.title}":\n${lines.join("\n")}`;
@@ -790,19 +869,21 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
               const chatId = ctx.chat?.id || 0;
               const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
-              const jobId = await launchJob("prd-decompose", chatId, decomposeFn, { messageThreadId: cbThreadId });
+              const jobId = await launchJob("prd-decompose", chatId, decomposeFn, {
+                messageThreadId: cbThreadId,
+              });
               await ctx.editMessageText(
-                `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`
+                `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee en arriere-plan (job: ${jobId}).`,
               );
             }
           } else {
             await ctx.editMessageText(
-              `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
+              `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`,
             );
           }
         } else {
           await ctx.editMessageText(
-            `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`
+            `PRD APPROUVE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nLe PRD est maintenant pret pour l'implementation. Utilise /plan pour decomposer en taches.`,
           );
         }
       } else {
@@ -813,7 +894,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       if (updated) {
         await ctx.answerCallbackQuery({ text: "PRD rejete." });
         await ctx.editMessageText(
-          `PRD REJETE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nCree un nouveau PRD avec /prd si tu veux reprendre.`
+          `PRD REJETE: ${updated.title} [${updated.id.substring(0, 8)}]\n\nCree un nouveau PRD avec /prd si tu veux reprendre.`,
         );
       } else {
         await ctx.answerCallbackQuery({ text: "Erreur." });
@@ -821,7 +902,7 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     } else if (action === "prd_revise") {
       await ctx.answerCallbackQuery({ text: "Envoie tes modifications." });
       await ctx.editMessageText(
-        `PRD en revision [${prdId.substring(0, 8)}]\n\nDecris les modifications souhaitees dans un message. Je regenererai le PRD avec tes retours.`
+        `PRD en revision [${prdId.substring(0, 8)}]\n\nDecris les modifications souhaitees dans un message. Je regenererai le PRD avec tes retours.`,
       );
     }
   });

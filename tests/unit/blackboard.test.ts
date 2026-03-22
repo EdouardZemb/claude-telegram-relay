@@ -5,19 +5,19 @@
  * role authorization, overflow handling, and traceability.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import {
-  createBlackboard,
-  readSection,
-  writeSection,
-  getFullBlackboard,
-  updateBlackboardStatus,
-  generateTraceabilityReport,
-  formatTraceabilityReport,
-  InMemoryBlackboard,
   type BlackboardSections,
+  createBlackboard,
+  formatTraceabilityReport,
+  generateTraceabilityReport,
+  getFullBlackboard,
+  InMemoryBlackboard,
+  readSection,
+  updateBlackboardStatus,
+  writeSection,
 } from "../../src/blackboard";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── createBlackboard ─────────────────────────────────────────
 
@@ -52,19 +52,21 @@ describe("createBlackboard", () => {
 describe("readSection", () => {
   it("returns only the requested section (AC-004)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 2,
-        sections: {
-          spec: { title: "My Spec" },
-          plan: { design: "My Plan" },
-          tasks: null,
-          implementation: null,
-          verification: null,
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 2,
+          sections: {
+            spec: { title: "My Spec" },
+            plan: { design: "My Plan" },
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          status: "active",
         },
-        status: "active",
-      }],
+      ],
     });
 
     const spec = await readSection(supabase, "session-1", "spec");
@@ -76,13 +78,21 @@ describe("readSection", () => {
 
   it("returns null for empty section (EC-001)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 1,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          status: "active",
+        },
+      ],
     });
 
     const result = await readSection(supabase, "session-1", "tasks");
@@ -95,18 +105,31 @@ describe("readSection", () => {
 describe("writeSection", () => {
   it("increments version and updates section (AC-002)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 1,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     const result = await writeSection(
-      supabase, "session-1", "spec", { title: "Test" }, "analyst", 1
+      supabase,
+      "session-1",
+      "spec",
+      { title: "Test" },
+      "analyst",
+      1,
     );
 
     expect(result.success).toBe(true);
@@ -115,20 +138,26 @@ describe("writeSection", () => {
 
   it("rejects writes from unauthorized roles (AC-005)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 1,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     // PM can't write to spec
-    const result = await writeSection(
-      supabase, "session-1", "spec", { title: "Test" }, "pm", 1
-    );
+    const result = await writeSection(supabase, "session-1", "spec", { title: "Test" }, "pm", 1);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("not authorized");
@@ -136,19 +165,32 @@ describe("writeSection", () => {
 
   it("fails with stale version (AC-003)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 5,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 5,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     // Try writing with version 3 when current is 5
     const result = await writeSection(
-      supabase, "session-1", "spec", { title: "Test" }, "analyst", 3
+      supabase,
+      "session-1",
+      "spec",
+      { title: "Test" },
+      "analyst",
+      3,
     );
 
     expect(result.success).toBe(false);
@@ -157,18 +199,31 @@ describe("writeSection", () => {
 
   it("handles version overflow (EC-007)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 100,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 100,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     const result = await writeSection(
-      supabase, "session-1", "spec", { title: "Test" }, "analyst", 100
+      supabase,
+      "session-1",
+      "spec",
+      { title: "Test" },
+      "analyst",
+      100,
     );
 
     expect(result.success).toBe(false);
@@ -177,18 +232,31 @@ describe("writeSection", () => {
 
   it("system role can write to any section", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 1,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     const result = await writeSection(
-      supabase, "session-1", "plan", { design: "Test" }, "system", 1
+      supabase,
+      "session-1",
+      "plan",
+      { design: "Test" },
+      "system",
+      1,
     );
 
     expect(result.success).toBe(true);
@@ -200,22 +268,24 @@ describe("writeSection", () => {
 describe("getFullBlackboard", () => {
   it("returns all sections and metadata (AC-006)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 3,
-        sections: {
-          spec: { title: "Spec" },
-          plan: { design: "Plan" },
-          tasks: null,
-          implementation: null,
-          verification: null,
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 3,
+          sections: {
+            spec: { title: "Spec" },
+            plan: { design: "Plan" },
+            tasks: null,
+            implementation: null,
+            verification: null,
+          },
+          history: [{ version: 2, section: "spec", timestamp: "2026-01-01", role: "analyst" }],
+          status: "active",
+          pipeline_type: "DEFAULT",
+          task_id: "task-1",
         },
-        history: [{ version: 2, section: "spec", timestamp: "2026-01-01", role: "analyst" }],
-        status: "active",
-        pipeline_type: "DEFAULT",
-        task_id: "task-1",
-      }],
+      ],
     });
 
     const result = await getFullBlackboard(supabase, "session-1");
@@ -234,12 +304,14 @@ describe("getFullBlackboard", () => {
 describe("updateBlackboardStatus", () => {
   it("updates status to completed", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-1",
-        version: 1,
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-1",
+          version: 1,
+          status: "active",
+        },
+      ],
     });
 
     const result = await updateBlackboardStatus(supabase, "session-1", "completed");
@@ -267,14 +339,10 @@ describe("generateTraceabilityReport", () => {
         ],
       },
       implementation: {
-        files: [
-          { path: "src/blackboard.ts", traces_to: ["FR-001", "FR-002"] },
-        ],
+        files: [{ path: "src/blackboard.ts", traces_to: ["FR-001", "FR-002"] }],
       },
       verification: {
-        tests: [
-          { name: "test create", validates: ["FR-001"] },
-        ],
+        tests: [{ name: "test create", validates: ["FR-001"] }],
       },
     };
 
@@ -305,9 +373,7 @@ describe("generateTraceabilityReport", () => {
       spec: "This spec covers FR-001 and FR-002.",
       plan: null,
       tasks: {
-        items: [
-          { title: "Task 1", traces_to: ["FR-001"] },
-        ],
+        items: [{ title: "Task 1", traces_to: ["FR-001"] }],
       },
       implementation: null,
       verification: null,
@@ -322,10 +388,7 @@ describe("generateTraceabilityReport", () => {
   it("reports missing FR when no tasks trace to it", () => {
     const sections: BlackboardSections = {
       spec: {
-        requirements: [
-          { id: "FR-001" },
-          { id: "FR-002" },
-        ],
+        requirements: [{ id: "FR-001" }, { id: "FR-002" }],
       },
       plan: null,
       tasks: { items: [] },
@@ -434,7 +497,13 @@ describe("working_memory section", () => {
 
     const roles = ["analyst", "pm", "architect", "dev", "qa", "sm", "system"];
     for (const role of roles) {
-      const result = bb.write("session-1", "working_memory", { test: role }, role, bb.get("session-1")!.version);
+      const result = bb.write(
+        "session-1",
+        "working_memory",
+        { test: role },
+        role,
+        bb.get("session-1")!.version,
+      );
       expect(result.success).toBe(true);
     }
   });
@@ -471,14 +540,23 @@ describe("working_memory section", () => {
 
   it("Supabase writeSection accepts working_memory (role auth check)", async () => {
     const supabase = createMockSupabase({
-      blackboard: [{
-        id: "bb-1",
-        session_id: "session-wm",
-        version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null },
-        history: [],
-        status: "active",
-      }],
+      blackboard: [
+        {
+          id: "bb-1",
+          session_id: "session-wm",
+          version: 1,
+          sections: {
+            spec: null,
+            plan: null,
+            tasks: null,
+            implementation: null,
+            verification: null,
+            working_memory: null,
+          },
+          history: [],
+          status: "active",
+        },
+      ],
     });
 
     const result = await writeSection(
@@ -487,7 +565,7 @@ describe("working_memory section", () => {
       "working_memory",
       { decisions: [], discoveries: [], blockers: [], context_updates: [] },
       "dev",
-      1
+      1,
     );
 
     expect(result.success).toBe(true);

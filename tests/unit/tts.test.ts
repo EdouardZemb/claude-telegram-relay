@@ -6,9 +6,9 @@
  * piper scripts since Bun.spawn is a native binding that cannot be mocked.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { writeFileSync, existsSync, chmodSync, mkdirSync } from "fs";
+import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { execSync } from "child_process";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 // ── Fake piper script setup ───────────────────────────────
@@ -21,7 +21,9 @@ function setupFakeScripts() {
   if (!existsSync(TMPDIR)) mkdirSync(TMPDIR, { recursive: true });
 
   // Fake piper: reads stdin, writes a minimal WAV file to --output_file
-  writeFileSync(FAKE_PIPER, `#!/bin/sh
+  writeFileSync(
+    FAKE_PIPER,
+    `#!/bin/sh
 # Read stdin (text to synthesize) and discard
 cat > /dev/null
 # Parse --output_file argument
@@ -46,15 +48,19 @@ header = struct.pack('<4sI4s4sIHHIIHH4sI',
     b'data', data_size)
 sys.stdout.buffer.write(header + b'\\x00' * data_size)
 " > "$OUTPUT"
-`);
+`,
+  );
   chmodSync(FAKE_PIPER, 0o755);
 
   // Fake piper that fails with exit code 1
-  writeFileSync(FAKE_PIPER_FAIL, `#!/bin/sh
+  writeFileSync(
+    FAKE_PIPER_FAIL,
+    `#!/bin/sh
 cat > /dev/null
 echo "Model not found" >&2
 exit 1
-`);
+`,
+  );
   chmodSync(FAKE_PIPER_FAIL, 0o755);
 }
 

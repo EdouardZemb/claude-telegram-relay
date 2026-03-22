@@ -17,10 +17,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Task } from "./tasks.ts";
-import { loadGraph, findAffectedModules, estimateComplexity } from "./code-graph.ts";
-import { findSimilarPastTasks } from "./memory.ts";
-import { getCachedTrustScore, getAutonomyLevel } from "./trust-scores.ts";
+import { estimateComplexity, findAffectedModules, loadGraph } from "./code-graph.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -56,7 +53,7 @@ export interface PlannerResult {
  */
 export async function analyzeBacklog(
   supabase: SupabaseClient,
-  sprintId?: string
+  sprintId?: string,
 ): Promise<PlannerResult> {
   // Get all tasks for the sprint (or all active tasks)
   let query = supabase
@@ -120,9 +117,10 @@ export async function analyzeBacklog(
 
   // Estimate days left based on velocity
   const firstTask = tasks.reduce((earliest: any, t: any) =>
-    new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest
+    new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest,
   );
-  const sprintAgeDays = (Date.now() - new Date(firstTask.created_at).getTime()) / (24 * 60 * 60 * 1000);
+  const sprintAgeDays =
+    (Date.now() - new Date(firstTask.created_at).getTime()) / (24 * 60 * 60 * 1000);
   const velocity = sprintAgeDays > 0 ? done / sprintAgeDays : 0;
   const remaining = total - done;
   const estimatedDaysLeft = velocity > 0 ? Math.ceil(remaining / velocity) : remaining * 2;
@@ -131,7 +129,13 @@ export async function analyzeBacklog(
 
   // Build summary
   const summary = buildPlannerSummary(recommendations, {
-    total, done, inProgress, backlog, completionRate, estimatedDaysLeft, onTrack,
+    total,
+    done,
+    inProgress,
+    backlog,
+    completionRate,
+    estimatedDaysLeft,
+    onTrack,
   });
 
   return {
@@ -150,7 +154,7 @@ function detectStuckPatterns(tasks: any[]): PlannerRecommendation[] {
   for (const task of tasks) {
     if (task.status === "in_progress") {
       const updatedAt = task.updated_at ? new Date(task.updated_at).getTime() : NaN;
-      if (isNaN(updatedAt)) continue;
+      if (Number.isNaN(updatedAt)) continue;
       const age = (now - updatedAt) / (60 * 60 * 1000);
       if (age > 24) {
         recs.push({
@@ -174,7 +178,10 @@ function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
   // Group by common words in title
   const wordGroups: Record<string, string[]> = {};
   for (const task of backlogTasks) {
-    const words = task.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
+    const words = task.title
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w: string) => w.length > 4);
     for (const word of words) {
       if (!wordGroups[word]) wordGroups[word] = [];
       wordGroups[word].push(task.id);
@@ -185,8 +192,8 @@ function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
     if (ids.length >= 2) {
       const uniqueIds = [...new Set(ids)];
       if (uniqueIds.length >= 2) {
-        const titles = uniqueIds.map((id) =>
-          backlogTasks.find((t: any) => t.id === id)?.title || id.substring(0, 8)
+        const titles = uniqueIds.map(
+          (id) => backlogTasks.find((t: any) => t.id === id)?.title || id.substring(0, 8),
         );
         recs.push({
           type: "group",
@@ -203,7 +210,7 @@ function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
   return deduplicateGroups(recs);
 }
 
-function analyzePacing(tasks: any[], sprintId?: string): PlannerRecommendation[] {
+function analyzePacing(tasks: any[], _sprintId?: string): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
   const total = tasks.length;
   const done = tasks.filter((t: any) => t.status === "done").length;
@@ -214,7 +221,9 @@ function analyzePacing(tasks: any[], sprintId?: string): PlannerRecommendation[]
       type: "pace",
       title: "Backlog charge",
       description: `${remaining} taches restantes. Envisager de reporter les P3 au prochain sprint.`,
-      taskIds: tasks.filter((t: any) => t.status === "backlog" && t.priority >= 3).map((t: any) => t.id),
+      taskIds: tasks
+        .filter((t: any) => t.status === "backlog" && t.priority >= 3)
+        .map((t: any) => t.id),
       confidence: remaining > 12 ? 0.8 : 0.5,
     });
   }
@@ -275,8 +284,7 @@ function detectSplittableTasks(tasks: any[]): PlannerRecommendation[] {
 /**
  * S42: Recommend pipeline per task based on code graph complexity and history.
  */
-function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerRecommendation[] {
-
+function recommendPipelines(tasks: any[], _supabase: SupabaseClient): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
   const graph = loadGraph();
   if (!graph) return recs;
@@ -288,7 +296,8 @@ function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerReco
     if (affected.length === 0) continue;
 
     const maxComplexity = Math.max(...affected.map((m) => estimateComplexity(graph, m)));
-    const avgComplexity = affected.reduce((s, m) => s + estimateComplexity(graph, m), 0) / affected.length;
+    const avgComplexity =
+      affected.reduce((s, m) => s + estimateComplexity(graph, m), 0) / affected.length;
 
     let pipeline: string;
     let confidence = 0.6;
@@ -322,7 +331,6 @@ function recommendPipelines(tasks: any[], supabase: SupabaseClient): PlannerReco
  * S42: Auto-defer P4/P5 tasks if sprint is overloaded.
  */
 function detectDeferrableTasks(tasks: any[]): PlannerRecommendation[] {
-
   const recs: PlannerRecommendation[] = [];
   const remaining = tasks.filter((t: any) => t.status !== "done" && t.status !== "cancelled");
   const inProgress = tasks.filter((t: any) => t.status === "in_progress");
@@ -358,7 +366,15 @@ function deduplicateGroups(recs: PlannerRecommendation[]): PlannerRecommendation
 
 function buildPlannerSummary(
   recs: PlannerRecommendation[],
-  health: { total: number; done: number; inProgress: number; backlog: number; completionRate: number; estimatedDaysLeft: number; onTrack: boolean }
+  health: {
+    total: number;
+    done: number;
+    inProgress: number;
+    backlog: number;
+    completionRate: number;
+    estimatedDaysLeft: number;
+    onTrack: boolean;
+  },
 ): string {
   const lines: string[] = [];
   const status = health.onTrack ? "nominal" : "attention requise";
@@ -400,7 +416,9 @@ export function formatPlannerResult(result: PlannerResult): string {
     lines.push(`[${rec.type.toUpperCase()}] ${rec.title} (${confidence}%)`);
     lines.push(`  ${rec.description}`);
     if (rec.suggestedPipeline) {
-      lines.push(`  Pipeline: ${rec.suggestedPipeline}${rec.complexityScore !== undefined ? ` | Complexite: ${rec.complexityScore}/10` : ""}`);
+      lines.push(
+        `  Pipeline: ${rec.suggestedPipeline}${rec.complexityScore !== undefined ? ` | Complexite: ${rec.complexityScore}/10` : ""}`,
+      );
     }
     if (rec.estimatedCost !== undefined) {
       lines.push(`  Cout estime: $${rec.estimatedCost.toFixed(2)}`);

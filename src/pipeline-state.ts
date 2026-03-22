@@ -5,9 +5,11 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AgentRole } from "./orchestrator.ts";
 import type { AgentMessage } from "./agent-schemas.ts";
+import { createLogger } from "./logger.ts";
+import type { AgentRole } from "./orchestrator.ts";
 
+const log = createLogger("pipeline-state");
 // ── Types ────────────────────────────────────────────────────
 
 export interface PipelineState {
@@ -54,7 +56,7 @@ export async function createPipelineRun(
   sessionId: string,
   pipelineType: string,
   pipelineAgents: AgentRole[],
-  blackboardId?: string
+  blackboardId?: string,
 ): Promise<string> {
   const state: PipelineState = {
     sessionId,
@@ -81,7 +83,7 @@ export async function createPipelineRun(
       status: "running",
     });
     if (error) {
-      console.error("createPipelineRun error:", error);
+      log.error("createPipelineRun error", { error: String(error) });
       memoryStore.set(sessionId, state);
     }
   } else {
@@ -99,7 +101,7 @@ export async function savePipelineStep(
   supabase: SupabaseClient | null,
   sessionId: string,
   step: StepSnapshot,
-  message: AgentMessage
+  message: AgentMessage,
 ): Promise<void> {
   if (supabase) {
     // Load current state to append
@@ -132,7 +134,7 @@ export async function savePipelineStep(
       })
       .eq("session_id", sessionId);
 
-    if (error) console.error("savePipelineStep error:", error);
+    if (error) log.error("savePipelineStep error", { error: String(error) });
   } else {
     const state = memoryStore.get(sessionId);
     if (state) {
@@ -150,7 +152,7 @@ export async function updatePipelineStatus(
   supabase: SupabaseClient | null,
   sessionId: string,
   status: PipelineState["status"],
-  error?: string
+  error?: string,
 ): Promise<void> {
   if (supabase) {
     const updates: Record<string, unknown> = { status };
@@ -161,7 +163,7 @@ export async function updatePipelineStatus(
       .update(updates)
       .eq("session_id", sessionId);
 
-    if (dbError) console.error("updatePipelineStatus error:", dbError);
+    if (dbError) log.error("updatePipelineStatus error", { error: String(dbError) });
   } else {
     const state = memoryStore.get(sessionId);
     if (state) {
@@ -177,7 +179,7 @@ export async function updatePipelineStatus(
  */
 export async function loadPipelineState(
   supabase: SupabaseClient | null,
-  sessionId: string
+  sessionId: string,
 ): Promise<PipelineState | null> {
   if (supabase) {
     const { data, error } = await supabase
@@ -213,7 +215,7 @@ export async function loadPipelineState(
  */
 export async function findLatestPipelineRun(
   supabase: SupabaseClient | null,
-  taskId: string
+  taskId: string,
 ): Promise<string | null> {
   if (supabase) {
     const { data, error } = await supabase

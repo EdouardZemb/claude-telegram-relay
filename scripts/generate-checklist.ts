@@ -95,10 +95,7 @@ export function generateChecklist(tasks: Array<{ title: string; description?: st
     allItems.push(...generateScenarios(task.title, task.description));
   }
 
-  const lines: string[] = [
-    `Checklist post-merge — ${allItems.length} scenarios`,
-    "",
-  ];
+  const lines: string[] = [`Checklist post-merge — ${allItems.length} scenarios`, ""];
 
   for (let i = 0; i < allItems.length; i++) {
     const item = allItems[i];
@@ -126,10 +123,7 @@ async function main() {
 
   const supabase = createClient(url, key);
 
-  let query = supabase
-    .from("tasks")
-    .select("title, description")
-    .eq("status", "done");
+  let query = supabase.from("tasks").select("title, description").eq("status", "done");
 
   if (sprintId) {
     query = query.eq("sprint", sprintId);

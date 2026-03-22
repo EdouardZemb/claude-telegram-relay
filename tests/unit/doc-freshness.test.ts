@@ -4,15 +4,15 @@
  * Validates that the freshness check correctly identifies gaps.
  */
 
-import { describe, test, expect } from "bun:test";
-import {
-  extractModules,
-  extractCommands,
-  parseClaudeMdModules,
-  parseClaudeMdCommands,
-  findGaps,
-} from "../../scripts/doc-utils.ts";
+import { describe, expect, test } from "bun:test";
 import { join } from "path";
+import {
+  extractCommands,
+  extractModules,
+  findGaps,
+  parseClaudeMdCommands,
+  parseClaudeMdModules,
+} from "../../scripts/doc-utils.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 const SRC_DIR = join(ROOT, "src");
@@ -33,9 +33,7 @@ describe("doc-freshness integration", () => {
       claudeMdTestCount: 0,
     });
 
-    const moduleGaps = gaps.filter(
-      (g) => g.type === "missing_module" || g.type === "extra_module"
-    );
+    const moduleGaps = gaps.filter((g) => g.type === "missing_module" || g.type === "extra_module");
     expect(moduleGaps).toEqual([]);
   });
 
@@ -52,9 +50,7 @@ describe("doc-freshness integration", () => {
       claudeMdTestCount: 0,
     });
 
-    const cmdGaps = gaps.filter(
-      (g) => g.type === "missing_command" || g.type === "extra_command"
-    );
+    const cmdGaps = gaps.filter((g) => g.type === "missing_command" || g.type === "extra_command");
     expect(cmdGaps).toEqual([]);
   });
 

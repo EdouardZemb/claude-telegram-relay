@@ -6,9 +6,8 @@
  * V2: Default ProtoSpec on spawnClaude failure.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { parseProtoSpec } from "../../src/spec-lite";
-import type { ProtoSpec } from "../../src/agent-schemas";
 
 const mockTask = {
   id: "test-123",

@@ -6,24 +6,20 @@
  * and dashboard endpoint.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { getAgent, getAgents } from "../../src/bmad-agents";
+import { measureRuleEffectiveness, promoteOrArchiveRules } from "../../src/feedback-loop";
 import {
-  updateTrustScore,
-  getCachedTrustScore,
-  shouldAutoApprove,
+  AUTO_APPROVE_IMPL_THRESHOLD,
+  AUTO_APPROVE_SPEC_THRESHOLD,
   formatTrustScores,
-  resetTrustScoreCache,
   getAutoApproveThresholds,
   getAutonomyLevel,
-  AUTO_APPROVE_SPEC_THRESHOLD,
-  AUTO_APPROVE_IMPL_THRESHOLD,
+  getCachedTrustScore,
+  resetTrustScoreCache,
+  shouldAutoApprove,
+  updateTrustScore,
 } from "../../src/trust-scores";
-import { getAgent, getAgents } from "../../src/bmad-agents";
-import {
-  measureRuleEffectiveness,
-  promoteOrArchiveRules,
-  type FeedbackRule,
-} from "../../src/feedback-loop";
 
 beforeEach(() => {
   resetTrustScoreCache();
@@ -38,7 +34,9 @@ describe("S42-01: per-role trust thresholds", () => {
       expect(agent.trustThresholds).toBeDefined();
       expect(agent.trustThresholds!.specAutoApprove).toBeGreaterThan(0);
       expect(agent.trustThresholds!.implAutoApprove).toBeGreaterThan(0);
-      expect(agent.trustThresholds!.implAutoApprove).toBeGreaterThan(agent.trustThresholds!.specAutoApprove);
+      expect(agent.trustThresholds!.implAutoApprove).toBeGreaterThan(
+        agent.trustThresholds!.specAutoApprove,
+      );
     }
   });
 
@@ -52,7 +50,9 @@ describe("S42-01: per-role trust thresholds", () => {
     const sm = getAgent("sm")!;
     const agents = getAgents().filter((a) => a.id !== "sm");
     for (const agent of agents) {
-      expect(sm.trustThresholds!.specAutoApprove).toBeLessThanOrEqual(agent.trustThresholds!.specAutoApprove);
+      expect(sm.trustThresholds!.specAutoApprove).toBeLessThanOrEqual(
+        agent.trustThresholds!.specAutoApprove,
+      );
     }
   });
 
@@ -60,7 +60,9 @@ describe("S42-01: per-role trust thresholds", () => {
     const qa = getAgent("qa")!;
     const agents = getAgents().filter((a) => a.id !== "qa");
     for (const agent of agents) {
-      expect(qa.trustThresholds!.implAutoApprove).toBeGreaterThanOrEqual(agent.trustThresholds!.implAutoApprove);
+      expect(qa.trustThresholds!.implAutoApprove).toBeGreaterThanOrEqual(
+        agent.trustThresholds!.implAutoApprove,
+      );
     }
   });
 

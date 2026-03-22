@@ -1,5 +1,9 @@
-import { describe, it, expect } from "bun:test";
-import { detectIntent, detectIntentWithLLM, formatIntentSuggestion } from "../../src/intent-detection.ts";
+import { describe, expect, it } from "bun:test";
+import {
+  detectIntent,
+  detectIntentWithLLM,
+  formatIntentSuggestion,
+} from "../../src/intent-detection.ts";
 
 describe("intent-detection", () => {
   describe("detectIntent", () => {
@@ -318,9 +322,12 @@ describe("intent-detection", () => {
   describe("detectIntentWithLLM", () => {
     it("returns regex result when confidence >= 0.9", async () => {
       // Matches all 3 patterns: "qu'est-ce qu'il reste dans le backlog" + "montre le backlog" + "quoi faire"
-      const result = await detectIntentWithLLM("qu'est-ce qu'il reste dans le backlog, montre le backlog, quoi faire", {
-        callLLM: async () => '{"command": "help", "args": "", "confidence": 0.95}',
-      });
+      const result = await detectIntentWithLLM(
+        "qu'est-ce qu'il reste dans le backlog, montre le backlog, quoi faire",
+        {
+          callLLM: async () => '{"command": "help", "args": "", "confidence": 0.95}',
+        },
+      );
       expect(result.detected).not.toBeNull();
       expect(result.detected!.command).toBe("backlog");
       expect(result.detected!.source).toBe("regex");
@@ -344,7 +351,8 @@ describe("intent-detection", () => {
 
     it("handles LLM timeout gracefully", async () => {
       const result = await detectIntentWithLLM("montre les alertes", {
-        callLLM: async () => new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 100)),
+        callLLM: async () =>
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 100)),
         timeoutMs: 50,
       });
       // Should fall back to regex result
@@ -384,7 +392,10 @@ describe("intent-detection", () => {
     });
 
     it("returns null for low-confidence match", () => {
-      const result = { detected: { intent: "test", command: "test", confidence: 0.5, source: "regex" as const }, suggestion: "/test" };
+      const result = {
+        detected: { intent: "test", command: "test", confidence: 0.5, source: "regex" as const },
+        suggestion: "/test",
+      };
       const suggestion = formatIntentSuggestion(result, 0.8);
       expect(suggestion).toBeNull();
     });

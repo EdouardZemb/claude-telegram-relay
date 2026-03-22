@@ -5,18 +5,15 @@
  * auto-approval logic, and double-loop feedback context.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  evaluateAndRework,
-  type GateEvaluation,
-} from "../../src/gate-evaluator";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { buildFeedbackContext } from "../../src/feedback-loop";
+import { evaluateAndRework } from "../../src/gate-evaluator";
 import {
   getCachedTrustScore,
   resetTrustScoreCache,
-  updateTrustScore,
   shouldAutoApprove,
+  updateTrustScore,
 } from "../../src/trust-scores";
-import { buildFeedbackContext } from "../../src/feedback-loop";
 
 beforeEach(() => {
   resetTrustScoreCache();
@@ -36,9 +33,12 @@ describe("evaluateAndRework with trust scores", () => {
       {
         maxIterations: 2,
         customEvaluator: async () => ({
-          pass: true, score: 85, issues: [], gate_name: "implementation",
+          pass: true,
+          score: 85,
+          issues: [],
+          gate_name: "implementation",
         }),
-      }
+      },
     );
 
     expect(result.finalEvaluation.pass).toBe(true);
@@ -65,11 +65,16 @@ describe("evaluateAndRework with trust scores", () => {
         customEvaluator: async () => {
           evalCount++;
           if (evalCount === 1) {
-            return { pass: false, score: 40, issues: [{ severity: "major", description: "Bad", suggestion: "Fix" }], gate_name: "tasks" };
+            return {
+              pass: false,
+              score: 40,
+              issues: [{ severity: "major", description: "Bad", suggestion: "Fix" }],
+              gate_name: "tasks",
+            };
           }
           return { pass: true, score: 75, issues: [], gate_name: "tasks" };
         },
-      }
+      },
     );
 
     expect(result.finalEvaluation.pass).toBe(true);
@@ -91,9 +96,12 @@ describe("evaluateAndRework with trust scores", () => {
       {
         maxIterations: 1,
         customEvaluator: async () => ({
-          pass: false, score: 30, issues: [{ severity: "critical", description: "Poor", suggestion: "Redo" }], gate_name: "plan",
+          pass: false,
+          score: 30,
+          issues: [{ severity: "critical", description: "Poor", suggestion: "Redo" }],
+          gate_name: "plan",
         }),
-      }
+      },
     );
 
     expect(result.finalEvaluation.pass).toBe(false);
@@ -114,7 +122,7 @@ describe("evaluateAndRework with trust scores", () => {
       { spec: "ok" },
       async () => ({ spec: "reworked" }),
       2, // legacy number format
-      async () => ({ pass: true, score: 80, issues: [], gate_name: "spec" }) // legacy customEvaluator
+      async () => ({ pass: true, score: 80, issues: [], gate_name: "spec" }), // legacy customEvaluator
     );
 
     expect(result.finalEvaluation.pass).toBe(true);

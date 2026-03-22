@@ -1,8 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  getMcpToolsForRole,
-  getMcpAllowedToolNames,
   buildMcpToolInstructions,
+  getMcpAllowedToolNames,
+  getMcpToolsForRole,
   isToolAllowed,
   MCP_TOOLS,
 } from "../../src/mcp-config.ts";

@@ -5,33 +5,27 @@
  * pipeline selection, and router integration.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  SOLO_PIPELINE,
-  LIGHT_PIPELINE,
+  formatStructuredOutput,
+  getJsonSchemaForRole,
+  getSchemaForRole,
+  type PlannerOutput,
+  validateAgentOutput,
+} from "../../src/agent-schemas";
+import { getAgent, getAgents } from "../../src/bmad-agents";
+import { type RouterDecision, routerPipelineToRoles, scoreToPipeline } from "../../src/llm-router";
+import { getMcpToolsForRole } from "../../src/mcp-config";
+import {
+  classifyAdaptivePipeline,
   DEFAULT_PIPELINE,
+  LIGHT_PIPELINE,
   QUICK_PIPELINE,
   REVIEW_PIPELINE,
-  selectPipeline,
+  SOLO_PIPELINE,
   selectAdaptivePipeline,
-  classifyPipeline,
-  classifyAdaptivePipeline,
+  selectPipeline,
 } from "../../src/orchestrator";
-import {
-  routerPipelineToRoles,
-  scoreToPipeline,
-  analyzeDescription,
-  type RouterDecision,
-} from "../../src/llm-router";
-import { getAgent, getAgents } from "../../src/bmad-agents";
-import {
-  validateAgentOutput,
-  getSchemaForRole,
-  getJsonSchemaForRole,
-  formatStructuredOutput,
-  type PlannerOutput,
-} from "../../src/agent-schemas";
-import { getMcpToolsForRole } from "../../src/mcp-config";
 
 // ── Pipeline Definitions ──────────────────────────────────────
 
@@ -218,7 +212,11 @@ describe("Router Pipeline Mapping (S44 T8)", () => {
 
   it("maps DEFAULT to full pipeline", () => {
     expect(routerPipelineToRoles(decision("DEFAULT"))).toEqual([
-      "analyst", "pm", "architect", "dev", "qa",
+      "analyst",
+      "pm",
+      "architect",
+      "dev",
+      "qa",
     ]);
   });
 });
@@ -294,8 +292,9 @@ describe("selectPipeline backward compatibility (S44 T8)", () => {
   });
 
   it("still returns DEFAULT for complex tasks", () => {
-    expect(selectPipeline(makeTask("Implement new orchestration pipeline with multi-agent support")))
-      .toEqual(DEFAULT_PIPELINE);
+    expect(
+      selectPipeline(makeTask("Implement new orchestration pipeline with multi-agent support")),
+    ).toEqual(DEFAULT_PIPELINE);
   });
 
   it("respects explicit pipeline override", () => {

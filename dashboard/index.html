@@ -507,7 +507,7 @@
       } catch (e) { console.error('loadProjects:', e); }
     }
 
-    function switchProject(projectId) {
+    function _switchProject(projectId) {
       activeProjectId = projectId;
       loadTasks();
     }
@@ -649,7 +649,7 @@
 
     // ── Tabs ───────────────────────────────────────────────────
 
-    function switchTab(tab) {
+    function _switchTab(tab) {
       document.querySelectorAll('.tab').forEach(t => {
         t.classList.toggle('active', t.dataset.tab === tab);
       });
@@ -710,7 +710,7 @@
       document.getElementById('prd-detail-content').textContent = header + (prd.content || '');
     }
 
-    function showPRDList() {
+    function _showPRDList() {
       document.getElementById('prd-list-container').style.display = '';
       document.getElementById('prd-detail-container').classList.remove('visible');
     }
@@ -823,7 +823,7 @@
           }
           if (r.actions_proposed && r.actions_proposed.length > 0) {
             const actions = r.actions_proposed.map(a => {
-              const accepted = r.actions_accepted && r.actions_accepted.some(ac => ac.action === a.action);
+              const accepted = r.actions_accepted?.some(ac => ac.action === a.action);
               return `<span style="color: ${accepted ? 'var(--green)' : 'var(--text-muted)'};">${accepted ? '[OK]' : '[ ]'} ${escapeHtml(a.action)}</span>`;
             });
             retroHtml += `<div style="font-size: 13px;">${actions.join('<br>')}</div>`;
@@ -863,7 +863,7 @@
       const total = reviews.length;
       const passed = reviews.filter(r => r.passes_gate).length;
       const avgScore = Math.round(reviews.reduce((a, r) => a + (r.score || 0), 0) / total);
-      const totalFindings = reviews.reduce((a, r) => a + (r.findings_count || 0), 0);
+      const _totalFindings = reviews.reduce((a, r) => a + (r.findings_count || 0), 0);
       const totalCritical = reviews.reduce((a, r) => a + (r.critical_count || 0), 0);
 
       let html = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;">';

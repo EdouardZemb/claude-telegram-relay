@@ -5,8 +5,10 @@
  * cases, LLM fallback (Haiku) for ambiguous messages. Behind feature flag "intent_detection".
  */
 
-import { getAllActions, getAction, formatActionsForLLM, type ActionDefinition } from "./action-registry.ts";
+import { type ActionDefinition, formatActionsForLLM, getAction } from "./action-registry.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("intent-detection");
 // ── Types ────────────────────────────────────────────────────
 
 export interface DetectedIntent {
@@ -76,10 +78,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "run_retro",
     command: "retro",
-    patterns: [
-      /\b(retro(spective)?|bilan|retour\s+d'?experience)\b/i,
-      /\bretrospective\b/i,
-    ],
+    patterns: [/\b(retro(spective)?|bilan|retour\s+d'?experience)\b/i, /\bretrospective\b/i],
   },
   {
     intent: "get_help",
@@ -92,30 +91,22 @@ const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "view_cost",
     command: "cost",
-    patterns: [
-      /\b(couts?|depenses?|budget|tokens?|combien\s+ca\s+coute)\b/i,
-    ],
+    patterns: [/\b(couts?|depenses?|budget|tokens?|combien\s+ca\s+coute)\b/i],
   },
   {
     intent: "brain_synthesis",
     command: "brain",
-    patterns: [
-      /\b(synthese|resume\s+memoire|qu'?est[- ]ce\s+que\s+tu\s+sais|memoire)\b/i,
-    ],
+    patterns: [/\b(synthese|resume\s+memoire|qu'?est[- ]ce\s+que\s+tu\s+sais|memoire)\b/i],
   },
   {
     intent: "view_alerts",
     command: "alerts",
-    patterns: [
-      /\b(alertes?|anomalies?|problemes?|bugs?\s+detectes?)\b/i,
-    ],
+    patterns: [/\b(alertes?|anomalies?|problemes?|bugs?\s+detectes?)\b/i],
   },
   {
     intent: "view_ideas",
     command: "ideas",
-    patterns: [
-      /\b(idees?|suggestions?|propositions?)\b/i,
-    ],
+    patterns: [/\b(idees?|suggestions?|propositions?)\b/i],
   },
   {
     intent: "plan_task",
@@ -140,37 +131,27 @@ const INTENT_PATTERNS: IntentPattern[] = [
   {
     intent: "view_projects",
     command: "projects",
-    patterns: [
-      /\b(projets?|liste\s+des\s+projets?|quels?\s+projets?)\b/i,
-    ],
+    patterns: [/\b(projets?|liste\s+des\s+projets?|quels?\s+projets?)\b/i],
   },
   {
     intent: "start_task",
     command: "start",
-    patterns: [
-      /\b(commence|demarre|prends?)\s+(la\s+)?tache\b/i,
-    ],
+    patterns: [/\b(commence|demarre|prends?)\s+(la\s+)?tache\b/i],
   },
   {
     intent: "done_task",
     command: "done",
-    patterns: [
-      /\b(termine|fini|complete|cloture)\s+(la\s+)?tache\b/i,
-    ],
+    patterns: [/\b(termine|fini|complete|cloture)\s+(la\s+)?tache\b/i],
   },
   {
     intent: "view_monitor",
     command: "monitor",
-    patterns: [
-      /\b(monitor(ing)?|surveillance|supervision)\b/i,
-    ],
+    patterns: [/\b(monitor(ing)?|surveillance|supervision)\b/i],
   },
   {
     intent: "rollback",
     command: "rollback",
-    patterns: [
-      /\b(rollback|revenir?\s+en\s+arriere|annuler?\s+(le\s+)?deploy)\b/i,
-    ],
+    patterns: [/\b(rollback|revenir?\s+en\s+arriere|annuler?\s+(le\s+)?deploy)\b/i],
   },
   {
     intent: "resume_pipeline",
@@ -430,12 +411,16 @@ export async function detectIntentWithLLM(
       "",
       'Si aucune commande ne correspond, reponds: {"command": null, "args": "", "confidence": 0}',
       "Ne force pas un match si le message est juste une conversation normale.",
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const timeoutMs = options.timeoutMs ?? 15000;
     const result = await Promise.race([
       options.callLLM(prompt),
-      new Promise<string>((_, reject) => setTimeout(() => reject(new Error("LLM timeout")), timeoutMs)),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error("LLM timeout")), timeoutMs),
+      ),
     ]);
 
     const jsonMatch = result.match(/\{[\s\S]*\}/);
@@ -467,7 +452,7 @@ export async function detectIntentWithLLM(
       suggestion: detected.args ? `/${detected.command} ${detected.args}` : `/${detected.command}`,
     };
   } catch (error) {
-    console.error("LLM intent detection error:", error);
+    log.error("LLM intent detection error", { error: String(error) });
     // Fall back to regex result
     return regexResult;
   }

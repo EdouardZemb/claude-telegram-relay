@@ -5,34 +5,26 @@
  * and router/DAG support for the new pipeline type.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { getAction } from "../../src/action-registry";
+import { detectWebResearchIntent } from "../../src/commands/exploration";
+import { detectIntent } from "../../src/intent-detection";
+import { parseRouterResponse, routerPipelineToRoles } from "../../src/llm-router";
 import {
-  getMcpToolsForRole,
-  getMcpAllowedToolNames,
   buildMcpToolInstructions,
-  isToolAllowed,
-  getTavilyToolsForRole,
+  getMcpAllowedToolNames,
   getTavilyAllowedToolNames,
+  getTavilyToolsForRole,
   TAVILY_TOOLS,
 } from "../../src/mcp-config";
-import { detectWebResearchIntent } from "../../src/commands/exploration";
 import {
-  selectPipeline,
   classifyPipeline,
-  RESEARCH_PIPELINE,
-  SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  QUICK_PIPELINE,
-  REVIEW_PIPELINE,
-  DEFAULT_PIPELINE,
   type PipelineType,
+  QUICK_PIPELINE,
+  RESEARCH_PIPELINE,
+  REVIEW_PIPELINE,
+  selectPipeline,
 } from "../../src/orchestrator";
-import {
-  parseRouterResponse,
-  routerPipelineToRoles,
-} from "../../src/llm-router";
-import { getAction } from "../../src/action-registry";
-import { detectIntent } from "../../src/intent-detection";
 
 // ── Tavily MCP Config ──────────────────────────────────────────
 
@@ -173,7 +165,9 @@ describe("RESEARCH Pipeline Selection", () => {
 
   it("selects RESEARCH for French research keywords", () => {
     expect(selectPipeline(makeTask("Recherche alternatives a Redis"))).toEqual(RESEARCH_PIPELINE);
-    expect(selectPipeline(makeTask("Etude des solutions de monitoring"))).toEqual(RESEARCH_PIPELINE);
+    expect(selectPipeline(makeTask("Etude des solutions de monitoring"))).toEqual(
+      RESEARCH_PIPELINE,
+    );
     expect(selectPipeline(makeTask("Comparer les frameworks de test"))).toEqual(RESEARCH_PIPELINE);
   });
 
@@ -203,7 +197,14 @@ describe("RESEARCH Pipeline Selection", () => {
 
 describe("classifyPipeline with RESEARCH", () => {
   function makeTask(title: string, desc?: string) {
-    return { id: "t", title, description: desc || null, priority: 3, status: "backlog" as const, subtasks: null } as any;
+    return {
+      id: "t",
+      title,
+      description: desc || null,
+      priority: 3,
+      status: "backlog" as const,
+      subtasks: null,
+    } as any;
   }
 
   it("classifies research tasks as RESEARCH", () => {
@@ -295,4 +296,3 @@ describe("Intent detection research patterns", () => {
     expect(result.detected!.command).toBe("explore");
   });
 });
-

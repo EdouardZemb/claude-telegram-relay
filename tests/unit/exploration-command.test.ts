@@ -5,19 +5,16 @@
  * action registry, prompt building, and feature flag gating.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { getAction } from "../../src/action-registry";
-import { getTopicConfig } from "../../src/topic-config";
-import { getAgent, getAgentForCommand } from "../../src/bmad-agents";
 import {
-  buildAgentSystemPromptPart,
-  buildAgentTaskPromptPart,
-} from "../../src/bmad-prompts";
-import {
+  buildStructuredOutputInstructions,
   getJsonSchemaForRole,
   getSchemaForRole,
-  buildStructuredOutputInstructions,
 } from "../../src/agent-schemas";
+import { getAgent, getAgentForCommand } from "../../src/bmad-agents";
+import { buildAgentSystemPromptPart, buildAgentTaskPromptPart } from "../../src/bmad-prompts";
+import { getTopicConfig } from "../../src/topic-config";
 
 // ── Action Registry Integration ─────────────────────────────────
 
@@ -158,4 +155,3 @@ describe("/explore Prompt Building", () => {
     expect(schema).toContain("options");
   });
 });
-

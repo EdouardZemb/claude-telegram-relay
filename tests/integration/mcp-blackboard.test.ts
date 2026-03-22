@@ -1,7 +1,7 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join, resolve } from "path";
-import { getMcpToolsForRole, buildMcpToolInstructions } from "../../src/mcp-config.ts";
+import { buildMcpToolInstructions, getMcpToolsForRole } from "../../src/mcp-config.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dir, "../..");
 

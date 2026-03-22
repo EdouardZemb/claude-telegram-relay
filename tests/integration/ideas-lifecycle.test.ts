@@ -6,20 +6,19 @@
  * formatting, and interactions with other memory types.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  processMemoryIntents,
-  autoRemember,
-  findDuplicateIdea,
-  listIdeas,
-  getIdea,
-  reviewIdea,
-  promoteIdea,
   archiveIdea,
+  autoRemember,
   formatIdeasList,
+  getIdea,
+  listIdeas,
+  processMemoryIntents,
+  promoteIdea,
+  reviewIdea,
   type ThoughtClassification,
 } from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -49,10 +48,14 @@ describe("Ideas Full Lifecycle", () => {
 
   it("idea flows through new → reviewed → promoted", async () => {
     // Create via autoRemember
-    await autoRemember(supabase, "On pourrait ajouter un mode sombre", makeClassification({
-      summary: "Ajouter un mode sombre",
-      topics: ["ui"],
-    }));
+    await autoRemember(
+      supabase,
+      "On pourrait ajouter un mode sombre",
+      makeClassification({
+        summary: "Ajouter un mode sombre",
+        topics: ["ui"],
+      }),
+    );
 
     const ideas = await listIdeas(supabase);
     expect(ideas.length).toBe(1);
@@ -74,9 +77,13 @@ describe("Ideas Full Lifecycle", () => {
   });
 
   it("idea flows through new → archived (rejected)", async () => {
-    await autoRemember(supabase, "Idee pas interessante", makeClassification({
-      summary: "Idee a rejeter",
-    }));
+    await autoRemember(
+      supabase,
+      "Idee pas interessante",
+      makeClassification({
+        summary: "Idee a rejeter",
+      }),
+    );
 
     const ideas = await listIdeas(supabase);
     expect(ideas.length).toBe(1);
@@ -95,9 +102,13 @@ describe("Ideas Full Lifecycle", () => {
   });
 
   it("idea flows through new → reviewed → archived", async () => {
-    await autoRemember(supabase, "Idee intermediaire", makeClassification({
-      summary: "Revue puis archivee",
-    }));
+    await autoRemember(
+      supabase,
+      "Idee intermediaire",
+      makeClassification({
+        summary: "Revue puis archivee",
+      }),
+    );
 
     const ideas = await listIdeas(supabase);
     await reviewIdea(supabase, ideas[0].id);
@@ -119,7 +130,10 @@ describe("Ideas Multi-Source Creation", () => {
   });
 
   it("creates idea from IDEA intent tag", async () => {
-    const result = await processMemoryIntents(supabase, "Voici mon idee: [IDEA: Ajouter un cache Redis]");
+    const result = await processMemoryIntents(
+      supabase,
+      "Voici mon idee: [IDEA: Ajouter un cache Redis]",
+    );
 
     expect(result).toBe("Voici mon idee:");
     const memory = supabase._getTable("memory");
@@ -131,10 +145,14 @@ describe("Ideas Multi-Source Creation", () => {
   });
 
   it("creates idea from autoRemember (classify-thought)", async () => {
-    await autoRemember(supabase, "Et si on faisait un plugin?", makeClassification({
-      summary: "Creer un systeme de plugins",
-      topics: ["architecture"],
-    }));
+    await autoRemember(
+      supabase,
+      "Et si on faisait un plugin?",
+      makeClassification({
+        summary: "Creer un systeme de plugins",
+        topics: ["architecture"],
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     const ideas = memory.filter((m: any) => m.type === "idea");
@@ -148,10 +166,14 @@ describe("Ideas Multi-Source Creation", () => {
     await processMemoryIntents(supabase, "Pensons a ca: [IDEA: Ajouter des webhooks]");
 
     // Second: auto-detect from a different message
-    await autoRemember(supabase, "On pourrait aussi faire du SSE", makeClassification({
-      summary: "Ajouter du Server-Sent Events",
-      topics: ["api"],
-    }));
+    await autoRemember(
+      supabase,
+      "On pourrait aussi faire du SSE",
+      makeClassification({
+        summary: "Ajouter du Server-Sent Events",
+        topics: ["api"],
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     const ideas = memory.filter((m: any) => m.type === "idea");
@@ -171,11 +193,15 @@ describe("Ideas Multi-Source Creation", () => {
   });
 
   it("auto-detect idea has correct metadata structure", async () => {
-    await autoRemember(supabase, "Original message long", makeClassification({
-      summary: "Summary court",
-      topics: ["test"],
-      people: ["Edouard"],
-    }));
+    await autoRemember(
+      supabase,
+      "Original message long",
+      makeClassification({
+        summary: "Summary court",
+        topics: ["test"],
+        people: ["Edouard"],
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     expect(memory[0].metadata.auto_classified).toBe(true);
@@ -199,17 +225,25 @@ describe("Ideas Deduplication Integration", () => {
   it("deduplicates identical idea from two auto-detect calls", async () => {
     // First call: no duplicates
     supabase._registerFunction("search", () => []);
-    await autoRemember(supabase, "On pourrait ajouter un dark mode", makeClassification({
-      summary: "Ajouter un dark mode",
-    }));
+    await autoRemember(
+      supabase,
+      "On pourrait ajouter un dark mode",
+      makeClassification({
+        summary: "Ajouter un dark mode",
+      }),
+    );
 
     // Second call: now the first idea exists as duplicate
     supabase._registerFunction("search", () => [
       { content: "Ajouter un dark mode", type: "idea", similarity: 0.95 },
     ]);
-    await autoRemember(supabase, "Et si on faisait un mode sombre?", makeClassification({
-      summary: "Ajouter un mode sombre",
-    }));
+    await autoRemember(
+      supabase,
+      "Et si on faisait un mode sombre?",
+      makeClassification({
+        summary: "Ajouter un mode sombre",
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     const ideas = memory.filter((m: any) => m.type === "idea");
@@ -219,9 +253,13 @@ describe("Ideas Deduplication Integration", () => {
   it("deduplicates idea from intent tag when auto-detect already captured it", async () => {
     // First: auto-detect
     supabase._registerFunction("search", () => []);
-    await autoRemember(supabase, "Un cache serait bien", makeClassification({
-      summary: "Ajouter un cache",
-    }));
+    await autoRemember(
+      supabase,
+      "Un cache serait bien",
+      makeClassification({
+        summary: "Ajouter un cache",
+      }),
+    );
 
     // Second: intent tag with similar content — detected as duplicate
     supabase._registerFunction("search", () => [
@@ -238,9 +276,13 @@ describe("Ideas Deduplication Integration", () => {
     // Edge Function filters by threshold server-side, returns empty when below 0.85
     supabase._registerFunction("search", () => []);
 
-    await autoRemember(supabase, "Un systeme de plugins", makeClassification({
-      summary: "Creer un systeme de plugins",
-    }));
+    await autoRemember(
+      supabase,
+      "Un systeme de plugins",
+      makeClassification({
+        summary: "Creer un systeme de plugins",
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     const ideas = memory.filter((m: any) => m.type === "idea");
@@ -253,11 +295,15 @@ describe("Ideas Deduplication Integration", () => {
       { id: "f1", content: "Le serveur tourne sur le port 3000", type: "fact", similarity: 0.95 },
     ]);
 
-    await autoRemember(supabase, "Le serveur utilise le port 3000", makeClassification({
-      type: "decision",
-      is_idea: false,
-      summary: "Serveur sur port 3000",
-    }));
+    await autoRemember(
+      supabase,
+      "Le serveur utilise le port 3000",
+      makeClassification({
+        type: "decision",
+        is_idea: false,
+        summary: "Serveur sur port 3000",
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     // S36-03: duplicate fact is skipped (sim >= 0.85), no new memory created
@@ -273,12 +319,53 @@ describe("Ideas Status Filtering", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "New idea 1", idea_status: "new", metadata: { topics: ["a"] }, created_at: "2026-03-14T10:00:00Z" },
-        { id: "i2", type: "idea", content: "New idea 2", idea_status: "new", metadata: { topics: ["b"] }, created_at: "2026-03-14T11:00:00Z" },
-        { id: "i3", type: "idea", content: "Reviewed idea", idea_status: "reviewed", metadata: {}, created_at: "2026-03-13T10:00:00Z" },
-        { id: "i4", type: "idea", content: "Promoted idea", idea_status: "promoted", metadata: {}, created_at: "2026-03-12T10:00:00Z" },
-        { id: "i5", type: "idea", content: "Archived idea", idea_status: "archived", metadata: {}, created_at: "2026-03-11T10:00:00Z" },
-        { id: "f1", type: "fact", content: "Not an idea", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "New idea 1",
+          idea_status: "new",
+          metadata: { topics: ["a"] },
+          created_at: "2026-03-14T10:00:00Z",
+        },
+        {
+          id: "i2",
+          type: "idea",
+          content: "New idea 2",
+          idea_status: "new",
+          metadata: { topics: ["b"] },
+          created_at: "2026-03-14T11:00:00Z",
+        },
+        {
+          id: "i3",
+          type: "idea",
+          content: "Reviewed idea",
+          idea_status: "reviewed",
+          metadata: {},
+          created_at: "2026-03-13T10:00:00Z",
+        },
+        {
+          id: "i4",
+          type: "idea",
+          content: "Promoted idea",
+          idea_status: "promoted",
+          metadata: {},
+          created_at: "2026-03-12T10:00:00Z",
+        },
+        {
+          id: "i5",
+          type: "idea",
+          content: "Archived idea",
+          idea_status: "archived",
+          metadata: {},
+          created_at: "2026-03-11T10:00:00Z",
+        },
+        {
+          id: "f1",
+          type: "fact",
+          content: "Not an idea",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -318,9 +405,27 @@ describe("Ideas Status Filtering", () => {
 describe("Ideas Formatting Through Lifecycle", () => {
   it("formats mixed-status ideas correctly", () => {
     const ideas = [
-      { id: "aaaa1111-0000-0000-0000-000000000000", content: "Idea A", idea_status: "new" as const, metadata: { topics: ["ui"] }, created_at: "2026-03-14T10:00:00Z" },
-      { id: "bbbb2222-0000-0000-0000-000000000000", content: "Idea B", idea_status: "reviewed" as const, metadata: { topics: ["api", "perf"] }, created_at: "2026-03-13T10:00:00Z" },
-      { id: "cccc3333-0000-0000-0000-000000000000", content: "Idea C", idea_status: "promoted" as const, metadata: {}, created_at: "2026-03-12T10:00:00Z" },
+      {
+        id: "aaaa1111-0000-0000-0000-000000000000",
+        content: "Idea A",
+        idea_status: "new" as const,
+        metadata: { topics: ["ui"] },
+        created_at: "2026-03-14T10:00:00Z",
+      },
+      {
+        id: "bbbb2222-0000-0000-0000-000000000000",
+        content: "Idea B",
+        idea_status: "reviewed" as const,
+        metadata: { topics: ["api", "perf"] },
+        created_at: "2026-03-13T10:00:00Z",
+      },
+      {
+        id: "cccc3333-0000-0000-0000-000000000000",
+        content: "Idea C",
+        idea_status: "promoted" as const,
+        metadata: {},
+        created_at: "2026-03-12T10:00:00Z",
+      },
     ];
 
     const result = formatIdeasList(ideas);
@@ -334,7 +439,13 @@ describe("Ideas Formatting Through Lifecycle", () => {
 
   it("formats single idea after review", () => {
     const ideas = [
-      { id: "dddd4444-0000-0000-0000-000000000000", content: "Reviewed only", idea_status: "reviewed" as const, metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "dddd4444-0000-0000-0000-000000000000",
+        content: "Reviewed only",
+        idea_status: "reviewed" as const,
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
     ];
 
     const result = formatIdeasList(ideas);
@@ -369,11 +480,15 @@ describe("Ideas and Other Memory Types", () => {
   });
 
   it("autoRemember creates idea + goals from action_items in same call", async () => {
-    await autoRemember(supabase, "On pourrait refactorer et ajouter des tests", makeClassification({
-      summary: "Refactorer le module auth",
-      topics: ["code"],
-      action_items: ["Ecrire des tests pour auth", "Mettre a jour la doc"],
-    }));
+    await autoRemember(
+      supabase,
+      "On pourrait refactorer et ajouter des tests",
+      makeClassification({
+        summary: "Refactorer le module auth",
+        topics: ["code"],
+        action_items: ["Ecrire des tests pour auth", "Mettre a jour la doc"],
+      }),
+    );
 
     const memory = supabase._getTable("memory");
     const ideas = memory.filter((m: any) => m.type === "idea");
@@ -385,10 +500,23 @@ describe("Ideas and Other Memory Types", () => {
 
   it("listing ideas ignores facts, goals, and preferences", async () => {
     supabase._store.memory = [
-      { id: "i1", type: "idea", content: "Idea", idea_status: "new", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "i1",
+        type: "idea",
+        content: "Idea",
+        idea_status: "new",
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
       { id: "f1", type: "fact", content: "Fact", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
       { id: "g1", type: "goal", content: "Goal", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
-      { id: "p1", type: "preference", content: "Pref", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "p1",
+        type: "preference",
+        content: "Pref",
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
     ];
 
     const ideas = await listIdeas(supabase);
@@ -409,7 +537,14 @@ describe("Ideas Edge Cases", () => {
 
   it("archiving already archived idea is idempotent", async () => {
     supabase._store.memory = [
-      { id: "i1", type: "idea", content: "Old idea", idea_status: "archived", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "i1",
+        type: "idea",
+        content: "Old idea",
+        idea_status: "archived",
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
     ];
 
     const result = await archiveIdea(supabase, "i1");
@@ -420,7 +555,14 @@ describe("Ideas Edge Cases", () => {
 
   it("promoting already promoted idea returns content", async () => {
     supabase._store.memory = [
-      { id: "i1", type: "idea", content: "Already promoted", idea_status: "promoted", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "i1",
+        type: "idea",
+        content: "Already promoted",
+        idea_status: "promoted",
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
     ];
 
     const content = await promoteIdea(supabase, "i1");
@@ -428,9 +570,7 @@ describe("Ideas Edge Cases", () => {
   });
 
   it("getIdea returns null for a fact id", async () => {
-    supabase._store.memory = [
-      { id: "f1", type: "fact", content: "Not an idea", metadata: {} },
-    ];
+    supabase._store.memory = [{ id: "f1", type: "fact", content: "Not an idea", metadata: {} }];
 
     const idea = await getIdea(supabase, "f1");
     expect(idea).toBeNull();
@@ -438,8 +578,22 @@ describe("Ideas Edge Cases", () => {
 
   it("listing returns empty when all ideas are archived", async () => {
     supabase._store.memory = [
-      { id: "i1", type: "idea", content: "Archived 1", idea_status: "archived", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
-      { id: "i2", type: "idea", content: "Archived 2", idea_status: "archived", metadata: {}, created_at: "2026-03-13T10:00:00Z" },
+      {
+        id: "i1",
+        type: "idea",
+        content: "Archived 1",
+        idea_status: "archived",
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
+      {
+        id: "i2",
+        type: "idea",
+        content: "Archived 2",
+        idea_status: "archived",
+        metadata: {},
+        created_at: "2026-03-13T10:00:00Z",
+      },
     ];
 
     const ideas = await listIdeas(supabase);
@@ -460,7 +614,7 @@ describe("Ideas Edge Cases", () => {
   it("IDEA tag with empty content is still processed", async () => {
     // Edge case: regex should not match empty content since .+? requires at least 1 char
     const input = "[IDEA: ] text";
-    const result = await processMemoryIntents(supabase, input);
+    const _result = await processMemoryIntents(supabase, input);
 
     // The regex requires at least 1 char (.+?), so empty-ish content like " " would match
     // but truly empty would not. This tests the boundary.
@@ -472,11 +626,15 @@ describe("Ideas Edge Cases", () => {
   });
 
   it("idea metadata preserved through status transitions", async () => {
-    await autoRemember(supabase, "Message original avec details", makeClassification({
-      summary: "Idee avec metadata riche",
-      topics: ["feature", "dashboard"],
-      people: ["Edouard"],
-    }));
+    await autoRemember(
+      supabase,
+      "Message original avec details",
+      makeClassification({
+        summary: "Idee avec metadata riche",
+        topics: ["feature", "dashboard"],
+        people: ["Edouard"],
+      }),
+    );
 
     const ideas = await listIdeas(supabase);
     const id = ideas[0].id;

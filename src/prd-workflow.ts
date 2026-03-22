@@ -6,38 +6,34 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Context } from "grammy";
 import { InlineKeyboard } from "grammy";
-import type { BotContext } from "./bot-context.ts";
 import {
-  generatePRD,
-  savePRD,
-  getPRD,
-  updatePRDContent,
-  updatePRDStatus,
-  formatPRDDetail,
-  type PRD,
-  type PRDSessionConstraints,
-} from "./prd.ts";
-import { shardDocument } from "./document-sharding.ts";
-import { resolveProjectContext } from "./projects.ts";
+  type AdversarialInput,
+  runAdversarialChallenge,
+  runImpactAnalysis,
+} from "./adversarial-challenge.ts";
 import { decomposeTask } from "./agent.ts";
-import { addTask, type Task } from "./tasks.ts";
-import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
-import { launch as launchJob, isJobManagerEnabled } from "./job-manager.ts";
-import { enqueue } from "./notification-queue.ts";
-import { explainPipelineChoice, type PipelineType } from "./pipeline-selection.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
+import type { AdversarialResult, ImpactAnalysisResult, ProtoSpec } from "./agent-schemas.ts";
 import {
-  getSession,
-  addDecision,
   buildConversationContext,
   type ConversationSession,
   type DetectedConstraint,
 } from "./conversation-session.ts";
+import { shardDocument } from "./document-sharding.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { enqueue } from "./notification-queue.ts";
+import { explainPipelineChoice, type PipelineType } from "./pipeline-selection.ts";
+import {
+  generatePRD,
+  type PRD,
+  type PRDSessionConstraints,
+  savePRD,
+  updatePRDContent,
+} from "./prd.ts";
+import { resolveProjectContext } from "./projects.ts";
 import { generateProtoSpec, type StoryFileInput } from "./spec-lite.ts";
-import { runAdversarialChallenge, runImpactAnalysis, type AdversarialInput } from "./adversarial-challenge.ts";
-import type { ProtoSpec, AdversarialResult, ImpactAnalysisResult } from "./agent-schemas.ts";
+import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
+import { addTask, type Task } from "./tasks.ts";
 
 const MAX_REVISIONS = 3;
 
@@ -127,15 +123,30 @@ export async function triageDescription(
   } catch {
     // Fallback: estimate from text length
     const len = description.length;
-    if (len < 50) { score = 0.2; pipeline = "SOLO"; }
-    else if (len < 150) { score = 0.45; pipeline = "LIGHT"; }
-    else { score = 0.7; pipeline = "DEFAULT"; }
+    if (len < 50) {
+      score = 0.2;
+      pipeline = "SOLO";
+    } else if (len < 150) {
+      score = 0.45;
+      pipeline = "LIGHT";
+    } else {
+      score = 0.7;
+      pipeline = "DEFAULT";
+    }
   }
 
   const label = score < 0.3 ? "faible" : score <= 0.6 ? "moyenne" : "haute";
 
   // Get pipeline explanation
-  const { selectPipeline, SOLO_PIPELINE, LIGHT_PIPELINE, DEFAULT_PIPELINE, QUICK_PIPELINE, RESEARCH_PIPELINE, REVIEW_PIPELINE } = await import("./pipeline-selection.ts");
+  const {
+    selectPipeline: _selectPipeline,
+    SOLO_PIPELINE,
+    LIGHT_PIPELINE,
+    DEFAULT_PIPELINE,
+    QUICK_PIPELINE,
+    RESEARCH_PIPELINE,
+    REVIEW_PIPELINE,
+  } = await import("./pipeline-selection.ts");
   const pipelineMap: Record<string, any[]> = {
     SOLO: SOLO_PIPELINE,
     LIGHT: LIGHT_PIPELINE,
@@ -250,8 +261,7 @@ export function canRevise(prd: PRD): boolean {
  */
 export function buildRevisionKeyboard(prd: PRD): InlineKeyboard {
   const revCount = getRevisionCount(prd);
-  const kb = new InlineKeyboard()
-    .text("Approuver", `prd_approve:${prd.id}`);
+  const kb = new InlineKeyboard().text("Approuver", `prd_approve:${prd.id}`);
 
   if (revCount < MAX_REVISIONS) {
     kb.text(`Revision (${revCount}/${MAX_REVISIONS})`, `prdwf_revise:${prd.id}`);
@@ -286,7 +296,7 @@ export async function revisePRD(
   if (!generated) return null;
 
   const updated = await updatePRDContent(supabase, prd.id, generated.content, {
-    ...(prd.metadata as Record<string, unknown> || {}),
+    ...((prd.metadata as Record<string, unknown>) || {}),
     revision_count: revCount,
   });
 
@@ -312,7 +322,12 @@ export async function decomposePRDIntoTasks(
     throw new Error("Aucune sous-tache generee depuis le PRD.");
   }
 
-  const added: Array<{ id: string; title: string; priority: number; acceptance_criteria?: string }> = [];
+  const added: Array<{
+    id: string;
+    title: string;
+    priority: number;
+    acceptance_criteria?: string;
+  }> = [];
   for (const st of subtasks) {
     const task = await addTask(supabase, st.title, {
       description: st.description,
@@ -323,9 +338,12 @@ export async function decomposePRDIntoTasks(
     });
     if (task) {
       if (st.acceptance_criteria) {
-        await supabase.from("tasks").update({
-          acceptance_criteria: st.acceptance_criteria,
-        }).eq("id", task.id);
+        await supabase
+          .from("tasks")
+          .update({
+            acceptance_criteria: st.acceptance_criteria,
+          })
+          .eq("id", task.id);
         task.acceptance_criteria = st.acceptance_criteria;
       }
       const story = buildStoryFile(task);
@@ -335,7 +353,9 @@ export async function decomposePRDIntoTasks(
   }
 
   const lines = added.map((t, i) => {
-    const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+    const acCount = (t.acceptance_criteria || "")
+      .split("\n")
+      .filter((l: string) => l.trim()).length;
     return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
   });
 
@@ -352,7 +372,7 @@ export async function decomposePRDIntoTasks(
  */
 export function buildLaunchConfirmation(
   prdId: string,
-  pipeline: string,
+  _pipeline: string,
   pipelineExplanation: string,
   taskCount: number,
 ): { message: string; keyboard: InlineKeyboard } {
@@ -413,11 +433,7 @@ export function buildPRCompletionKeyboard(
   prUrl: string,
   gatesSummary: string,
 ): { message: string; keyboard: InlineKeyboard } {
-  const message = [
-    "Implementation terminee !",
-    "",
-    gatesSummary,
-  ].join("\n");
+  const message = ["Implementation terminee !", "", gatesSummary].join("\n");
 
   const keyboard = new InlineKeyboard()
     .url("Voir la PR", prUrl)
@@ -457,12 +473,18 @@ export function clearPendingDescription(chatKey: string): void {
  */
 const pendingRevisions = new Map<string, { prdId: string; constraints?: PRDSessionConstraints }>();
 
-export function storePendingRevision(chatKey: string, prdId: string, constraints?: PRDSessionConstraints): void {
+export function storePendingRevision(
+  chatKey: string,
+  prdId: string,
+  constraints?: PRDSessionConstraints,
+): void {
   pendingRevisions.set(chatKey, { prdId, constraints });
   setTimeout(() => pendingRevisions.delete(chatKey), 5 * 60 * 1000);
 }
 
-export function getPendingRevision(chatKey: string): { prdId: string; constraints?: PRDSessionConstraints } | undefined {
+export function getPendingRevision(
+  chatKey: string,
+): { prdId: string; constraints?: PRDSessionConstraints } | undefined {
   return pendingRevisions.get(chatKey);
 }
 
@@ -479,7 +501,10 @@ export function chatKey(chatId: number, threadId?: number): string {
 
 // ── Pending Proto-Specs Storage (R8) ─────────────────────────
 
-const pendingProtoSpecs = new Map<string, { protoSpecs: PreflightReport["protoSpecs"]; prdId: string }>();
+const pendingProtoSpecs = new Map<
+  string,
+  { protoSpecs: PreflightReport["protoSpecs"]; prdId: string }
+>();
 
 /**
  * Store proto-specs for a chat key with 10-minute TTL (R8).
@@ -497,7 +522,9 @@ export function storePendingProtoSpec(
 /**
  * Retrieve pending proto-specs for a chat key.
  */
-export function getPendingProtoSpec(key: string): { protoSpecs: PreflightReport["protoSpecs"]; prdId: string } | undefined {
+export function getPendingProtoSpec(
+  key: string,
+): { protoSpecs: PreflightReport["protoSpecs"]; prdId: string } | undefined {
   return pendingProtoSpecs.get(key);
 }
 
@@ -532,10 +559,7 @@ export function isPrdMaturationEnabled(): boolean {
  * @param tasks The decomposed tasks
  * @returns PreflightReport with consolidated verdict
  */
-export async function runPrdPreflightChecks(
-  prd: PRD,
-  tasks: Task[],
-): Promise<PreflightReport> {
+export async function runPrdPreflightChecks(prd: PRD, tasks: Task[]): Promise<PreflightReport> {
   const startTime = Date.now();
 
   const runP1 = isFeatureEnabled("spec_phase_lite");
@@ -555,7 +579,7 @@ export async function runPrdPreflightChecks(
   }
 
   // ── Phase P1: Proto-specs per task ──────────────────────────
-  let protoSpecs: PreflightReport["protoSpecs"] = [];
+  const protoSpecs: PreflightReport["protoSpecs"] = [];
 
   if (runP1) {
     for (const task of tasks) {
@@ -584,9 +608,8 @@ export async function runPrdPreflightChecks(
       taskTitle: prd.title,
       taskDescription: prd.content,
       protoSpec: null,
-      agentOutput: protoSpecs.length > 0
-        ? JSON.stringify(protoSpecs.map((p) => p.spec))
-        : undefined,
+      agentOutput:
+        protoSpecs.length > 0 ? JSON.stringify(protoSpecs.map((p) => p.spec)) : undefined,
     };
 
     // Determine impacted files for E1
@@ -657,10 +680,7 @@ export function formatPreflightReport(report: PreflightReport): string {
   lines.push("");
 
   // Proto-spec section
-  const totalVCriteria = report.protoSpecs.reduce(
-    (sum, p) => sum + p.spec.v_criteria.length,
-    0,
-  );
+  const totalVCriteria = report.protoSpecs.reduce((sum, p) => sum + p.spec.v_criteria.length, 0);
   const allFiles = new Set<string>();
   for (const p of report.protoSpecs) {
     for (const f of p.spec.impacted_files) allFiles.add(f);
@@ -678,17 +698,13 @@ export function formatPreflightReport(report: PreflightReport): string {
     lines.push(`${bloquants} finding(s) bloquant(s), ${majeurs} finding(s) majeur(s)`);
 
     // R9: Always show BLOQUANT findings
-    const bloquantFindings = report.adversarial.findings.filter(
-      (f) => f.severity === "BLOQUANT",
-    );
+    const bloquantFindings = report.adversarial.findings.filter((f) => f.severity === "BLOQUANT");
     for (const f of bloquantFindings) {
       lines.push(`  ${f.id} : ${f.title}`);
     }
 
     // R9: Show MAJEUR findings only if <= 3
-    const majeurFindings = report.adversarial.findings.filter(
-      (f) => f.severity === "MAJEUR",
-    );
+    const majeurFindings = report.adversarial.findings.filter((f) => f.severity === "MAJEUR");
     if (majeurFindings.length > 0 && majeurFindings.length <= 3) {
       for (const f of majeurFindings) {
         lines.push(`  ${f.id} : ${f.title}`);
@@ -730,10 +746,7 @@ export function formatPreflightReport(report: PreflightReport): string {
  */
 export function buildPreflightResultTag(report: PreflightReport): string {
   const taskCount = report.protoSpecs.length;
-  const totalVCriteria = report.protoSpecs.reduce(
-    (sum, p) => sum + p.spec.v_criteria.length,
-    0,
-  );
+  const totalVCriteria = report.protoSpecs.reduce((sum, p) => sum + p.spec.v_criteria.length, 0);
   const riskLevel = report.impact?.risk_level || "N/A";
   const resume = `${taskCount} taches analysees, ${totalVCriteria} V-criteres, risque ${riskLevel}`;
   return `PRDWF_PREFLIGHT:${report.prdId}|${report.verdict}|${resume}`;
@@ -744,9 +757,7 @@ export function buildPreflightResultTag(report: PreflightReport): string {
  * - Always: prdwf_preflight_ok, prdwf_preflight_abort
  * - If verdict PAUSE: also prdwf_revise_prd
  */
-export function buildPreflightKeyboard(
-  verdict: PreflightReport["verdict"],
-): InlineKeyboard {
+export function buildPreflightKeyboard(verdict: PreflightReport["verdict"]): InlineKeyboard {
   const kb = new InlineKeyboard();
   kb.text("Continuer", `prdwf_preflight_ok`);
   if (verdict === "PAUSE") {

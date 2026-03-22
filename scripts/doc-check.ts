@@ -8,15 +8,15 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import {
-  extractModules,
-  extractCommands,
-  parseClaudeMdModules,
-  parseClaudeMdCommands,
-  parseClaudeMdTestCount,
-  parseClaudeMdModuleCount,
   countTests,
-  findGaps,
   type DocGap,
+  extractCommands,
+  extractModules,
+  findGaps,
+  parseClaudeMdCommands,
+  parseClaudeMdModuleCount,
+  parseClaudeMdModules,
+  parseClaudeMdTestCount,
 } from "./doc-utils.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -98,8 +98,12 @@ async function main() {
 
   // Check module count in Project Structure section
   if (claudeMdModuleCount !== srcModules.length) {
-    console.log(`[MODULE_COUNT] Project Structure says "${claudeMdModuleCount} TypeScript modules" but there are ${srcModules.length}`);
-    console.log(`  Fix: Update "src/    ${claudeMdModuleCount} TypeScript modules" to "src/    ${srcModules.length} TypeScript modules" in CLAUDE.md\n`);
+    console.log(
+      `[MODULE_COUNT] Project Structure says "${claudeMdModuleCount} TypeScript modules" but there are ${srcModules.length}`,
+    );
+    console.log(
+      `  Fix: Update "src/    ${claudeMdModuleCount} TypeScript modules" to "src/    ${srcModules.length} TypeScript modules" in CLAUDE.md\n`,
+    );
   }
 }
 

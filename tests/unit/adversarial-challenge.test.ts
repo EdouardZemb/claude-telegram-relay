@@ -8,7 +8,7 @@
  * V19-V21: Impact analysis paths.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { parseAdversarialResult } from "../../src/adversarial-challenge";
 
 // ── parseAdversarialResult (P2) ──────────────────────────────
@@ -17,8 +17,20 @@ describe("parseAdversarialResult", () => {
   it("[V3] parses valid findings and returns PASS when no bloquants", () => {
     const output = JSON.stringify({
       findings: [
-        { id: "F-DA-1", severity: "MAJEUR", title: "Minor issue", description: "Not critical", source: "R1" },
-        { id: "F-DA-2", severity: "MINEUR", title: "Trivial", description: "Cosmetic", source: "R2" },
+        {
+          id: "F-DA-1",
+          severity: "MAJEUR",
+          title: "Minor issue",
+          description: "Not critical",
+          source: "R1",
+        },
+        {
+          id: "F-DA-2",
+          severity: "MINEUR",
+          title: "Trivial",
+          description: "Cosmetic",
+          source: "R2",
+        },
       ],
     });
 
@@ -37,8 +49,20 @@ describe("parseAdversarialResult", () => {
   it("[V5] returns PAUSE when at least 1 bloquant found", () => {
     const output = JSON.stringify({
       findings: [
-        { id: "F-DA-1", severity: "BLOQUANT", title: "Critical issue", description: "Must fix", source: "R1" },
-        { id: "F-DA-2", severity: "MAJEUR", title: "Important", description: "Should fix", source: "R2" },
+        {
+          id: "F-DA-1",
+          severity: "BLOQUANT",
+          title: "Critical issue",
+          description: "Must fix",
+          source: "R1",
+        },
+        {
+          id: "F-DA-2",
+          severity: "MAJEUR",
+          title: "Important",
+          description: "Should fix",
+          source: "R2",
+        },
       ],
     });
 
@@ -100,9 +124,7 @@ End of analysis.`;
 
   it("normalizes invalid severity to MINEUR", () => {
     const output = JSON.stringify({
-      findings: [
-        { id: "F-1", severity: "UNKNOWN", title: "T", description: "D", source: "S" },
-      ],
+      findings: [{ id: "F-1", severity: "UNKNOWN", title: "T", description: "D", source: "S" }],
     });
 
     const result = parseAdversarialResult(output, Date.now());
@@ -126,9 +148,7 @@ End of analysis.`;
 
   it("assigns default IDs to findings without id", () => {
     const output = JSON.stringify({
-      findings: [
-        { severity: "MAJEUR", title: "T", description: "D", source: "S" },
-      ],
+      findings: [{ severity: "MAJEUR", title: "T", description: "D", source: "S" }],
     });
 
     const result = parseAdversarialResult(output, Date.now());
@@ -137,9 +157,7 @@ End of analysis.`;
 
   it("handles finding with missing fields", () => {
     const output = JSON.stringify({
-      findings: [
-        { id: "F-1", severity: "BLOQUANT" },
-      ],
+      findings: [{ id: "F-1", severity: "BLOQUANT" }],
     });
 
     const result = parseAdversarialResult(output, Date.now());

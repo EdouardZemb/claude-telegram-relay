@@ -5,15 +5,17 @@
  * control and JSON persistence for crash recovery.
  */
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
-import { join } from "path";
-import { InlineKeyboard } from "grammy";
+import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import type { Bot } from "grammy";
-import { Semaphore } from "./semaphore.ts";
-import { enqueue } from "./notification-queue.ts";
+import { InlineKeyboard } from "grammy";
+import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { createLogger } from "./logger.ts";
+import { enqueue } from "./notification-queue.ts";
 import { buildPreflightKeyboard } from "./prd-workflow.ts";
+import { Semaphore } from "./semaphore.ts";
 
+const log = createLogger("job-manager");
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const JOBS_FILE = join(RELAY_DIR, "jobs.json");
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -89,7 +91,7 @@ async function saveJobs(): Promise<void> {
     await writeFile(tmp, JSON.stringify(jobs, null, 2));
     await rename(tmp, JOBS_FILE);
   } catch (error) {
-    console.error("Job persistence error:", error);
+    log.error("Job persistence error", { error: String(error) });
   }
 }
 
@@ -150,7 +152,8 @@ export async function launch(
       ]);
 
       job.status = "completed";
-      job.result = typeof result === "string" ? result.substring(0, 500) : String(result).substring(0, 500);
+      job.result =
+        typeof result === "string" ? result.substring(0, 500) : String(result).substring(0, 500);
       job.completedAt = new Date().toISOString();
     } catch (error: any) {
       job.status = "failed";
@@ -166,7 +169,7 @@ export async function launch(
     try {
       await sendJobCompletionNotification(job);
     } catch (notifError) {
-      console.error("Job notification error:", notifError);
+      log.error("Job notification error", { error: String(notifError) });
     }
   })();
 
@@ -197,8 +200,14 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
     case "exec":
     case "orchestrate":
     case "autopipeline":
-      if (prUrl) { kb.url("Voir la PR", prUrl); hasButtons = true; }
-      if (job.taskId) { kb.text("Terminer la tache", `jc_done:${job.taskId.substring(0, 8)}`); hasButtons = true; }
+      if (prUrl) {
+        kb.url("Voir la PR", prUrl);
+        hasButtons = true;
+      }
+      if (job.taskId) {
+        kb.text("Terminer la tache", `jc_done:${job.taskId.substring(0, 8)}`);
+        hasButtons = true;
+      }
       break;
     case "autopipeline-batch":
       kb.text("Voir le backlog", "jc_backlog");
@@ -299,7 +308,7 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       await botInstance.api.sendMessage(job.chatId, message, opts);
       return;
     } catch (error) {
-      console.error("Direct job notification failed, falling back to queue:", error);
+      log.error("Direct job notification failed, falling back to queue", { error: String(error) });
     }
   }
 

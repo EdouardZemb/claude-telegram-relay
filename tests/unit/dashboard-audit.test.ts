@@ -2,9 +2,9 @@
  * Dashboard /api/audit endpoint — Unit Tests
  */
 
-import { describe, it, expect } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import { handleAudit } from "../../dashboard/server";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // Helper: parse JSON response
 async function parseResponse(res: Response) {
@@ -60,7 +60,10 @@ describe("handleAudit", () => {
   describe("AC-2 — limit parameter", () => {
     it("returns 5 audits when ?limit=5", async () => {
       const audits = Array.from({ length: 10 }, (_, i) =>
-        makeAudit({ created_at: `2026-03-${String(i + 1).padStart(2, "0")}T00:00:00Z`, score: 50 + i })
+        makeAudit({
+          created_at: `2026-03-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+          score: 50 + i,
+        }),
       );
       const sb = createMockSupabase({ audit_results: audits });
 
@@ -87,7 +90,9 @@ describe("handleAudit", () => {
 
     it("clamps limit to max 50", async () => {
       const audits = Array.from({ length: 55 }, (_, i) =>
-        makeAudit({ created_at: `2026-01-${String((i % 28) + 1).padStart(2, "0")}T${String(i).padStart(2, "0")}:00:00Z` })
+        makeAudit({
+          created_at: `2026-01-${String((i % 28) + 1).padStart(2, "0")}T${String(i).padStart(2, "0")}:00:00Z`,
+        }),
       );
       const sb = createMockSupabase({ audit_results: audits });
 

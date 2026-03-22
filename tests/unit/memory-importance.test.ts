@@ -5,15 +5,15 @@
  * ranked getMemoryContext, and contradiction detection.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  calculateEffectiveImportance,
   bumpMemoryAccess,
-  getMemoryContext,
-  findContradiction,
+  calculateEffectiveImportance,
   detectAndLogContradiction,
+  findContradiction,
+  getMemoryContext,
 } from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── calculateEffectiveImportance (S23-02) ────────────────────
 
@@ -27,13 +27,7 @@ describe("calculateEffectiveImportance", () => {
 
   it("decays by half after one half-life (70 days)", () => {
     const seventyDaysAgo = new Date(now.getTime() - 70 * 24 * 60 * 60 * 1000);
-    const score = calculateEffectiveImportance(
-      50,
-      seventyDaysAgo.toISOString(),
-      null,
-      0,
-      now
-    );
+    const score = calculateEffectiveImportance(50, seventyDaysAgo.toISOString(), null, 0, now);
     // Should be approximately 25 (50 * 0.5)
     expect(score).toBeGreaterThan(20);
     expect(score).toBeLessThan(30);
@@ -41,13 +35,7 @@ describe("calculateEffectiveImportance", () => {
 
   it("decays further after two half-lives (140 days)", () => {
     const oneFortyDaysAgo = new Date(now.getTime() - 140 * 24 * 60 * 60 * 1000);
-    const score = calculateEffectiveImportance(
-      50,
-      oneFortyDaysAgo.toISOString(),
-      null,
-      0,
-      now
-    );
+    const score = calculateEffectiveImportance(50, oneFortyDaysAgo.toISOString(), null, 0, now);
     // Should be approximately 12.5 (50 * 0.25)
     expect(score).toBeGreaterThan(10);
     expect(score).toBeLessThan(16);
@@ -55,20 +43,8 @@ describe("calculateEffectiveImportance", () => {
 
   it("boosts score with access count", () => {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const noAccess = calculateEffectiveImportance(
-      50,
-      thirtyDaysAgo.toISOString(),
-      null,
-      0,
-      now
-    );
-    const withAccess = calculateEffectiveImportance(
-      50,
-      thirtyDaysAgo.toISOString(),
-      null,
-      5,
-      now
-    );
+    const noAccess = calculateEffectiveImportance(50, thirtyDaysAgo.toISOString(), null, 0, now);
+    const withAccess = calculateEffectiveImportance(50, thirtyDaysAgo.toISOString(), null, 5, now);
     expect(withAccess).toBeGreaterThan(noAccess);
   });
 
@@ -82,19 +58,13 @@ describe("calculateEffectiveImportance", () => {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const notRecent = calculateEffectiveImportance(
-      50,
-      thirtyDaysAgo.toISOString(),
-      null,
-      0,
-      now
-    );
+    const notRecent = calculateEffectiveImportance(50, thirtyDaysAgo.toISOString(), null, 0, now);
     const recentAccess = calculateEffectiveImportance(
       50,
       thirtyDaysAgo.toISOString(),
       yesterday.toISOString(),
       0,
-      now
+      now,
     );
     expect(recentAccess).toBeGreaterThan(notRecent);
   });
@@ -103,19 +73,13 @@ describe("calculateEffectiveImportance", () => {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
 
-    const noAccess = calculateEffectiveImportance(
-      50,
-      thirtyDaysAgo.toISOString(),
-      null,
-      0,
-      now
-    );
+    const noAccess = calculateEffectiveImportance(50, thirtyDaysAgo.toISOString(), null, 0, now);
     const oldAccess = calculateEffectiveImportance(
       50,
       thirtyDaysAgo.toISOString(),
       tenDaysAgo.toISOString(),
       0,
-      now
+      now,
     );
     // Old access (>7 days) should give no recency boost
     expect(oldAccess).toBeCloseTo(noAccess, 0);
@@ -280,7 +244,7 @@ describe("findContradiction", () => {
 
   it("ignores non-fact matches", async () => {
     supabase._registerFunction("search", () => [
-      { id: "m1", content: "Similar goal", type: "goal", similarity: 0.90 },
+      { id: "m1", content: "Similar goal", type: "goal", similarity: 0.9 },
     ]);
 
     const result = await findContradiction(supabase, "Something");
@@ -307,7 +271,9 @@ describe("findContradiction", () => {
   });
 
   it("handles search failure gracefully", async () => {
-    supabase._registerFunction("search", () => { throw new Error("Network"); });
+    supabase._registerFunction("search", () => {
+      throw new Error("Network");
+    });
     const result = await findContradiction(supabase, "test");
     expect(result).toBeNull();
   });

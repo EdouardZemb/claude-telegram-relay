@@ -3,18 +3,18 @@
  * @description Tests for documentation parsing utilities (doc-utils.ts).
  */
 
-import { describe, test, expect } from "bun:test";
-import {
-  extractModules,
-  extractCommands,
-  parseClaudeMdModules,
-  parseClaudeMdCommands,
-  parseClaudeMdTestCount,
-  parseClaudeMdModuleCount,
-  findGaps,
-  type DocState,
-} from "../../scripts/doc-utils.ts";
+import { describe, expect, test } from "bun:test";
 import { join } from "path";
+import {
+  type DocState,
+  extractCommands,
+  extractModules,
+  findGaps,
+  parseClaudeMdCommands,
+  parseClaudeMdModuleCount,
+  parseClaudeMdModules,
+  parseClaudeMdTestCount,
+} from "../../scripts/doc-utils.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 const SRC_DIR = join(ROOT, "src");

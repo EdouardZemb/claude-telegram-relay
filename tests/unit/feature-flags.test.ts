@@ -2,21 +2,21 @@
  * Unit Tests — src/feature-flags.ts (S29-T1)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 // Use a temp file for tests to avoid modifying the real config
-const TEMP_FLAGS = join(import.meta.dir, "..", "..", "config", "features.test.json");
+const _TEMP_FLAGS = join(import.meta.dir, "..", "..", "config", "features.test.json");
 const REAL_FLAGS = join(import.meta.dir, "..", "..", "config", "features.json");
 
 // We test the functions directly by importing them
 import {
-  loadFeatures,
-  isFeatureEnabled,
-  setFeature,
-  listFeatures,
   formatFeatures,
+  isFeatureEnabled,
+  listFeatures,
+  loadFeatures,
+  setFeature,
 } from "../../src/feature-flags";
 
 describe("auto_document_search flag (AC-1, AC-2)", () => {
@@ -34,11 +34,18 @@ describe("feature-flags", () => {
     // Save original
     originalContent = readFileSync(REAL_FLAGS, "utf-8");
     // Write known state
-    writeFileSync(REAL_FLAGS, JSON.stringify({
-      test_flag_a: true,
-      test_flag_b: false,
-      test_flag_c: true,
-    }, null, 2) + "\n");
+    writeFileSync(
+      REAL_FLAGS,
+      JSON.stringify(
+        {
+          test_flag_a: true,
+          test_flag_b: false,
+          test_flag_c: true,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
   });
 
   afterEach(() => {
@@ -94,8 +101,8 @@ describe("feature-flags", () => {
     it("returns all flags with status", () => {
       const features = listFeatures();
       expect(features.length).toBe(3);
-      expect(features.find(f => f.flag === "test_flag_a")?.enabled).toBe(true);
-      expect(features.find(f => f.flag === "test_flag_b")?.enabled).toBe(false);
+      expect(features.find((f) => f.flag === "test_flag_a")?.enabled).toBe(true);
+      expect(features.find((f) => f.flag === "test_flag_b")?.enabled).toBe(false);
     });
   });
 

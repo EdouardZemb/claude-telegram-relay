@@ -6,7 +6,7 @@
  * Instead tests the Semaphore integration pattern and empty batch.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { runBatchPipeline } from "../../src/auto-pipeline";
 import { Semaphore } from "../../src/semaphore";
 
@@ -42,7 +42,7 @@ describe("runBatchPipeline", () => {
         } finally {
           semaphore.release();
         }
-      })
+      }),
     );
 
     expect(maxConcurrent).toBeLessThanOrEqual(2);
@@ -64,7 +64,7 @@ describe("runBatchPipeline", () => {
         } finally {
           semaphore.release();
         }
-      })
+      }),
     );
 
     // All tasks should complete (4 success, 1 rejected)

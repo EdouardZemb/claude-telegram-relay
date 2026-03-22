@@ -5,13 +5,12 @@
  * Max 1 round-trip per pair. Behind "deliberation" feature flag.
  */
 
-import type { Task } from "./tasks.ts";
-import type { AgentMessage } from "./agent-schemas.ts";
-import { parseAgentOutput } from "./agent-schemas.ts";
-import { getAgent } from "./bmad-agents.ts";
 import { spawnClaude } from "./agent.ts";
-import type { AgentRole, AgentStepResult } from "./orchestrator.ts";
+import type { AgentMessage } from "./agent-schemas.ts";
+import { getAgent } from "./bmad-agents.ts";
+import type { AgentRole } from "./orchestrator.ts";
 import { runAgentStep } from "./orchestrator.ts";
+import type { Task } from "./tasks.ts";
 
 // ── Deliberation Pairs ───────────────────────────────────────
 
@@ -20,8 +19,8 @@ import { runAgentStep } from "./orchestrator.ts";
  * reviews their output and can request a revision. Max 1 round-trip.
  */
 const DELIBERATION_PAIRS: Record<string, string> = {
-  architect: "pm",    // PM validates architect's design feasibility
-  dev: "qa",          // QA pre-reviews dev's implementation plan
+  architect: "pm", // PM validates architect's design feasibility
+  dev: "qa", // QA pre-reviews dev's implementation plan
 };
 
 // ── Functions ────────────────────────────────────────────────
@@ -42,12 +41,20 @@ export async function runDeliberation(
   messages: AgentMessage[],
   shardedContext?: string,
   agentContext?: string,
-  options?: { modelOverride?: string; cascade?: boolean; onProgress?: (msg: string) => Promise<void> },
+  options?: {
+    modelOverride?: string;
+    cascade?: boolean;
+    onProgress?: (msg: string) => Promise<void>;
+  },
 ): Promise<{ output: string; revised: boolean; reviewerFeedback: string }> {
   const proposerAgent = getAgent(proposerRole);
   const reviewerAgent = getAgent(reviewerRole);
-  const proposerLabel = proposerAgent ? `${proposerAgent.icon} ${proposerAgent.name}` : proposerRole;
-  const reviewerLabel = reviewerAgent ? `${reviewerAgent.icon} ${reviewerAgent.name}` : reviewerRole;
+  const proposerLabel = proposerAgent
+    ? `${proposerAgent.icon} ${proposerAgent.name}`
+    : proposerRole;
+  const reviewerLabel = reviewerAgent
+    ? `${reviewerAgent.icon} ${reviewerAgent.name}`
+    : reviewerRole;
 
   // Step 1: Reviewer examines proposer's output
   const reviewPrompt = [
@@ -78,7 +85,10 @@ export async function runDeliberation(
   const reviewOutput = reviewResult.stdout.trim();
 
   // Check if approved
-  if (reviewOutput.toUpperCase().includes("APPROVE") && !reviewOutput.toUpperCase().includes("REVISE")) {
+  if (
+    reviewOutput.toUpperCase().includes("APPROVE") &&
+    !reviewOutput.toUpperCase().includes("REVISE")
+  ) {
     if (options?.onProgress) {
       await options.onProgress(`Deliberation: ${reviewerLabel} approuve ${proposerLabel}`);
     }
@@ -87,7 +97,9 @@ export async function runDeliberation(
 
   // Step 2: Proposer revises based on feedback
   if (options?.onProgress) {
-    await options.onProgress(`Deliberation: ${proposerLabel} revise suite au feedback de ${reviewerLabel}...`);
+    await options.onProgress(
+      `Deliberation: ${proposerLabel} revise suite au feedback de ${reviewerLabel}...`,
+    );
   }
 
   const revisionMessages: AgentMessage[] = [

@@ -5,19 +5,19 @@
  * selectAdaptivePipeline(), classifyAdaptivePipeline(), and edge cases.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
+  classifyAdaptivePipeline,
+  classifyPipeline,
   DEFAULT_PIPELINE,
+  LIGHT_PIPELINE,
+  type PipelineType,
   QUICK_PIPELINE,
+  RESEARCH_PIPELINE,
   REVIEW_PIPELINE,
   SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  RESEARCH_PIPELINE,
-  selectPipeline,
   selectAdaptivePipeline,
-  classifyPipeline,
-  classifyAdaptivePipeline,
-  type PipelineType,
+  selectPipeline,
 } from "../../src/pipeline-selection";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -179,9 +179,7 @@ describe("selectPipeline", () => {
   // DEFAULT fallback
   it("returns DEFAULT for complex task with no keywords", () => {
     expect(
-      selectPipeline(
-        makeTask("implement multi-agent orchestration pipeline with DAG execution"),
-      ),
+      selectPipeline(makeTask("implement multi-agent orchestration pipeline with DAG execution")),
     ).toEqual(DEFAULT_PIPELINE);
   });
 
@@ -190,34 +188,29 @@ describe("selectPipeline", () => {
   });
 
   it("returns DEFAULT for P3 task with long title", () => {
-    const longTitle = "add a new comprehensive configuration management system for all environments";
+    const longTitle =
+      "add a new comprehensive configuration management system for all environments";
     expect(selectPipeline(makeTask(longTitle, { priority: 3 }))).toEqual(DEFAULT_PIPELINE);
   });
 
   it("returns DEFAULT for P3 task with subtasks", () => {
     expect(
-      selectPipeline(
-        makeTask("add config", { priority: 3, subtasks: [{ title: "sub1" }] }),
-      ),
+      selectPipeline(makeTask("add config", { priority: 3, subtasks: [{ title: "sub1" }] })),
     ).toEqual(DEFAULT_PIPELINE);
   });
 
   // Description matters
   it("detects keywords in description, not just title", () => {
     expect(
-      selectPipeline(
-        makeTask("update module", { description: "fix the broken handler" }),
-      ),
+      selectPipeline(makeTask("update module", { description: "fix the broken handler" })),
     ).toEqual(QUICK_PIPELINE);
   });
 
   // Research keywords have priority over bug keywords
   it("research keywords take priority over bug keywords", () => {
-    expect(
-      selectPipeline(
-        makeTask("research fix strategies for memory leaks"),
-      ),
-    ).toEqual(RESEARCH_PIPELINE);
+    expect(selectPipeline(makeTask("research fix strategies for memory leaks"))).toEqual(
+      RESEARCH_PIPELINE,
+    );
   });
 });
 
@@ -254,9 +247,7 @@ describe("classifyPipeline", () => {
 
   it("uses description for classification", () => {
     expect(
-      classifyPipeline(
-        makeTask("update module", { description: "audit the security posture" }),
-      ),
+      classifyPipeline(makeTask("update module", { description: "audit the security posture" })),
     ).toBe("REVIEW");
   });
 
@@ -295,13 +286,10 @@ describe("selectAdaptivePipeline", () => {
 
   it("returns DEFAULT for complex task (high difficulty score)", async () => {
     const result = await selectAdaptivePipeline(
-      makeTask(
-        "Implement new orchestration engine",
-        {
-          description:
-            "Full architecture design with database migration, parallel execution framework, and security hardening of the authentication workflow integration",
-        },
-      ),
+      makeTask("Implement new orchestration engine", {
+        description:
+          "Full architecture design with database migration, parallel execution framework, and security hardening of the authentication workflow integration",
+      }),
     );
     expect(result).toEqual(DEFAULT_PIPELINE);
   });
@@ -335,13 +323,10 @@ describe("classifyAdaptivePipeline", () => {
 
   it("returns DEFAULT for complex task", async () => {
     const result = await classifyAdaptivePipeline(
-      makeTask(
-        "Implement new orchestration engine",
-        {
-          description:
-            "Full architecture design with database migration and security hardening across auth workflow integration protocol",
-        },
-      ),
+      makeTask("Implement new orchestration engine", {
+        description:
+          "Full architecture design with database migration and security hardening across auth workflow integration protocol",
+      }),
     );
     expect(result).toBe("DEFAULT");
   });
@@ -407,8 +392,18 @@ describe("Edge cases", () => {
 
 describe("PipelineType", () => {
   it("classifyPipeline returns valid PipelineType values", () => {
-    const validTypes: PipelineType[] = ["DEFAULT", "QUICK", "REVIEW", "DOC", "SOLO", "LIGHT", "RESEARCH"];
-    const result = classifyPipeline(makeTask("generic long task with complex requirements and scope", { priority: 1 }));
+    const validTypes: PipelineType[] = [
+      "DEFAULT",
+      "QUICK",
+      "REVIEW",
+      "DOC",
+      "SOLO",
+      "LIGHT",
+      "RESEARCH",
+    ];
+    const result = classifyPipeline(
+      makeTask("generic long task with complex requirements and scope", { priority: 1 }),
+    );
     expect(validTypes).toContain(result);
   });
 });

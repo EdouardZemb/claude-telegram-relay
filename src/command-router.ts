@@ -5,10 +5,10 @@
  * Integrated into zz-messages.ts to execute commands directly instead of suggesting.
  */
 
-import { Context, InlineKeyboard } from "grammy";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { type Context, InlineKeyboard } from "grammy";
+import { type ActionDefinition, getAction } from "./action-registry.ts";
 import type { DetectedIntent } from "./intent-detection.ts";
-import { getAction, type ActionDefinition } from "./action-registry.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -124,9 +124,7 @@ async function resolveLastFailedPipeline(
 /**
  * Try to resolve sprint ID from context
  */
-async function resolveSprintId(
-  supabase: SupabaseClient | null,
-): Promise<string | undefined> {
+async function resolveSprintId(supabase: SupabaseClient | null): Promise<string | undefined> {
   if (!supabase) return undefined;
 
   const { data } = await supabase
@@ -259,10 +257,7 @@ export function checkPendingClarification(ctx: Context, text: string): string | 
  * Handle confirmation callback queries (intent_confirm / intent_cancel).
  * Returns the command to execute, or null if cancelled/expired.
  */
-export function handleConfirmationCallback(
-  ctx: Context,
-  data: string,
-): string | null {
+export function handleConfirmationCallback(ctx: Context, data: string): string | null {
   if (data === "intent_cancel") {
     const key = confirmationKey(ctx);
     pendingConfirmations.delete(key);
@@ -282,9 +277,7 @@ export function handleConfirmationCallback(
     }
 
     pendingConfirmations.delete(key);
-    return pending.args
-      ? `/${pending.command} ${pending.args}`
-      : `/${pending.command}`;
+    return pending.args ? `/${pending.command} ${pending.args}` : `/${pending.command}`;
   }
 
   return null;
@@ -313,12 +306,18 @@ function buildClarificationQuestion(action: ActionDefinition, paramName: string)
 
 function actionVerb(command: string): string {
   switch (command) {
-    case "exec": return "executer";
-    case "start": return "demarrer";
-    case "done": return "terminer";
-    case "orchestrate": return "orchestrer";
-    case "autopipeline": return "lancer en autopipeline";
-    default: return "traiter";
+    case "exec":
+      return "executer";
+    case "start":
+      return "demarrer";
+    case "done":
+      return "terminer";
+    case "orchestrate":
+      return "orchestrer";
+    case "autopipeline":
+      return "lancer en autopipeline";
+    default:
+      return "traiter";
   }
 }
 

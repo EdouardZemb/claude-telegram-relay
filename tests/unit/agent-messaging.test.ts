@@ -2,23 +2,23 @@
  * Tests for agent-messaging.ts — S38 FR-002..FR-006
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  sendAgentMessage,
-  getAgentMessages,
-  getPendingQuestions,
-  resolveQuestion,
-  canRequestClarification,
-  markClarificationUsed,
-  clearClarificationTracker,
-  checkPendingClarifications,
-  detectConflicts,
-  getMediatingAgent,
-  buildInterAgentContext,
-  getMessageFlowSummary,
-  formatMessageFlow,
-  jaccardSimilarity,
   type AgentInterMessage,
+  buildInterAgentContext,
+  canRequestClarification,
+  checkPendingClarifications,
+  clearClarificationTracker,
+  detectConflicts,
+  formatMessageFlow,
+  getAgentMessages,
+  getMediatingAgent,
+  getMessageFlowSummary,
+  getPendingQuestions,
+  jaccardSimilarity,
+  markClarificationUsed,
+  resolveQuestion,
+  sendAgentMessage,
 } from "../../src/agent-messaging.ts";
 import type { WorkingMemory } from "../../src/blackboard.ts";
 import { createMockSupabase } from "../fixtures/mock-supabase.ts";
@@ -35,8 +35,13 @@ describe("agent-messaging", () => {
       session_id: sid,
       version,
       sections: {
-        spec: null, plan: null, tasks: null, implementation: null,
-        verification: null, working_memory: null, messages,
+        spec: null,
+        plan: null,
+        tasks: null,
+        implementation: null,
+        verification: null,
+        working_memory: null,
+        messages,
       },
       history: [],
       status: "active",
@@ -73,8 +78,12 @@ describe("agent-messaging", () => {
 
     it("returns error when supabase is null", async () => {
       const msg: AgentInterMessage = {
-        id: "msg-1", from: "dev", to: "qa", type: "observation",
-        content: "test", timestamp: new Date().toISOString(),
+        id: "msg-1",
+        from: "dev",
+        to: "qa",
+        type: "observation",
+        content: "test",
+        timestamp: new Date().toISOString(),
       };
 
       const result = await sendAgentMessage(null, sessionId, msg, 1);
@@ -85,12 +94,20 @@ describe("agent-messaging", () => {
     // AC-011: Messages sorted by timestamp
     it("preserves message order by timestamp", async () => {
       const msg1: AgentInterMessage = {
-        id: "msg-1", from: "analyst", to: "*", type: "observation",
-        content: "First", timestamp: "2026-03-17T01:00:00Z",
+        id: "msg-1",
+        from: "analyst",
+        to: "*",
+        type: "observation",
+        content: "First",
+        timestamp: "2026-03-17T01:00:00Z",
       };
       const msg2: AgentInterMessage = {
-        id: "msg-2", from: "pm", to: "*", type: "observation",
-        content: "Second", timestamp: "2026-03-17T02:00:00Z",
+        id: "msg-2",
+        from: "pm",
+        to: "*",
+        type: "observation",
+        content: "Second",
+        timestamp: "2026-03-17T02:00:00Z",
       };
 
       await sendAgentMessage(supabase, sessionId, msg1, 1);
@@ -108,8 +125,12 @@ describe("agent-messaging", () => {
 
       for (const role of roles) {
         const msg: AgentInterMessage = {
-          id: `msg-${role}`, from: role, to: "*", type: "observation",
-          content: `From ${role}`, timestamp: new Date().toISOString(),
+          id: `msg-${role}`,
+          from: role,
+          to: "*",
+          type: "observation",
+          content: `From ${role}`,
+          timestamp: new Date().toISOString(),
         };
         const result = await sendAgentMessage(supabase, sessionId, msg, version);
         expect(result.success).toBe(true);
@@ -128,10 +149,38 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: [
-          { id: "m1", from: "architect", to: "dev", type: "directive", content: "Use X", timestamp: "2026-03-17T01:00:00Z" },
-          { id: "m2", from: "pm", to: "*", type: "observation", content: "Priority change", timestamp: "2026-03-17T02:00:00Z" },
-          { id: "m3", from: "qa", to: "dev", type: "warning", content: "Missing tests", timestamp: "2026-03-17T03:00:00Z" },
-          { id: "m4", from: "dev", to: "architect", type: "question", content: "What about Y?", timestamp: "2026-03-17T04:00:00Z" },
+          {
+            id: "m1",
+            from: "architect",
+            to: "dev",
+            type: "directive",
+            content: "Use X",
+            timestamp: "2026-03-17T01:00:00Z",
+          },
+          {
+            id: "m2",
+            from: "pm",
+            to: "*",
+            type: "observation",
+            content: "Priority change",
+            timestamp: "2026-03-17T02:00:00Z",
+          },
+          {
+            id: "m3",
+            from: "qa",
+            to: "dev",
+            type: "warning",
+            content: "Missing tests",
+            timestamp: "2026-03-17T03:00:00Z",
+          },
+          {
+            id: "m4",
+            from: "dev",
+            to: "architect",
+            type: "question",
+            content: "What about Y?",
+            timestamp: "2026-03-17T04:00:00Z",
+          },
         ],
       };
     });
@@ -166,9 +215,32 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: [
-          { id: "q1", from: "dev", to: "architect", type: "question", content: "How?", timestamp: "2026-03-17T01:00:00Z", resolved: false },
-          { id: "q2", from: "qa", to: "architect", type: "question", content: "Why?", timestamp: "2026-03-17T02:00:00Z", resolved: true },
-          { id: "d1", from: "pm", to: "architect", type: "directive", content: "Do X", timestamp: "2026-03-17T03:00:00Z" },
+          {
+            id: "q1",
+            from: "dev",
+            to: "architect",
+            type: "question",
+            content: "How?",
+            timestamp: "2026-03-17T01:00:00Z",
+            resolved: false,
+          },
+          {
+            id: "q2",
+            from: "qa",
+            to: "architect",
+            type: "question",
+            content: "Why?",
+            timestamp: "2026-03-17T02:00:00Z",
+            resolved: true,
+          },
+          {
+            id: "d1",
+            from: "pm",
+            to: "architect",
+            type: "directive",
+            content: "Do X",
+            timestamp: "2026-03-17T03:00:00Z",
+          },
         ],
       };
 
@@ -181,7 +253,15 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: [
-          { id: "q1", from: "dev", to: "architect", type: "question", content: "How?", timestamp: "2026-03-17T01:00:00Z", resolved: true },
+          {
+            id: "q1",
+            from: "dev",
+            to: "architect",
+            type: "question",
+            content: "How?",
+            timestamp: "2026-03-17T01:00:00Z",
+            resolved: true,
+          },
         ],
       };
 
@@ -196,12 +276,23 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: [
-          { id: "q1", from: "dev", to: "architect", type: "question", content: "How to handle errors?", timestamp: "2026-03-17T01:00:00Z", resolved: false },
+          {
+            id: "q1",
+            from: "dev",
+            to: "architect",
+            type: "question",
+            content: "How to handle errors?",
+            timestamp: "2026-03-17T01:00:00Z",
+            resolved: false,
+          },
         ],
       };
 
       const response: AgentInterMessage = {
-        id: "r1", from: "architect", to: "dev", type: "directive",
+        id: "r1",
+        from: "architect",
+        to: "dev",
+        type: "directive",
         content: "Use try-catch with custom error types",
         timestamp: "2026-03-17T02:00:00Z",
       };
@@ -218,8 +309,12 @@ describe("agent-messaging", () => {
 
     it("returns error when no messages section exists", async () => {
       const response: AgentInterMessage = {
-        id: "r1", from: "architect", to: "dev", type: "directive",
-        content: "answer", timestamp: new Date().toISOString(),
+        id: "r1",
+        from: "architect",
+        to: "dev",
+        type: "directive",
+        content: "answer",
+        timestamp: new Date().toISOString(),
       };
       const result = await resolveQuestion(supabase, sessionId, "q-nonexistent", response, 1);
       expect(result.success).toBe(false);
@@ -256,9 +351,33 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: [
-          { id: "q1", from: "dev", to: "architect", type: "question", content: "Q1", timestamp: "2026-03-17T01:00:00Z", resolved: false },
-          { id: "q2", from: "qa", to: "pm", type: "question", content: "Q2", timestamp: "2026-03-17T02:00:00Z", resolved: true },
-          { id: "q3", from: "dev", to: "pm", type: "question", content: "Q3", timestamp: "2026-03-17T03:00:00Z", resolved: false },
+          {
+            id: "q1",
+            from: "dev",
+            to: "architect",
+            type: "question",
+            content: "Q1",
+            timestamp: "2026-03-17T01:00:00Z",
+            resolved: false,
+          },
+          {
+            id: "q2",
+            from: "qa",
+            to: "pm",
+            type: "question",
+            content: "Q2",
+            timestamp: "2026-03-17T02:00:00Z",
+            resolved: true,
+          },
+          {
+            id: "q3",
+            from: "dev",
+            to: "pm",
+            type: "question",
+            content: "Q3",
+            timestamp: "2026-03-17T03:00:00Z",
+            resolved: false,
+          },
         ],
       };
 
@@ -279,8 +398,16 @@ describe("agent-messaging", () => {
     it("detects conflicts when decisions overlap with different reasoning", () => {
       const wm: WorkingMemory = {
         decisions: [
-          { agent: "architect", decision: "use REST API for data access layer", reasoning: "REST is simpler and well-understood" },
-          { agent: "dev", decision: "use REST API for data access layer", reasoning: "GraphQL would be more efficient for this use case" },
+          {
+            agent: "architect",
+            decision: "use REST API for data access layer",
+            reasoning: "REST is simpler and well-understood",
+          },
+          {
+            agent: "dev",
+            decision: "use REST API for data access layer",
+            reasoning: "GraphQL would be more efficient for this use case",
+          },
         ],
         discoveries: [],
         blockers: [],
@@ -315,9 +442,7 @@ describe("agent-messaging", () => {
 
     it("returns empty for single decision", () => {
       const wm: WorkingMemory = {
-        decisions: [
-          { agent: "dev", decision: "test", reasoning: "reason" },
-        ],
+        decisions: [{ agent: "dev", decision: "test", reasoning: "reason" }],
         discoveries: [],
         blockers: [],
         context_updates: [],
@@ -330,7 +455,11 @@ describe("agent-messaging", () => {
     it("ignores decisions with low lexical overlap", () => {
       const wm: WorkingMemory = {
         decisions: [
-          { agent: "architect", decision: "use microservice architecture", reasoning: "scalability" },
+          {
+            agent: "architect",
+            decision: "use microservice architecture",
+            reasoning: "scalability",
+          },
           { agent: "dev", decision: "implement caching layer", reasoning: "performance" },
         ],
         discoveries: [],
@@ -390,8 +519,22 @@ describe("agent-messaging", () => {
     // AC-023: buildStructuredChainContext includes inter-agent messages
     it("builds context string from messages", () => {
       const messages: AgentInterMessage[] = [
-        { id: "m1", from: "architect", to: "dev", type: "directive", content: "Use Observer pattern", timestamp: "2026-03-17T01:00:00Z" },
-        { id: "m2", from: "qa", to: "dev", type: "warning", content: "Missing error handling", timestamp: "2026-03-17T02:00:00Z" },
+        {
+          id: "m1",
+          from: "architect",
+          to: "dev",
+          type: "directive",
+          content: "Use Observer pattern",
+          timestamp: "2026-03-17T01:00:00Z",
+        },
+        {
+          id: "m2",
+          from: "qa",
+          to: "dev",
+          type: "warning",
+          content: "Missing error handling",
+          timestamp: "2026-03-17T02:00:00Z",
+        },
       ];
 
       const ctx = buildInterAgentContext(messages, "dev");
@@ -403,9 +546,30 @@ describe("agent-messaging", () => {
     // AC-024: Messages filtered by recipient
     it("filters messages for the target role", () => {
       const messages: AgentInterMessage[] = [
-        { id: "m1", from: "architect", to: "dev", type: "directive", content: "For dev", timestamp: "2026-03-17T01:00:00Z" },
-        { id: "m2", from: "pm", to: "qa", type: "directive", content: "For qa", timestamp: "2026-03-17T02:00:00Z" },
-        { id: "m3", from: "dev", to: "*", type: "observation", content: "Broadcast", timestamp: "2026-03-17T03:00:00Z" },
+        {
+          id: "m1",
+          from: "architect",
+          to: "dev",
+          type: "directive",
+          content: "For dev",
+          timestamp: "2026-03-17T01:00:00Z",
+        },
+        {
+          id: "m2",
+          from: "pm",
+          to: "qa",
+          type: "directive",
+          content: "For qa",
+          timestamp: "2026-03-17T02:00:00Z",
+        },
+        {
+          id: "m3",
+          from: "dev",
+          to: "*",
+          type: "observation",
+          content: "Broadcast",
+          timestamp: "2026-03-17T03:00:00Z",
+        },
       ];
 
       const ctx = buildInterAgentContext(messages, "dev");
@@ -416,7 +580,14 @@ describe("agent-messaging", () => {
 
     it("returns empty for no relevant messages", () => {
       const messages: AgentInterMessage[] = [
-        { id: "m1", from: "architect", to: "qa", type: "directive", content: "For qa only", timestamp: "2026-03-17T01:00:00Z" },
+        {
+          id: "m1",
+          from: "architect",
+          to: "qa",
+          type: "directive",
+          content: "For qa only",
+          timestamp: "2026-03-17T01:00:00Z",
+        },
       ];
 
       const ctx = buildInterAgentContext(messages, "dev");
@@ -426,9 +597,30 @@ describe("agent-messaging", () => {
     // Priorities: escalation > warning > question > directive > observation
     it("prioritizes warnings and escalations first", () => {
       const messages: AgentInterMessage[] = [
-        { id: "m1", from: "pm", to: "dev", type: "observation", content: "Observation text", timestamp: "2026-03-17T01:00:00Z" },
-        { id: "m2", from: "qa", to: "dev", type: "warning", content: "Warning text", timestamp: "2026-03-17T02:00:00Z" },
-        { id: "m3", from: "architect", to: "dev", type: "escalation", content: "Escalation text", timestamp: "2026-03-17T03:00:00Z" },
+        {
+          id: "m1",
+          from: "pm",
+          to: "dev",
+          type: "observation",
+          content: "Observation text",
+          timestamp: "2026-03-17T01:00:00Z",
+        },
+        {
+          id: "m2",
+          from: "qa",
+          to: "dev",
+          type: "warning",
+          content: "Warning text",
+          timestamp: "2026-03-17T02:00:00Z",
+        },
+        {
+          id: "m3",
+          from: "architect",
+          to: "dev",
+          type: "escalation",
+          content: "Escalation text",
+          timestamp: "2026-03-17T03:00:00Z",
+        },
       ];
 
       const ctx = buildInterAgentContext(messages, "dev");
@@ -445,7 +637,10 @@ describe("agent-messaging", () => {
       const messages: AgentInterMessage[] = [];
       for (let i = 0; i < 50; i++) {
         messages.push({
-          id: `m${i}`, from: "pm", to: "dev", type: "observation",
+          id: `m${i}`,
+          from: "pm",
+          to: "dev",
+          type: "observation",
           content: "A".repeat(500), // 500 chars each
           timestamp: `2026-03-17T${String(i).padStart(2, "0")}:00:00Z`,
         });
@@ -459,7 +654,15 @@ describe("agent-messaging", () => {
     // AC-025: Questions resolved with response
     it("marks resolved questions", () => {
       const messages: AgentInterMessage[] = [
-        { id: "q1", from: "dev", to: "architect", type: "question", content: "How?", timestamp: "2026-03-17T01:00:00Z", resolved: true },
+        {
+          id: "q1",
+          from: "dev",
+          to: "architect",
+          type: "question",
+          content: "How?",
+          timestamp: "2026-03-17T01:00:00Z",
+          resolved: true,
+        },
       ];
 
       const ctx = buildInterAgentContext(messages, "architect");
@@ -472,10 +675,40 @@ describe("agent-messaging", () => {
   describe("getMessageFlowSummary", () => {
     it("summarizes message flow", () => {
       const messages: AgentInterMessage[] = [
-        { id: "m1", from: "architect", to: "dev", type: "directive", content: "X", timestamp: "2026-03-17T01:00:00Z" },
-        { id: "m2", from: "dev", to: "architect", type: "question", content: "Y?", timestamp: "2026-03-17T02:00:00Z", resolved: false },
-        { id: "m3", from: "qa", to: "*", type: "warning", content: "Z", timestamp: "2026-03-17T03:00:00Z" },
-        { id: "m4", from: "dev", to: "pm", type: "question", content: "W?", timestamp: "2026-03-17T04:00:00Z", resolved: true },
+        {
+          id: "m1",
+          from: "architect",
+          to: "dev",
+          type: "directive",
+          content: "X",
+          timestamp: "2026-03-17T01:00:00Z",
+        },
+        {
+          id: "m2",
+          from: "dev",
+          to: "architect",
+          type: "question",
+          content: "Y?",
+          timestamp: "2026-03-17T02:00:00Z",
+          resolved: false,
+        },
+        {
+          id: "m3",
+          from: "qa",
+          to: "*",
+          type: "warning",
+          content: "Z",
+          timestamp: "2026-03-17T03:00:00Z",
+        },
+        {
+          id: "m4",
+          from: "dev",
+          to: "pm",
+          type: "question",
+          content: "W?",
+          timestamp: "2026-03-17T04:00:00Z",
+          resolved: true,
+        },
       ];
 
       const summary = getMessageFlowSummary(messages);
@@ -548,14 +781,22 @@ describe("agent-messaging", () => {
       const bb = supabase._store.blackboard.find((r: any) => r.session_id === sessionId);
       bb.sections.messages = {
         messages: Array.from({ length: 20 }, (_, i) => ({
-          id: `m${i}`, from: "dev", to: "*", type: "observation",
-          content: `Msg ${i}`, timestamp: `2026-03-17T${String(i).padStart(2, "0")}:00:00Z`,
+          id: `m${i}`,
+          from: "dev",
+          to: "*",
+          type: "observation",
+          content: `Msg ${i}`,
+          timestamp: `2026-03-17T${String(i).padStart(2, "0")}:00:00Z`,
         })),
       };
 
       const msg: AgentInterMessage = {
-        id: "m-new", from: "qa", to: "*", type: "observation",
-        content: "New message", timestamp: "2026-03-17T21:00:00Z",
+        id: "m-new",
+        from: "qa",
+        to: "*",
+        type: "observation",
+        content: "New message",
+        timestamp: "2026-03-17T21:00:00Z",
       };
 
       await sendAgentMessage(supabase, sessionId, msg, 1);
@@ -572,9 +813,20 @@ describe("agent-messaging", () => {
       const emptyBb = createMockSupabase();
       if (!emptyBb._store.blackboard) emptyBb._store.blackboard = [];
       emptyBb._store.blackboard.push({
-        id: "bb-2", session_id: "empty-session", version: 1,
-        sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null, messages: null },
-        history: [], status: "active",
+        id: "bb-2",
+        session_id: "empty-session",
+        version: 1,
+        sections: {
+          spec: null,
+          plan: null,
+          tasks: null,
+          implementation: null,
+          verification: null,
+          working_memory: null,
+          messages: null,
+        },
+        history: [],
+        status: "active",
       });
 
       const messages = await getAgentMessages(emptyBb, "empty-session", "dev");

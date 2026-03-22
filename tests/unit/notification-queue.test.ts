@@ -4,9 +4,7 @@
  * Tests for notification queue, batching, digest formatting, inline buttons.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { writeFile, unlink, readFile } from "fs/promises";
-import { join } from "path";
+import { beforeEach, describe, expect, it } from "bun:test";
 
 // Set env before imports
 process.env.TELEGRAM_GROUP_ID = "123456";
@@ -20,10 +18,7 @@ import type { NotificationItem } from "../../src/notification-queue";
 const {
   enqueue,
   flush,
-  flushMorningDigest,
   getQueue,
-  loadQueue,
-  startQueue,
   stopQueue,
   getQueueSize,
   formatDigest,
@@ -75,7 +70,7 @@ describe("formatDigest", () => {
 
   it("collapses after 10 items", () => {
     const items = Array.from({ length: 15 }, (_, i) =>
-      makeItem({ type: "task", message: `Task ${i}` })
+      makeItem({ type: "task", message: `Task ${i}` }),
     );
     const result = formatDigest(items);
     expect(result).toContain("+ 5 autres notifications");

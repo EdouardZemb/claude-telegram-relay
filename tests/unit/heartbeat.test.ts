@@ -2,16 +2,16 @@
  * Heartbeat — Unit Tests
  */
 
-import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import {
   buildHeartbeatPrompt,
   createDefaultState,
-  HEARTBEAT_SYSTEM_PROMPT,
   HEARTBEAT_DECISION_SCHEMA,
-  type HeartbeatState,
+  HEARTBEAT_SYSTEM_PROMPT,
   type HeartbeatDelta,
+  type HeartbeatState,
 } from "../../src/heartbeat-prompt";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── heartbeat-prompt.ts ─────────────────────────────────────
 
@@ -121,7 +121,7 @@ describe("HeartbeatPrompt", () => {
     it("should include active cooldowns", () => {
       const state: HeartbeatState = {
         ...baseState,
-        cooldowns: { "ci_failure": Date.now() + 600000 },
+        cooldowns: { ci_failure: Date.now() + 600000 },
       };
       const prompt = buildHeartbeatPrompt(state, baseDelta);
       expect(prompt).toContain("COOLDOWNS ACTIFS");
@@ -131,7 +131,7 @@ describe("HeartbeatPrompt", () => {
     it("should filter expired cooldowns", () => {
       const state: HeartbeatState = {
         ...baseState,
-        cooldowns: { "old_topic": Date.now() - 1000 },
+        cooldowns: { old_topic: Date.now() - 1000 },
       };
       const prompt = buildHeartbeatPrompt(state, baseDelta);
       expect(prompt).not.toContain("COOLDOWNS ACTIFS");
@@ -228,9 +228,7 @@ describe("Heartbeat Triage", () => {
       const { getStaleTasks } = await import("../../src/heartbeat");
       const threeDaysAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
       const supabase = createMockSupabase({
-        tasks: [
-          { id: "t1", title: "Stale Task", status: "in_progress", updated_at: threeDaysAgo },
-        ],
+        tasks: [{ id: "t1", title: "Stale Task", status: "in_progress", updated_at: threeDaysAgo }],
       });
 
       const result = await getStaleTasks(supabase);
@@ -242,9 +240,7 @@ describe("Heartbeat Triage", () => {
       const { getStaleTasks } = await import("../../src/heartbeat");
       const recentDate = new Date().toISOString();
       const supabase = createMockSupabase({
-        tasks: [
-          { id: "t1", title: "Recent Task", status: "in_progress", updated_at: recentDate },
-        ],
+        tasks: [{ id: "t1", title: "Recent Task", status: "in_progress", updated_at: recentDate }],
       });
 
       const result = await getStaleTasks(supabase);
@@ -291,12 +287,14 @@ describe("Heartbeat Actions", () => {
 
       const decision = {
         observations: ["Test manquant detecte"],
-        actions: [{
-          type: "task_create" as const,
-          taskTitle: "Ajouter tests heartbeat",
-          taskDescription: "Tests unitaires pour le module heartbeat",
-          taskPriority: 3,
-        }],
+        actions: [
+          {
+            type: "task_create" as const,
+            taskTitle: "Ajouter tests heartbeat",
+            taskDescription: "Tests unitaires pour le module heartbeat",
+            taskPriority: 3,
+          },
+        ],
         reasoning: "Test coverage",
       };
 
@@ -321,11 +319,13 @@ describe("Heartbeat Actions", () => {
 
       const decision = {
         observations: ["CI toujours cassee"],
-        actions: [{
-          type: "notify" as const,
-          message: "CI cassee sur master",
-          priority: "high" as const,
-        }],
+        actions: [
+          {
+            type: "notify" as const,
+            message: "CI cassee sur master",
+            priority: "high" as const,
+          },
+        ],
         reasoning: "CI failure",
       };
 
@@ -340,11 +340,13 @@ describe("Heartbeat Actions", () => {
 
       const decision = {
         observations: ["Sprint en retard"],
-        actions: [{
-          type: "notify" as const,
-          message: "Sprint S44 en retard: seulement 3/10 taches",
-          priority: "medium" as const,
-        }],
+        actions: [
+          {
+            type: "notify" as const,
+            message: "Sprint S44 en retard: seulement 3/10 taches",
+            priority: "medium" as const,
+          },
+        ],
         reasoning: "Sprint delay",
       };
 
@@ -363,8 +365,17 @@ describe("Heartbeat Actions", () => {
       const decision = {
         observations: ["CI cassee", "Tache bloquee"],
         actions: [
-          { type: "notify" as const, message: "CI cassee sur feature/x", priority: "high" as const },
-          { type: "task_create" as const, taskTitle: "Fix CI", taskDescription: "Corriger le build", taskPriority: 2 },
+          {
+            type: "notify" as const,
+            message: "CI cassee sur feature/x",
+            priority: "high" as const,
+          },
+          {
+            type: "task_create" as const,
+            taskTitle: "Fix CI",
+            taskDescription: "Corriger le build",
+            taskPriority: 2,
+          },
         ],
         reasoning: "Multiple issues",
       };

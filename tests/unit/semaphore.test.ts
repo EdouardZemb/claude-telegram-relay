@@ -4,7 +4,7 @@
  * Tests for counting semaphore: concurrency limits, FIFO ordering, mutex mode.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { Semaphore } from "../../src/semaphore";
 
 describe("Semaphore", () => {
@@ -13,7 +13,7 @@ describe("Semaphore", () => {
     let running = 0;
     let maxRunning = 0;
 
-    const tasks = Array.from({ length: 5 }, (_, i) => async () => {
+    const tasks = Array.from({ length: 5 }, (_, _i) => async () => {
       await sem.acquire();
       running++;
       maxRunning = Math.max(maxRunning, running);
@@ -36,9 +36,18 @@ describe("Semaphore", () => {
     await sem.acquire();
 
     // Queue 3 waiters
-    const p1 = sem.acquire().then(() => { order.push(1); sem.release(); });
-    const p2 = sem.acquire().then(() => { order.push(2); sem.release(); });
-    const p3 = sem.acquire().then(() => { order.push(3); sem.release(); });
+    const p1 = sem.acquire().then(() => {
+      order.push(1);
+      sem.release();
+    });
+    const p2 = sem.acquire().then(() => {
+      order.push(2);
+      sem.release();
+    });
+    const p3 = sem.acquire().then(() => {
+      order.push(3);
+      sem.release();
+    });
 
     expect(sem.waiting).toBe(3);
 

@@ -5,31 +5,31 @@
  * WorkflowTracker, metrics collection, retro generation, and formatting.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // We need to set PROJECT_DIR before importing workflow so it loads the test config
 process.env.PROJECT_DIR = import.meta.dir + "/../fixtures/..";
 
 import {
-  loadWorkflowConfig,
-  reloadWorkflowConfig,
+  acceptRetroActions,
+  canTransition,
+  collectSprintMetrics,
+  formatMetrics,
+  formatMetricsComparison,
+  formatRetro,
+  generateRetroData,
+  getAllSprintMetrics,
+  getCheckpointConfig,
+  getRetro,
+  getSprintMetrics,
   getStep,
   getStepIds,
   getValidTransitions,
-  canTransition,
-  getCheckpointConfig,
-  WorkflowTracker,
-  collectSprintMetrics,
-  getSprintMetrics,
-  getAllSprintMetrics,
-  formatMetrics,
-  formatMetricsComparison,
-  generateRetroData,
+  loadWorkflowConfig,
+  reloadWorkflowConfig,
   saveRetro,
-  acceptRetroActions,
-  getRetro,
-  formatRetro,
+  WorkflowTracker,
 } from "../../src/workflow";
 
 // ── Config Loading ───────────────────────────────────────────
@@ -246,13 +246,45 @@ describe("Sprint Metrics", () => {
 
     supabase = createMockSupabase({
       tasks: [
-        { id: "t1", status: "done", sprint: "S11", created_at: yesterday.toISOString(), completed_at: now.toISOString() },
-        { id: "t2", status: "done", sprint: "S11", created_at: yesterday.toISOString(), completed_at: now.toISOString() },
-        { id: "t3", status: "in_progress", sprint: "S11", created_at: yesterday.toISOString(), completed_at: null },
+        {
+          id: "t1",
+          status: "done",
+          sprint: "S11",
+          created_at: yesterday.toISOString(),
+          completed_at: now.toISOString(),
+        },
+        {
+          id: "t2",
+          status: "done",
+          sprint: "S11",
+          created_at: yesterday.toISOString(),
+          completed_at: now.toISOString(),
+        },
+        {
+          id: "t3",
+          status: "in_progress",
+          sprint: "S11",
+          created_at: yesterday.toISOString(),
+          completed_at: null,
+        },
       ],
       workflow_logs: [
-        { task_id: "t1", sprint_id: "S11", step_from: "execution", step_to: "review", had_rework: false, checkpoint_result: "pass" },
-        { task_id: "t2", sprint_id: "S11", step_from: "execution", step_to: "review", had_rework: true, checkpoint_result: "corrected" },
+        {
+          task_id: "t1",
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          had_rework: false,
+          checkpoint_result: "pass",
+        },
+        {
+          task_id: "t2",
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          had_rework: true,
+          checkpoint_result: "corrected",
+        },
       ],
       sprint_metrics: [],
     });
@@ -367,14 +399,40 @@ describe("Retrospective", () => {
 
   beforeEach(() => {
     supabase = createMockSupabase({
-      sprint_metrics: [
-        { sprint_id: "S11", tasks_planned: 13, tasks_completed: 12 },
-      ],
+      sprint_metrics: [{ sprint_id: "S11", tasks_planned: 13, tasks_completed: 12 }],
       workflow_logs: [
-        { sprint_id: "S11", step_from: "request", step_to: "decomposition", duration_seconds: 120, had_rework: false, checkpoint_result: "skipped" },
-        { sprint_id: "S11", step_from: "decomposition", step_to: "execution", duration_seconds: 300, had_rework: false, checkpoint_result: "pass" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "pass" },
-        { sprint_id: "S11", step_from: "review", step_to: "execution", duration_seconds: 60, had_rework: true, checkpoint_result: "fail" },
+        {
+          sprint_id: "S11",
+          step_from: "request",
+          step_to: "decomposition",
+          duration_seconds: 120,
+          had_rework: false,
+          checkpoint_result: "skipped",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "decomposition",
+          step_to: "execution",
+          duration_seconds: 300,
+          had_rework: false,
+          checkpoint_result: "pass",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "pass",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "review",
+          step_to: "execution",
+          duration_seconds: 60,
+          had_rework: true,
+          checkpoint_result: "fail",
+        },
       ],
       tasks: [
         { id: "t1", sprint: "S11", status: "done", title: "Task 1" },
@@ -395,15 +453,15 @@ describe("Retrospective", () => {
   it("generateRetroData computes avg step durations", async () => {
     const retro = await generateRetroData(supabase, "S11");
     expect(retro!.workflowStats.avgStepDuration).toBeDefined();
-    expect(retro!.workflowStats.avgStepDuration["request"]).toBe(120);
-    expect(retro!.workflowStats.avgStepDuration["execution"]).toBe(3600);
+    expect(retro!.workflowStats.avgStepDuration.request).toBe(120);
+    expect(retro!.workflowStats.avgStepDuration.execution).toBe(3600);
   });
 
   it("generateRetroData counts checkpoint results", async () => {
     const retro = await generateRetroData(supabase, "S11");
-    expect(retro!.workflowStats.checkpointResults["pass"]).toBe(2);
-    expect(retro!.workflowStats.checkpointResults["fail"]).toBe(1);
-    expect(retro!.workflowStats.checkpointResults["skipped"]).toBe(1);
+    expect(retro!.workflowStats.checkpointResults.pass).toBe(2);
+    expect(retro!.workflowStats.checkpointResults.fail).toBe(1);
+    expect(retro!.workflowStats.checkpointResults.skipped).toBe(1);
   });
 
   it("saveRetro stores retro data", async () => {

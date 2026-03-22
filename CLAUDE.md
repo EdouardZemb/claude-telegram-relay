@@ -43,6 +43,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
 | `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
+| `logger.ts` | Structured logger: JSON (production) / colored (dev), correlation IDs, log level filtering |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, V-criteria conformance check |
 | `adversarial-challenge.ts` | P2 adversarial challenge (Devil's Advocate) + E1 impact analysis before dev |
 | `spec-lite.ts` | P1 lightweight spec phase: proto-spec with V-criteria and impacted files |
@@ -175,14 +176,14 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    61 TypeScript modules (core logic)
+src/                    62 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2816 tests (unit + integration + E2E)
+tests/                  3212 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -214,10 +215,10 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2816 tests, all must pass before merge)
+- Tests: `bun test` (3212 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
-- Error handling: always destructure `{ error }` from Supabase operations and log with `console.error`
+- Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
 - Telegram responses: plain text only, no markdown formatting
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments

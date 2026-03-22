@@ -16,7 +16,13 @@ import { loadWorkflowConfig } from "./workflow";
 // ── Types ────────────────────────────────────────────────────
 
 export interface DetectedPattern {
-  type: "slow_step" | "useless_checkpoint" | "critical_checkpoint" | "high_rework" | "improving" | "degrading";
+  type:
+    | "slow_step"
+    | "useless_checkpoint"
+    | "critical_checkpoint"
+    | "high_rework"
+    | "improving"
+    | "degrading";
   severity: "info" | "warning" | "critical";
   description: string;
   data: Record<string, unknown>;
@@ -44,7 +50,7 @@ export interface PatternAnalysis {
  */
 export async function analyzePatterns(
   supabase: SupabaseClient,
-  options?: { minSprints?: number }
+  options?: { minSprints?: number },
 ): Promise<PatternAnalysis> {
   const patterns: DetectedPattern[] = [];
   const minSprints = options?.minSprints ?? 2;
@@ -86,7 +92,12 @@ export async function analyzePatterns(
         type: "slow_step",
         severity: avg > 7200 ? "warning" : "info",
         description: `L'etape "${step}" prend en moyenne ${formatDuration(avg)} (mediane: ${formatDuration(median)})`,
-        data: { step, avg_seconds: Math.round(avg), median_seconds: Math.round(median), sample_count: durations.length },
+        data: {
+          step,
+          avg_seconds: Math.round(avg),
+          median_seconds: Math.round(median),
+          sample_count: durations.length,
+        },
       });
     }
   }
@@ -178,10 +189,7 @@ export async function analyzePatterns(
 
 // ── Suggestion Generator ─────────────────────────────────────
 
-function generateSuggestions(
-  patterns: DetectedPattern[],
-  retros: any[]
-): WorkflowSuggestion[] {
+function generateSuggestions(patterns: DetectedPattern[], retros: any[]): WorkflowSuggestion[] {
   const suggestions: WorkflowSuggestion[] = [];
   const config = loadWorkflowConfig();
 
@@ -254,9 +262,7 @@ function generateSuggestions(
 
   // Deduplicate suggestions that were already proposed in past retros
   const pastActions = new Set(
-    retros.flatMap((r: any) =>
-      (r.actions_accepted ?? []).map((a: any) => a.action)
-    )
+    retros.flatMap((r: any) => (r.actions_accepted ?? []).map((a: any) => a.action)),
   );
 
   return suggestions.filter((s) => !pastActions.has(s.action));
@@ -276,9 +282,15 @@ function computeStepDurations(logs: any[]): Record<string, number[]> {
 }
 
 function computeCheckpointStats(
-  logs: any[]
-): Record<string, { total: number; pass: number; fail: number; corrected: number; skipped: number }> {
-  const stats: Record<string, { total: number; pass: number; fail: number; corrected: number; skipped: number }> = {};
+  logs: any[],
+): Record<
+  string,
+  { total: number; pass: number; fail: number; corrected: number; skipped: number }
+> {
+  const stats: Record<
+    string,
+    { total: number; pass: number; fail: number; corrected: number; skipped: number }
+  > = {};
   for (const log of logs) {
     if (!log.checkpoint_result) continue;
     const step = log.step_from;
@@ -292,9 +304,7 @@ function computeCheckpointStats(
   return stats;
 }
 
-function computeSprintRework(
-  logs: any[]
-): Record<string, { total: number; reworkCount: number }> {
+function computeSprintRework(logs: any[]): Record<string, { total: number; reworkCount: number }> {
   const sprints: Record<string, { total: number; reworkCount: number }> = {};
   for (const log of logs) {
     if (!log.sprint_id) continue;
@@ -341,10 +351,7 @@ export function formatPatterns(analysis: PatternAnalysis): string {
     return `Analyse de patterns (${analysis.sprintCount} sprints)\n\nPas de patterns significatifs detectes. Continuez comme ca.`;
   }
 
-  const lines = [
-    `Analyse de patterns (${analysis.sprintCount} sprints)`,
-    "",
-  ];
+  const lines = [`Analyse de patterns (${analysis.sprintCount} sprints)`, ""];
 
   if (analysis.patterns.length > 0) {
     lines.push("Patterns detectes :");

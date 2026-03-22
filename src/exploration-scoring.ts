@@ -6,16 +6,11 @@
  * PRD: Phase Exploration dans le Workflow de Dev.
  */
 
-import type { Task } from "./tasks.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  getGraph,
-  findAffectedModules,
-  estimateComplexity,
-  type CodeGraph,
-} from "./code-graph.ts";
-import { findSimilarPastTasks } from "./memory.ts";
+import { type CodeGraph, estimateComplexity, findAffectedModules, getGraph } from "./code-graph.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { findSimilarPastTasks } from "./memory.ts";
+import type { Task } from "./tasks.ts";
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -28,16 +23,46 @@ const SKIP_PIPELINES = ["SOLO", "QUICK"];
 /** Keywords suggesting the task needs research/exploration */
 const EXPLORATION_KEYWORDS = [
   // English
-  "research", "investigate", "explore", "compare", "evaluate",
-  "benchmark", "study", "analyze", "alternative", "approach",
-  "architecture", "design pattern", "best practice", "trade-off",
-  "tradeoff", "proof of concept", "poc", "spike", "prototype",
-  "feasibility", "migration strategy", "technology choice",
+  "research",
+  "investigate",
+  "explore",
+  "compare",
+  "evaluate",
+  "benchmark",
+  "study",
+  "analyze",
+  "alternative",
+  "approach",
+  "architecture",
+  "design pattern",
+  "best practice",
+  "trade-off",
+  "tradeoff",
+  "proof of concept",
+  "poc",
+  "spike",
+  "prototype",
+  "feasibility",
+  "migration strategy",
+  "technology choice",
   // French
-  "recherche", "investiguer", "explorer", "comparer", "evaluer",
-  "etude", "analyser", "alternative", "approche", "patron",
-  "bonne pratique", "compromis", "preuve de concept", "faisabilite",
-  "strategie de migration", "choix technologique", "etat de l'art",
+  "recherche",
+  "investiguer",
+  "explorer",
+  "comparer",
+  "evaluer",
+  "etude",
+  "analyser",
+  "alternative",
+  "approche",
+  "patron",
+  "bonne pratique",
+  "compromis",
+  "preuve de concept",
+  "faisabilite",
+  "strategie de migration",
+  "choix technologique",
+  "etat de l'art",
   "state of the art",
 ];
 
@@ -237,7 +262,11 @@ export async function shouldExplore(
 
   // Auto-skip for simple pipelines
   if (options.pipeline && SKIP_PIPELINES.includes(options.pipeline)) {
-    return { explore: false, score: null, reason: `Pipeline ${options.pipeline} : exploration non necessaire` };
+    return {
+      explore: false,
+      score: null,
+      reason: `Pipeline ${options.pipeline} : exploration non necessaire`,
+    };
   }
 
   // Compute score

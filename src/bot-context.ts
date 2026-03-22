@@ -5,18 +5,19 @@
  * without globals or closures.
  */
 
-import { Bot, Context, InputFile } from "grammy";
-import { spawn } from "bun";
-import { writeFile, mkdir, readFile, unlink } from "fs/promises";
-import { join, dirname } from "path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { transcribe } from "./transcribe.ts";
-import { synthesize } from "./tts.ts";
+import { spawn } from "bun";
+import { readFile, writeFile } from "fs/promises";
+import { type Bot, type Context, InputFile } from "grammy";
+import { dirname, join } from "path";
+import type { DocumentSearchResult } from "./documents.ts";
+import { createLogger } from "./logger.ts";
+import { getIdea } from "./memory.ts";
 import { analyzeProfile } from "./profile-evolution.ts";
 import { getTopicConfig as getTopicConfigHelper, type TopicConfig } from "./topic-config.ts";
-import { getIdea } from "./memory.ts";
-import type { DocumentSearchResult } from "./documents.ts";
+import { synthesize } from "./tts.ts";
 
+const log = createLogger("bot-context");
 // ============================================================
 // CONFIG CONSTANTS
 // ============================================================
@@ -31,7 +32,8 @@ export const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", 
 export const TEMP_DIR = join(RELAY_DIR, "temp");
 export const UPLOADS_DIR = join(RELAY_DIR, "uploads");
 export const USER_NAME = process.env.USER_NAME || "";
-export const USER_TIMEZONE = process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
+export const USER_TIMEZONE =
+  process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const RELAY_START_TIME = Date.now();
 
 const HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000;
@@ -60,7 +62,7 @@ export interface Reminder {
   threadId?: number;
 }
 
-export { type TopicConfig };
+export type { TopicConfig };
 
 /**
  * Shared dependency object passed to all Composer factory functions.
@@ -146,10 +148,7 @@ const claudeQueue: Array<{
 // Forward declaration — set by createBotContext when bot is known
 let _botRef: Bot | null = null;
 
-async function callClaudeInternal(
-  prompt: string,
-  options?: ClaudeCallOptions,
-): Promise<string> {
+async function callClaudeInternal(prompt: string, options?: ClaudeCallOptions): Promise<string> {
   const args = [CLAUDE_PATH, "-p", prompt];
 
   if (options?.resume && session.sessionId) {
@@ -158,7 +157,7 @@ async function callClaudeInternal(
 
   args.push("--output-format", "text", "--dangerously-skip-permissions");
 
-  console.log(`Calling Claude: ${prompt.substring(0, 50)}...`);
+  log.info(`Calling Claude: ${prompt.substring(0, 50)}...`);
 
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   const startTime = Date.now();
@@ -176,7 +175,7 @@ async function callClaudeInternal(
           opts,
         );
       } catch (e) {
-        console.error("Heartbeat send error:", e);
+        log.error("Heartbeat send error", { error: String(e) });
       }
     }, HEARTBEAT_INTERVAL_MS);
   }
@@ -200,7 +199,7 @@ async function callClaudeInternal(
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-      console.error("Claude error:", stderr);
+      log.error("Claude error", { error: String(stderr) });
       return `Error: ${stderr || "Claude exited with code " + exitCode}`;
     }
 
@@ -213,7 +212,7 @@ async function callClaudeInternal(
 
     return output.trim();
   } catch (error) {
-    console.error("Spawn error:", error);
+    log.error("Spawn error", { error: String(error) });
     return `Error: Could not run Claude CLI`;
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -233,10 +232,7 @@ function processClaudeQueue(): void {
     });
 }
 
-async function callClaude(
-  prompt: string,
-  options?: ClaudeCallOptions,
-): Promise<string> {
+async function callClaude(prompt: string, options?: ClaudeCallOptions): Promise<string> {
   if (claudeBusy) {
     return new Promise<string>((resolve, reject) => {
       claudeQueue.push({ resolve, reject, prompt, options });
@@ -276,7 +272,7 @@ function recordError(messageId: number): boolean {
   const count = (errorCounts.get(messageId) || 0) + 1;
   errorCounts.set(messageId, count);
   if (count >= CIRCUIT_BREAKER_THRESHOLD) {
-    console.error(`Circuit breaker: skipping message ${messageId} after ${count} errors`);
+    log.error(`Circuit breaker: skipping message ${messageId} after ${count} errors`);
     errorCounts.delete(messageId);
     return true;
   }
@@ -339,7 +335,7 @@ async function saveMessage(
       metadata: metadata || {},
     });
   } catch (error) {
-    console.error("Supabase save error:", error);
+    log.error("Supabase save error", { error: String(error) });
   }
 }
 
@@ -347,7 +343,7 @@ async function saveMessage(
 // SESSION (loaded at module init)
 // ============================================================
 
-let session = await loadSession();
+const session = await loadSession();
 
 // ============================================================
 // TOPIC FORUM HELPERS
@@ -356,8 +352,10 @@ let session = await loadSession();
 const TOPIC_NAMES: Record<number, string> = {};
 
 function getThreadId(ctx: Context): number | undefined {
-  return (ctx.message as any)?.message_thread_id
-    || (ctx.callbackQuery?.message as any)?.message_thread_id;
+  return (
+    (ctx.message as any)?.message_thread_id ||
+    (ctx.callbackQuery?.message as any)?.message_thread_id
+  );
 }
 
 function threadOpts(ctx: Context): { message_thread_id?: number } {
@@ -421,7 +419,12 @@ async function getDynamicProfile(): Promise<string> {
       parts.push(`Pic d'activite: ${insights.activityPattern.peakHour}h`);
     }
     if (insights.taskPreferences.topTaskTypes.length > 0) {
-      parts.push(`Types de taches frequents: ${insights.taskPreferences.topTaskTypes.slice(0, 3).map((t: any) => t.type).join(", ")}`);
+      parts.push(
+        `Types de taches frequents: ${insights.taskPreferences.topTaskTypes
+          .slice(0, 3)
+          .map((t: any) => t.type)
+          .join(", ")}`,
+      );
     }
     if (insights.taskPreferences.avgTasksPerSprint > 0) {
       parts.push(`Moyenne: ${insights.taskPreferences.avgTasksPerSprint} taches/sprint`);
@@ -435,7 +438,8 @@ async function getDynamicProfile(): Promise<string> {
     if (insights.workflowPreferences.autonomyLevel) {
       parts.push(`Autonomie: ${insights.workflowPreferences.autonomyLevel}`);
     }
-    dynamicProfileCache = parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
+    dynamicProfileCache =
+      parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
     dynamicProfileLastRefresh = Date.now();
   } catch {
     // Silent fail
@@ -515,9 +519,13 @@ function buildPrompt(
   if (topicName) {
     const config = getTopicConfigHelper(topicName);
     if (config) {
-      parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic (${config.label}). ${config.systemPrompt}`);
+      parts.push(
+        `\nTOPIC CONTEXT: This message is in the "${topicName}" topic (${config.label}). ${config.systemPrompt}`,
+      );
     } else {
-      parts.push(`\nTOPIC CONTEXT: This message is in the "${topicName}" topic of a Telegram forum group. Stay focused on the topic's subject.`);
+      parts.push(
+        `\nTOPIC CONTEXT: This message is in the "${topicName}" topic of a Telegram forum group. Stay focused on the topic's subject.`,
+      );
     }
   }
 
@@ -526,7 +534,9 @@ function buildPrompt(
   if (memoryContext) parts.push(`\n${memoryContext}`);
   if (documentContext) {
     parts.push(`\n${documentContext}`);
-    parts.push("Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.");
+    parts.push(
+      "Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.",
+    );
   }
   if (relevantContext) parts.push(`\n${relevantContext}`);
 
@@ -656,7 +666,7 @@ async function sendVoiceResponse(ctx: Context, response: string): Promise<void> 
       return;
     }
   } catch (error) {
-    console.error("TTS error:", error);
+    log.error("TTS error", { error: String(error) });
   }
 
   await sendResponse(ctx, response);

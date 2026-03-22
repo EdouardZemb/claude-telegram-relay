@@ -5,19 +5,19 @@
  * backlog viewing, sprint summaries, and status transitions.
  */
 
-import { Composer, Context } from "grammy";
+import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
+import { enqueue } from "../notification-queue.ts";
+import { resolveProjectContext } from "../projects.ts";
 import {
   addTask,
-  getBacklog,
-  updateTaskStatus,
-  getSprintSummary,
-  getCurrentSprint,
   formatBacklog,
   formatSprintSummary,
+  getBacklog,
+  getCurrentSprint,
+  getSprintSummary,
+  updateTaskStatus,
 } from "../tasks.ts";
-import { resolveProjectContext } from "../projects.ts";
-import { enqueue } from "../notification-queue.ts";
 
 export default function tasksCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -25,7 +25,10 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
   // /task — create a new task
   composer.command("task", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "task");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -36,11 +39,20 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       return;
     }
     // Resolve project context
-    const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+    const currentProject = await resolveProjectContext(
+      bctx.supabase,
+      ctx.message?.message_thread_id,
+    );
     const projectSlug = currentProject?.slug || "telegram-relay";
-    const task = await addTask(bctx.supabase, input, { project: projectSlug, project_id: currentProject?.id });
+    const task = await addTask(bctx.supabase, input, {
+      project: projectSlug,
+      project_id: currentProject?.id,
+    });
     if (task) {
-      await ctx.reply(`Tache ajoutee: ${task.title}\nProjet: ${projectSlug}\nID: ${task.id.substring(0, 8)}`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Tache ajoutee: ${task.title}\nProjet: ${projectSlug}\nID: ${task.id.substring(0, 8)}`,
+        bctx.threadOpts(ctx),
+      );
     } else {
       await ctx.reply("Erreur lors de l'ajout de la tache.", bctx.threadOpts(ctx));
     }
@@ -49,7 +61,10 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
   // /backlog — view current backlog
   composer.command("backlog", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "backlog");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -61,8 +76,14 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       await bctx.sendResponse(ctx, formatBacklog(tasks));
     } else {
       // Auto-scope to current project
-      const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
-      const tasks = await getBacklog(bctx.supabase, currentProject ? { project_id: currentProject.id } : undefined);
+      const currentProject = await resolveProjectContext(
+        bctx.supabase,
+        ctx.message?.message_thread_id,
+      );
+      const tasks = await getBacklog(
+        bctx.supabase,
+        currentProject ? { project_id: currentProject.id } : undefined,
+      );
       const header = currentProject ? `Backlog — ${currentProject.name}\n\n` : "";
       await bctx.sendResponse(ctx, header + formatBacklog(tasks));
     }
@@ -71,7 +92,10 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
   // /sprint — view sprint status or assign tasks to a sprint
   composer.command("sprint", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "sprint");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -79,20 +103,30 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     const arg = ctx.match?.trim();
 
     // Resolve project context for scoping
-    const currentProject = await resolveProjectContext(bctx.supabase, ctx.message?.message_thread_id);
+    const currentProject = await resolveProjectContext(
+      bctx.supabase,
+      ctx.message?.message_thread_id,
+    );
     const projectFilter = currentProject ? { project_id: currentProject.id } : {};
 
     if (!arg) {
       // Show current sprint summary
-      const current = currentProject?.current_sprint || await getCurrentSprint(bctx.supabase);
+      const current = currentProject?.current_sprint || (await getCurrentSprint(bctx.supabase));
       if (!current) {
-        await ctx.reply("Aucun sprint actif. Utilise /sprint S01 pour en creer un.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          "Aucun sprint actif. Utilise /sprint S01 pour en creer un.",
+          bctx.threadOpts(ctx),
+        );
         return;
       }
       const summary = await getSprintSummary(bctx.supabase, current);
       const tasks = await getBacklog(bctx.supabase, { sprint: current, ...projectFilter });
       const header = currentProject ? `${currentProject.name} — ` : "";
-      const text = header + formatSprintSummary(current, summary) + "\n\n" + formatBacklog(tasks, `Taches ${current}`);
+      const text =
+        header +
+        formatSprintSummary(current, summary) +
+        "\n\n" +
+        formatBacklog(tasks, `Taches ${current}`);
       await bctx.sendResponse(ctx, text);
       return;
     }
@@ -101,14 +135,18 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     const summary = await getSprintSummary(bctx.supabase, arg);
     const tasks = await getBacklog(bctx.supabase, { sprint: arg, ...projectFilter });
     const header = currentProject ? `${currentProject.name} — ` : "";
-    const text = header + formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
+    const text =
+      header + formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
     await bctx.sendResponse(ctx, text);
   });
 
   // /done — mark a task as done by ID prefix
   composer.command("done", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "done");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -128,11 +166,17 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     const matches = (allDoneTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
 
     if (matches.length === 0) {
-      await ctx.reply(`Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Aucune tache trouvee avec l'ID commencant par "${idPrefix}".`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
     if (matches.length > 1) {
-      await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Plusieurs taches correspondent. Sois plus precis:\n${matches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -141,10 +185,11 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       await ctx.reply(`Fait: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
       const currentThread = bctx.getThreadId(ctx);
-      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
+      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0", 10);
       if (currentThread !== sprintThread) {
         const ts = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
           timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
         });
         await enqueue({
@@ -166,21 +211,32 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     const idPrefix = ctx.match?.trim();
     if (!idPrefix) return; // /start without args = normal bot start, do nothing
     const blocked = bctx.commandGuard(ctx, "start");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     const { data: allStartTasks } = await bctx.supabase
       .from("tasks")
       .select("id, title")
       .eq("status", "backlog");
 
-    const startMatches = (allStartTasks || []).filter((t: { id: string }) => t.id.startsWith(idPrefix));
+    const startMatches = (allStartTasks || []).filter((t: { id: string }) =>
+      t.id.startsWith(idPrefix),
+    );
 
     if (startMatches.length === 0) {
-      await ctx.reply(`Aucune tache backlog trouvee avec l'ID "${idPrefix}".`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Aucune tache backlog trouvee avec l'ID "${idPrefix}".`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
     if (startMatches.length > 1) {
-      await ctx.reply(`Plusieurs taches correspondent. Sois plus precis:\n${startMatches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Plusieurs taches correspondent. Sois plus precis:\n${startMatches.map((m: { id: string; title: string }) => `  ${m.id.substring(0, 8)} — ${m.title}`).join("\n")}`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -189,10 +245,11 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       await ctx.reply(`En cours: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
       const currentThread = bctx.getThreadId(ctx);
-      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0");
+      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0", 10);
       if (currentThread !== sprintThread) {
         const ts = new Date().toLocaleTimeString("fr-FR", {
-          hour: "2-digit", minute: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
           timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
         });
         await enqueue({

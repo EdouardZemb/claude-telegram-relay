@@ -5,19 +5,13 @@
  * orchestrator.ts to improve modularity.
  */
 
-import type { Task } from "./tasks.ts";
 import type { AgentRole } from "./orchestrator.ts";
+import type { Task } from "./tasks.ts";
 
 // ── Pipeline Constants ───────────────────────────────────────
 
 /** Default pipeline: full BMad flow */
-export const DEFAULT_PIPELINE: AgentRole[] = [
-  "analyst",
-  "pm",
-  "architect",
-  "dev",
-  "qa",
-];
+export const DEFAULT_PIPELINE: AgentRole[] = ["analyst", "pm", "architect", "dev", "qa"];
 
 /** Quick pipeline: skip analysis, go straight to dev */
 export const QUICK_PIPELINE: AgentRole[] = ["dev", "qa"];
@@ -38,33 +32,70 @@ export const RESEARCH_PIPELINE: AgentRole[] = ["explorer", "planner", "dev", "qa
 
 /** Keywords that indicate a bug fix task */
 const BUG_KEYWORDS = [
-  "fix", "bug", "crash", "erreur", "error", "broken", "casse",
-  "regression", "hotfix", "patch", "reparer", "corriger",
+  "fix",
+  "bug",
+  "crash",
+  "erreur",
+  "error",
+  "broken",
+  "casse",
+  "regression",
+  "hotfix",
+  "patch",
+  "reparer",
+  "corriger",
 ];
 
 /** Keywords that indicate a review/QA task */
 const REVIEW_KEYWORDS = [
-  "review", "audit", "revue", "test", "qa", "qualite", "refactor",
-  "nettoyage", "cleanup", "lint", "dette", "debt",
+  "review",
+  "audit",
+  "revue",
+  "test",
+  "qa",
+  "qualite",
+  "refactor",
+  "nettoyage",
+  "cleanup",
+  "lint",
+  "dette",
+  "debt",
 ];
 
 /** Keywords that indicate a documentation task */
-const DOC_KEYWORDS = [
-  "doc", "documentation", "readme", "changelog", "guide", "tutoriel",
-];
+const DOC_KEYWORDS = ["doc", "documentation", "readme", "changelog", "guide", "tutoriel"];
 
 /** Keywords that indicate a research task (S44 T9) */
 const RESEARCH_KEYWORDS = [
-  "research", "recherche", "investigate", "investiguer", "compare",
-  "comparer", "evaluate", "evaluer", "benchmark", "etude", "study",
-  "state of the art", "etat de l'art", "alternative", "comparatif",
-  "explore options", "explorer les options",
+  "research",
+  "recherche",
+  "investigate",
+  "investiguer",
+  "compare",
+  "comparer",
+  "evaluate",
+  "evaluer",
+  "benchmark",
+  "etude",
+  "study",
+  "state of the art",
+  "etat de l'art",
+  "alternative",
+  "comparatif",
+  "explore options",
+  "explorer les options",
 ];
 
 /** Keywords that indicate breaking changes — forces DEFAULT pipeline (R11) */
 export const BREAKING_KEYWORDS = [
-  "breaking", "migration schema", "deprecate", "api v2",
-  "schema change", "backward incompatible", "supprime", "retire",
+  "breaking",
+  "migration schema",
+  "deprecate",
+  "api v2",
+  "schema change",
+  "backward incompatible",
+  "supprime",
+  "retire",
 ];
 
 // ── Types ────────────────────────────────────────────────────
@@ -84,10 +115,7 @@ export type PipelineType = "DEFAULT" | "QUICK" | "REVIEW" | "DOC" | "SOLO" | "LI
  *   - Everything else → DEFAULT (analyst + pm + architect + dev + qa)
  *   - Explicit override via options.pipeline always wins
  */
-export function selectPipeline(
-  task: Task,
-  explicitPipeline?: AgentRole[]
-): AgentRole[] {
+export function selectPipeline(task: Task, explicitPipeline?: AgentRole[]): AgentRole[] {
   if (explicitPipeline) return explicitPipeline;
 
   const text = `${task.title} ${task.description || ""}`.toLowerCase();
@@ -221,7 +249,8 @@ export function explainPipelineChoice(pipeline: AgentRole[], difficultyScore?: n
   };
 
   const explanation = explanations[type] || "Pipeline personnalise.";
-  const scoreText = difficultyScore !== undefined ? ` (difficulte: ${Math.round(difficultyScore * 100)}%)` : "";
+  const scoreText =
+    difficultyScore !== undefined ? ` (difficulte: ${Math.round(difficultyScore * 100)}%)` : "";
 
   return `Pipeline : ${pipelineNames}${scoreText}\n${explanation}`;
 }
@@ -232,7 +261,7 @@ export function explainPipelineChoice(pipeline: AgentRole[], difficultyScore?: n
 function identifyPipelineType(pipeline: AgentRole[]): string {
   const key = pipeline.join(",");
   const mapping: Record<string, string> = {
-    "dev": "SOLO",
+    dev: "SOLO",
     "planner,dev,qa": "LIGHT",
     "dev,qa": "QUICK",
     "analyst,pm,architect,dev,qa": "DEFAULT",
@@ -264,10 +293,7 @@ export async function selectPipelineWithExploration(
   return selectAdaptivePipeline(task, undefined, supabase);
 }
 
-export async function classifyAdaptivePipeline(
-  task: Task,
-  supabase?: any,
-): Promise<PipelineType> {
+export async function classifyAdaptivePipeline(task: Task, supabase?: any): Promise<PipelineType> {
   const text = `${task.title} ${task.description || ""}`.toLowerCase();
 
   // Keyword rules still apply for research/review

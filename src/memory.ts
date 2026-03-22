@@ -23,12 +23,15 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
+
+const log = createLogger("memory");
 
 // ── Interfaces ───────────────────────────────────────────────
 
 /** Full memory table row */
-interface MemoryRecord {
+interface _MemoryRecord {
   id: string;
   created_at: string;
   updated_at: string;
@@ -45,7 +48,7 @@ interface MemoryRecord {
 }
 
 /** memory_links table row */
-interface MemoryLink {
+interface _MemoryLink {
   id: string;
   source_id: string;
   target_id: string;
@@ -64,7 +67,7 @@ interface MemorySearchResult {
 }
 
 /** Result count from archive_old_memories RPC (returns integer) */
-type MemoryArchiveResult = number;
+type _MemoryArchiveResult = number;
 
 /** A fact from get_facts RPC */
 interface FactRecord {
@@ -84,7 +87,7 @@ interface GoalRecord {
 }
 
 /** An idea from memory (alias for the Idea interface with all fields) */
-interface IdeaRecord {
+interface _IdeaRecord {
   id: string;
   content: string;
   type: string;
@@ -115,7 +118,7 @@ export interface MemoryChain {
 }
 
 /** Memory statistics summary */
-interface MemoryStats {
+interface _MemoryStats {
   totalFacts: number;
   totalGoals: number;
   totalIdeas: number;
@@ -146,13 +149,13 @@ export function calculateEffectiveImportance(
   createdAt: string | Date,
   lastAccessedAt: string | Date | null,
   accessCount: number = 0,
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
 ): number {
   const created = new Date(createdAt);
   const ageDays = (referenceDate.getTime() - created.getTime()) / (1000 * 60 * 60 * 24);
 
   // Exponential decay
-  const decayFactor = Math.pow(2, -ageDays / DECAY_HALF_LIFE_DAYS);
+  const decayFactor = 2 ** (-ageDays / DECAY_HALF_LIFE_DAYS);
   let effective = baseScore * decayFactor;
 
   // Access boost: +2 per access, capped at base score
@@ -162,7 +165,8 @@ export function calculateEffectiveImportance(
   // Recency boost: if accessed in last 7 days, small bonus
   if (lastAccessedAt) {
     const lastAccess = new Date(lastAccessedAt);
-    const daysSinceAccess = (referenceDate.getTime() - lastAccess.getTime()) / (1000 * 60 * 60 * 24);
+    const daysSinceAccess =
+      (referenceDate.getTime() - lastAccess.getTime()) / (1000 * 60 * 60 * 24);
     if (daysSinceAccess < 7) {
       effective += 5 * (1 - daysSinceAccess / 7);
     }
@@ -177,7 +181,7 @@ export function calculateEffectiveImportance(
  */
 export async function bumpMemoryAccess(
   supabase: SupabaseClient | null,
-  memoryIds: string[]
+  memoryIds: string[],
 ): Promise<void> {
   if (!supabase || memoryIds.length === 0) return;
 
@@ -185,9 +189,9 @@ export async function bumpMemoryAccess(
     const { error } = await supabase.rpc("bump_memory_access", {
       memory_ids: memoryIds,
     });
-    if (error) console.error("bump_memory_access error:", error);
+    if (error) log.error("bump_memory_access error", { error: String(error) });
   } catch (error) {
-    console.error("bump_memory_access error:", error);
+    log.error("bump_memory_access error", { error: String(error) });
   }
 }
 
@@ -210,7 +214,7 @@ export interface ThoughtClassification {
  */
 export async function processMemoryIntents(
   supabase: SupabaseClient | null,
-  response: string
+  response: string,
 ): Promise<string> {
   if (!supabase) return response;
 
@@ -230,21 +234,19 @@ export async function processMemoryIntents(
         type: "fact",
         content: match[1],
       });
-      if (error) console.error("memory insert (fact) error:", error);
+      if (error) log.error("memory insert (fact) error", { error: String(error) });
     }
     clean = clean.replace(match[0], "");
   }
 
   // [GOAL: text] or [GOAL: text | DEADLINE: date]
-  for (const match of response.matchAll(
-    /\[GOAL:\s*(.+?)(?:\s*\|\s*DEADLINE:\s*(.+?))?\]/gi
-  )) {
+  for (const match of response.matchAll(/\[GOAL:\s*(.+?)(?:\s*\|\s*DEADLINE:\s*(.+?))?\]/gi)) {
     const { error } = await supabase.from("memory").insert({
       type: "goal",
       content: match[1],
       deadline: match[2] || null,
     });
-    if (error) console.error("memory insert (goal) error:", error);
+    if (error) log.error("memory insert (goal) error", { error: String(error) });
     clean = clean.replace(match[0], "");
   }
 
@@ -253,7 +255,7 @@ export async function processMemoryIntents(
     // Semantic deduplication (S21-04)
     const duplicate = await findDuplicateIdea(supabase, match[1]);
     if (duplicate) {
-      console.log(`Idea deduplicated (similar to: "${duplicate}")`);
+      log.info(`Idea deduplicated (similar to: "${duplicate}")`);
       clean = clean.replace(match[0], "");
       continue;
     }
@@ -263,11 +265,12 @@ export async function processMemoryIntents(
       idea_status: "new",
       metadata: { source: "intent-tag" },
     });
-    if (error) console.error("memory insert (idea) error:", error);
+    if (error) log.error("memory insert (idea) error", { error: String(error) });
     else {
       const ideaPreview = match[1].length > 80 ? match[1].slice(0, 80) + "..." : match[1];
       const ts = new Date().toLocaleTimeString("fr-FR", {
-        hour: "2-digit", minute: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
         timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
       });
       await enqueue({
@@ -296,7 +299,7 @@ export async function processMemoryIntents(
           completed_at: new Date().toISOString(),
         })
         .eq("id", data[0].id);
-      if (error) console.error("memory update (complete goal) error:", error);
+      if (error) log.error("memory update (complete goal) error", { error: String(error) });
     }
     clean = clean.replace(match[0], "");
   }
@@ -309,9 +312,7 @@ export async function processMemoryIntents(
  * S23-03: Ranked by importance score (DB-side), limited to top N.
  * Bumps access stats for served memories.
  */
-export async function getMemoryContext(
-  supabase: SupabaseClient | null
-): Promise<string> {
+export async function getMemoryContext(supabase: SupabaseClient | null): Promise<string> {
   if (!supabase) return "";
 
   try {
@@ -337,7 +338,7 @@ export async function getMemoryContext(
       const factLines = topFacts.map((f) => {
         const links = linkedMap.get(f.id) || [];
         const linkLines = links.map(
-          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`,
         );
         return [`- ${f.content}`, ...linkLines].join("\n");
       });
@@ -347,12 +348,10 @@ export async function getMemoryContext(
 
     if (topGoals.length) {
       const goalLines = topGoals.map((g) => {
-        const deadline = g.deadline
-          ? ` (by ${new Date(g.deadline).toLocaleDateString()})`
-          : "";
+        const deadline = g.deadline ? ` (by ${new Date(g.deadline).toLocaleDateString()})` : "";
         const links = linkedMap.get(g.id) || [];
         const linkLines = links.map(
-          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`
+          (l: LinkedMemory) => `  -> ${l.link_type}: ${l.linked_content}`,
         );
         return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
       });
@@ -367,7 +366,7 @@ export async function getMemoryContext(
 
     return parts.join("\n\n");
   } catch (error) {
-    console.error("Memory context error:", error);
+    log.error("Memory context error", { error: String(error) });
     return "";
   }
 }
@@ -377,7 +376,7 @@ export async function getMemoryContext(
  */
 export async function getRecentMessages(
   supabase: SupabaseClient | null,
-  limit: number = 20
+  limit: number = 20,
 ): Promise<string> {
   if (!supabase) return "";
 
@@ -397,7 +396,7 @@ export async function getRecentMessages(
 
     return "RECENT CONVERSATION:\n" + messages;
   } catch (error) {
-    console.error("Recent messages error:", error);
+    log.error("Recent messages error", { error: String(error) });
     return "";
   }
 }
@@ -408,7 +407,7 @@ export async function getRecentMessages(
  */
 export async function getRelevantContext(
   supabase: SupabaseClient | null,
-  query: string
+  query: string,
 ): Promise<string> {
   if (!supabase) return "";
 
@@ -421,9 +420,7 @@ export async function getRelevantContext(
 
     return (
       "RELEVANT PAST MESSAGES:\n" +
-      data
-        .map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`)
-        .join("\n")
+      data.map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`).join("\n")
     );
   } catch {
     // Search not available yet (Edge Functions not deployed) — that's fine
@@ -439,7 +436,7 @@ export async function getRelevantContext(
 export async function classifyMessage(
   supabase: SupabaseClient | null,
   content: string,
-  role: string = "user"
+  role: string = "user",
 ): Promise<ThoughtClassification | null> {
   if (!supabase || !content) return null;
 
@@ -478,7 +475,7 @@ function resolveMemoryType(classification: ThoughtClassification): "idea" | "pre
 export async function autoRemember(
   supabase: SupabaseClient | null,
   content: string,
-  classification: ThoughtClassification
+  classification: ThoughtClassification,
 ): Promise<void> {
   if (!supabase || !classification.is_memorable) return;
 
@@ -490,7 +487,7 @@ export async function autoRemember(
     if (memoryType !== "idea") {
       const actionability = classification.actionability_score ?? 7; // EC-003: default 7
       if (actionability < ACTIONABILITY_THRESHOLD) {
-        console.log(`Memory filtered by actionability (score: ${actionability}): "${memoryContent}"`);
+        log.info(`Memory filtered by actionability (score: ${actionability}): "${memoryContent}"`);
         return;
       }
     }
@@ -499,7 +496,7 @@ export async function autoRemember(
     if (memoryType === "idea") {
       const duplicate = await findDuplicateIdea(supabase, memoryContent);
       if (duplicate) {
-        console.log(`Idea deduplicated (similar to: "${duplicate}")`);
+        log.info(`Idea deduplicated (similar to: "${duplicate}")`);
         return;
       }
     }
@@ -512,7 +509,12 @@ export async function autoRemember(
         return;
       }
       if (resolution.action === "update" || resolution.action === "merge") {
-        await updateMemoryWithRevision(supabase, resolution.existingId, memoryContent, resolution.action);
+        await updateMemoryWithRevision(
+          supabase,
+          resolution.existingId,
+          memoryContent,
+          resolution.action,
+        );
         await autoCreateGoals(supabase, classification);
         return;
       }
@@ -540,11 +542,13 @@ export async function autoRemember(
       metadata,
     });
 
-    if (error) console.error("auto-remember insert error:", error);
+    if (error) log.error("auto-remember insert error", { error: String(error) });
     else if (memoryType === "idea") {
-      const autoPreview = memoryContent.length > 80 ? memoryContent.slice(0, 80) + "..." : memoryContent;
+      const autoPreview =
+        memoryContent.length > 80 ? memoryContent.slice(0, 80) + "..." : memoryContent;
       const ts = new Date().toLocaleTimeString("fr-FR", {
-        hour: "2-digit", minute: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
         timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
       });
       await enqueue({
@@ -557,7 +561,7 @@ export async function autoRemember(
     // Auto-create goals from action_items
     await autoCreateGoals(supabase, classification);
   } catch (error) {
-    console.error("auto-remember error:", error);
+    log.error("auto-remember error", { error: String(error) });
   }
 }
 
@@ -567,7 +571,7 @@ export async function autoRemember(
  */
 async function autoCreateGoals(
   supabase: SupabaseClient,
-  classification: ThoughtClassification
+  classification: ThoughtClassification,
 ): Promise<void> {
   if (!classification.action_items?.length) return;
 
@@ -577,7 +581,7 @@ async function autoCreateGoals(
       content: item,
       metadata: { auto_classified: true, source: "action-item", topics: classification.topics },
     });
-    if (goalError) console.error("auto-remember goal insert error:", goalError);
+    if (goalError) log.error("auto-remember goal insert error", { error: String(goalError) });
   }
 }
 
@@ -589,7 +593,7 @@ async function autoCreateGoals(
 export async function findDuplicateIdea(
   supabase: SupabaseClient | null,
   content: string,
-  threshold: number = 0.85
+  threshold: number = 0.85,
 ): Promise<string | null> {
   if (!supabase || !content) return null;
 
@@ -622,7 +626,7 @@ export async function linkMemories(
   supabase: SupabaseClient | null,
   memoryId: string,
   threshold?: number,
-  maxLinks?: number
+  maxLinks?: number,
 ): Promise<number> {
   if (!supabase || !memoryId) return 0;
 
@@ -634,13 +638,13 @@ export async function linkMemories(
     const { data, error } = await supabase.rpc("link_memory", params);
 
     if (error) {
-      console.error("link_memory error:", error);
+      log.error("link_memory error", { error: String(error) });
       return 0;
     }
 
     return data || 0;
   } catch (error) {
-    console.error("link_memory error:", error);
+    log.error("link_memory error", { error: String(error) });
     return 0;
   }
 }
@@ -666,7 +670,7 @@ const MAX_LINKS_PER_MEMORY_IN_CONTEXT = 3;
  */
 export async function getLinkedMemories(
   supabase: SupabaseClient | null,
-  memoryId: string
+  memoryId: string,
 ): Promise<LinkedMemory[]> {
   if (!supabase || !memoryId) return [];
 
@@ -676,13 +680,13 @@ export async function getLinkedMemories(
     });
 
     if (error) {
-      console.error("get_linked_memories error:", error);
+      log.error("get_linked_memories error", { error: String(error) });
       return [];
     }
 
     return (data || []) as LinkedMemory[];
   } catch (error) {
-    console.error("get_linked_memories error:", error);
+    log.error("get_linked_memories error", { error: String(error) });
     return [];
   }
 }
@@ -694,7 +698,7 @@ export async function getLinkedMemories(
  */
 export async function getLinkedMemoriesBatch(
   supabase: SupabaseClient | null,
-  memoryIds: string[]
+  memoryIds: string[],
 ): Promise<Map<string, LinkedMemory[]>> {
   if (!supabase || memoryIds.length === 0) return new Map();
 
@@ -704,7 +708,7 @@ export async function getLinkedMemoriesBatch(
     });
 
     if (error) {
-      console.error("get_linked_memories batch error:", error);
+      log.error("get_linked_memories batch error", { error: String(error) });
       return new Map();
     }
 
@@ -720,7 +724,7 @@ export async function getLinkedMemoriesBatch(
 
     return grouped;
   } catch (error) {
-    console.error("get_linked_memories batch error:", error);
+    log.error("get_linked_memories batch error", { error: String(error) });
     return new Map();
   }
 }
@@ -730,7 +734,7 @@ export async function getLinkedMemoriesBatch(
 /** Threshold for duplicate detection (skip insertion) */
 const DUPLICATE_THRESHOLD = 0.85;
 /** Threshold for contradiction detection (update existing) */
-const CONTRADICTION_THRESHOLD = 0.80;
+const CONTRADICTION_THRESHOLD = 0.8;
 /** Threshold for complement detection (merge into existing) */
 const COMPLEMENT_THRESHOLD = 0.75;
 /** Actionability threshold for auto-remember filtering (S36-06) */
@@ -751,7 +755,7 @@ interface SimilarMemory {
 export async function findSimilarFact(
   supabase: SupabaseClient | null,
   content: string,
-  threshold: number = COMPLEMENT_THRESHOLD
+  threshold: number = COMPLEMENT_THRESHOLD,
 ): Promise<SimilarMemory | null> {
   if (!supabase || !content) return null;
 
@@ -791,7 +795,7 @@ export type ConflictResolution =
  */
 export async function resolveMemoryConflict(
   supabase: SupabaseClient | null,
-  content: string
+  content: string,
 ): Promise<ConflictResolution> {
   if (!supabase) return { action: "insert" };
 
@@ -800,16 +804,20 @@ export async function resolveMemoryConflict(
 
   if (similar.similarity >= DUPLICATE_THRESHOLD) {
     await bumpMemoryAccess(supabase, [similar.id]);
-    console.log(`Memory deduplicated (sim: ${similar.similarity.toFixed(2)}): "${content}"`);
+    log.info(`Memory deduplicated (sim: ${similar.similarity.toFixed(2)}): "${content}"`);
     return { action: "skip", existingId: similar.id };
   }
 
   if (similar.similarity >= CONTRADICTION_THRESHOLD) {
-    console.log(`Memory contradiction detected (sim: ${similar.similarity.toFixed(2)}): "${content}" vs "${similar.content}"`);
+    log.info(
+      `Memory contradiction detected (sim: ${similar.similarity.toFixed(2)}): "${content}" vs "${similar.content}"`,
+    );
     return { action: "update", existingId: similar.id };
   }
 
-  console.log(`Memory complement detected (sim: ${similar.similarity.toFixed(2)}): "${content}" → enriching "${similar.content}"`);
+  log.info(
+    `Memory complement detected (sim: ${similar.similarity.toFixed(2)}): "${content}" → enriching "${similar.content}"`,
+  );
   return { action: "merge", existingId: similar.id };
 }
 
@@ -824,7 +832,7 @@ export async function updateMemoryWithRevision(
   supabase: SupabaseClient | null,
   existingId: string,
   newContent: string,
-  mode: "update" | "merge"
+  mode: "update" | "merge",
 ): Promise<boolean> {
   if (!supabase || !existingId) return false;
 
@@ -843,9 +851,7 @@ export async function updateMemoryWithRevision(
       : [];
     previousVersions.push(existing.content);
 
-    const finalContent = mode === "update"
-      ? newContent
-      : `${existing.content}. ${newContent}`;
+    const finalContent = mode === "update" ? newContent : `${existing.content}. ${newContent}`;
 
     const { error } = await supabase
       .from("memory")
@@ -862,13 +868,13 @@ export async function updateMemoryWithRevision(
       .eq("id", existingId);
 
     if (error) {
-      console.error("updateMemoryWithRevision error:", error);
+      log.error("updateMemoryWithRevision error", { error: String(error) });
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error("updateMemoryWithRevision error:", error);
+    log.error("updateMemoryWithRevision error", { error: String(error) });
     return false;
   }
 }
@@ -891,7 +897,7 @@ export interface WorkingMemoryData {
 export async function promoteWorkingMemory(
   supabase: SupabaseClient | null,
   workingMemory: WorkingMemoryData | null,
-  sessionId: string
+  sessionId: string,
 ): Promise<number> {
   if (!supabase || !workingMemory) return 0;
 
@@ -920,7 +926,10 @@ export async function promoteWorkingMemory(
 
       if (resolution.action === "update" || resolution.action === "merge") {
         const ok = await updateMemoryWithRevision(
-          supabase, resolution.existingId, item.content, resolution.action
+          supabase,
+          resolution.existingId,
+          item.content,
+          resolution.action,
         );
         if (ok) promoted++;
         continue;
@@ -941,7 +950,7 @@ export async function promoteWorkingMemory(
 
     return promoted;
   } catch (error) {
-    console.error("promoteWorkingMemory error:", error);
+    log.error("promoteWorkingMemory error", { error: String(error) });
     return 0;
   }
 }
@@ -956,7 +965,7 @@ export async function promoteWorkingMemory(
 export async function findContradiction(
   supabase: SupabaseClient | null,
   content: string,
-  threshold: number = 0.80
+  threshold: number = 0.8,
 ): Promise<{ id: string; content: string; similarity: number } | null> {
   if (!supabase || !content) return null;
 
@@ -970,7 +979,7 @@ export async function findContradiction(
     // Look for facts that are semantically very similar but might contradict
     // (same topic, different assertion)
     const match = (data as MemorySearchResult[]).find(
-      (m) => m.type === "fact" && m.similarity >= threshold
+      (m) => m.type === "fact" && m.similarity >= threshold,
     );
     return match ? { id: match.id, content: match.content, similarity: match.similarity } : null;
   } catch {
@@ -985,15 +994,15 @@ export async function findContradiction(
  */
 export async function detectAndLogContradiction(
   supabase: SupabaseClient | null,
-  newContent: string
+  newContent: string,
 ): Promise<{ existingContent: string; similarity: number } | null> {
   if (!supabase) return null;
 
   const contradiction = await findContradiction(supabase, newContent);
   if (!contradiction) return null;
 
-  console.log(
-    `Potential contradiction detected: "${newContent}" vs existing "${contradiction.content}" (similarity: ${contradiction.similarity})`
+  log.info(
+    `Potential contradiction detected: "${newContent}" vs existing "${contradiction.content}" (similarity: ${contradiction.similarity})`,
   );
 
   return {
@@ -1018,7 +1027,7 @@ export interface Idea {
  */
 export async function listIdeas(
   supabase: SupabaseClient | null,
-  statusFilter: string[] = ["new", "reviewed"]
+  statusFilter: string[] = ["new", "reviewed"],
 ): Promise<Idea[]> {
   if (!supabase) return [];
 
@@ -1032,13 +1041,13 @@ export async function listIdeas(
       .limit(50);
 
     if (error) {
-      console.error("list ideas error:", error);
+      log.error("list ideas error", { error: String(error) });
       return [];
     }
 
     return (data || []) as Idea[];
   } catch (error) {
-    console.error("list ideas error:", error);
+    log.error("list ideas error", { error: String(error) });
     return [];
   }
 }
@@ -1046,10 +1055,7 @@ export async function listIdeas(
 /**
  * Get a single idea by ID.
  */
-export async function getIdea(
-  supabase: SupabaseClient | null,
-  id: string
-): Promise<Idea | null> {
+export async function getIdea(supabase: SupabaseClient | null, id: string): Promise<Idea | null> {
   if (!supabase || !id) return null;
 
   try {
@@ -1070,10 +1076,7 @@ export async function getIdea(
 /**
  * Update idea status to "reviewed".
  */
-export async function reviewIdea(
-  supabase: SupabaseClient | null,
-  id: string
-): Promise<boolean> {
+export async function reviewIdea(supabase: SupabaseClient | null, id: string): Promise<boolean> {
   if (!supabase || !id) return false;
 
   try {
@@ -1084,7 +1087,7 @@ export async function reviewIdea(
       .eq("type", "idea");
 
     if (error) {
-      console.error("review idea error:", error);
+      log.error("review idea error", { error: String(error) });
       return false;
     }
     return true;
@@ -1099,7 +1102,7 @@ export async function reviewIdea(
  */
 export async function promoteIdea(
   supabase: SupabaseClient | null,
-  id: string
+  id: string,
 ): Promise<string | null> {
   if (!supabase || !id) return null;
 
@@ -1113,7 +1116,7 @@ export async function promoteIdea(
       .single();
 
     if (error) {
-      console.error("promote idea error:", error);
+      log.error("promote idea error", { error: String(error) });
       return null;
     }
     return data?.content || null;
@@ -1125,10 +1128,7 @@ export async function promoteIdea(
 /**
  * Archive an idea (soft-delete).
  */
-export async function archiveIdea(
-  supabase: SupabaseClient | null,
-  id: string
-): Promise<boolean> {
+export async function archiveIdea(supabase: SupabaseClient | null, id: string): Promise<boolean> {
   if (!supabase || !id) return false;
 
   try {
@@ -1139,7 +1139,7 @@ export async function archiveIdea(
       .eq("type", "idea");
 
     if (error) {
-      console.error("archive idea error:", error);
+      log.error("archive idea error", { error: String(error) });
       return false;
     }
     return true;
@@ -1172,7 +1172,7 @@ export function formatIdeasList(ideas: Idea[]): string {
  */
 export async function archiveOldMemories(
   supabase: SupabaseClient | null,
-  daysThreshold: number = 90
+  daysThreshold: number = 90,
 ): Promise<number> {
   if (!supabase) return 0;
 
@@ -1182,13 +1182,13 @@ export async function archiveOldMemories(
     });
 
     if (error) {
-      console.error("archive memories error:", error);
+      log.error("archive memories error", { error: String(error) });
       return 0;
     }
 
     return data || 0;
   } catch (error) {
-    console.error("archive memories error:", error);
+    log.error("archive memories error", { error: String(error) });
     return 0;
   }
 }
@@ -1225,7 +1225,30 @@ export function classifyLinkContent(sourceContent: string, targetContent: string
   ];
 
   // Extract meaningful words (3+ chars, exclude common stop words)
-  const stopWords = new Set(["est", "les", "des", "une", "par", "sur", "dans", "pour", "avec", "que", "qui", "the", "and", "for", "are", "was", "has", "its", "this", "that", "with", "from"]);
+  const stopWords = new Set([
+    "est",
+    "les",
+    "des",
+    "une",
+    "par",
+    "sur",
+    "dans",
+    "pour",
+    "avec",
+    "que",
+    "qui",
+    "the",
+    "and",
+    "for",
+    "are",
+    "was",
+    "has",
+    "its",
+    "this",
+    "that",
+    "with",
+    "from",
+  ]);
   const srcWords = new Set(srcLower.split(/\W+/).filter((w) => w.length >= 3 && !stopWords.has(w)));
   const tgtWords = new Set(tgtLower.split(/\W+/).filter((w) => w.length >= 3 && !stopWords.has(w)));
   const overlap = [...srcWords].filter((w) => tgtWords.has(w));
@@ -1276,7 +1299,7 @@ const MAX_CHAIN_NODES = 50;
 export async function getMemoryChain(
   supabase: SupabaseClient | null,
   memoryId: string,
-  maxDepth: number = 3
+  maxDepth: number = 3,
 ): Promise<MemoryChainNode[]> {
   if (!supabase || !memoryId) return [];
 
@@ -1346,7 +1369,7 @@ export async function getMemoryChain(
 
     return Array.from(visited.values());
   } catch (error) {
-    console.error("getMemoryChain error:", error);
+    log.error("getMemoryChain error", { error: String(error) });
     return [];
   }
 }
@@ -1361,7 +1384,7 @@ export async function getMemoryChain(
 export async function clusterMemories(
   supabase: SupabaseClient | null,
   maxFacts: number = 50,
-  maxClusters: number = 10
+  maxClusters: number = 10,
 ): Promise<MemoryCluster[]> {
   if (!supabase) return [];
 
@@ -1428,9 +1451,11 @@ export async function clusterMemories(
 
       // Only include clusters with 2+ members
       if (component.length >= 2) {
-        const memories = component
-          .map((id) => nodeMap.get(id))
-          .filter(Boolean) as Array<{ id: string; content: string; type: string }>;
+        const memories = component.map((id) => nodeMap.get(id)).filter(Boolean) as Array<{
+          id: string;
+          content: string;
+          type: string;
+        }>;
 
         clusters.push({
           id: clusterId++,
@@ -1443,7 +1468,7 @@ export async function clusterMemories(
 
     return clusters.sort((a, b) => b.size - a.size).slice(0, maxClusters);
   } catch (error) {
-    console.error("clusterMemories error:", error);
+    log.error("clusterMemories error", { error: String(error) });
     return [];
   }
 }
@@ -1479,7 +1504,7 @@ export function formatClusters(clusters: MemoryCluster[]): string {
  */
 export async function buildMemoryChains(
   supabase: SupabaseClient | null,
-  role: string
+  role: string,
 ): Promise<string> {
   if (!supabase) return "";
 
@@ -1495,10 +1520,7 @@ export async function buildMemoryChains(
     if (facts.length === 0 && goals.length === 0) return "";
 
     // Fetch links for all memories
-    const allIds = [
-      ...facts.map((f) => f.id),
-      ...goals.map((g) => g.id),
-    ].filter(Boolean);
+    const allIds = [...facts.map((f) => f.id), ...goals.map((g) => g.id)].filter(Boolean);
 
     const linkedMap = await getLinkedMemoriesBatch(supabase, allIds);
     const parts: string[] = [];
@@ -1512,7 +1534,7 @@ export async function buildMemoryChains(
             facts
               .slice(0, 10)
               .map((f) => `- ${f.content}`)
-              .join("\n")
+              .join("\n"),
         );
         servedIds.push(...facts.slice(0, 10).map((f) => f.id));
       }
@@ -1522,7 +1544,7 @@ export async function buildMemoryChains(
             goals
               .slice(0, 5)
               .map((g) => `- ${g.content}`)
-              .join("\n")
+              .join("\n"),
         );
         servedIds.push(...goals.slice(0, 5).map((g) => g.id));
       }
@@ -1565,7 +1587,7 @@ export async function buildMemoryChains(
           if (links.length > 0) {
             const linkLines = links.map(
               (l: LinkedMemory) =>
-                `  [${classifyLinkContent(g.content, l.linked_content)}] ${l.linked_content}`
+                `  [${classifyLinkContent(g.content, l.linked_content)}] ${l.linked_content}`,
             );
             return [`- ${g.content}${deadline}`, ...linkLines].join("\n");
           }
@@ -1582,7 +1604,7 @@ export async function buildMemoryChains(
 
     return parts.join("\n\n");
   } catch (error) {
-    console.error("buildMemoryChains error:", error);
+    log.error("buildMemoryChains error", { error: String(error) });
     return "";
   }
 }
@@ -1607,7 +1629,7 @@ export interface SimilarTask {
 export async function findSimilarPastTasks(
   supabase: SupabaseClient | null,
   taskTitle: string,
-  limit: number = 5
+  limit: number = 5,
 ): Promise<SimilarTask[]> {
   if (!supabase || !taskTitle) return [];
 
@@ -1634,16 +1656,25 @@ export async function findSimilarPastTasks(
 
     if (error || !data?.length) return [];
 
-    return data.map((t: { id: string; title: string; estimated_hours: number | null; actual_hours: number | null; sprint: string | null; tags: string[] | null }) => ({
-      id: t.id,
-      title: t.title,
-      estimatedHours: t.estimated_hours,
-      actualHours: t.actual_hours,
-      sprint: t.sprint,
-      tags: t.tags || [],
-    }));
+    return data.map(
+      (t: {
+        id: string;
+        title: string;
+        estimated_hours: number | null;
+        actual_hours: number | null;
+        sprint: string | null;
+        tags: string[] | null;
+      }) => ({
+        id: t.id,
+        title: t.title,
+        estimatedHours: t.estimated_hours,
+        actualHours: t.actual_hours,
+        sprint: t.sprint,
+        tags: t.tags || [],
+      }),
+    );
   } catch (error) {
-    console.error("findSimilarPastTasks error:", error);
+    log.error("findSimilarPastTasks error", { error: String(error) });
     return [];
   }
 }

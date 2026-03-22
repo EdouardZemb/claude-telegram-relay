@@ -15,7 +15,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("gates");
 export interface GateResult {
   passed: boolean;
   gate: string;
@@ -32,7 +34,7 @@ export interface GateResult {
  */
 export async function checkGate1_PRD(
   supabase: SupabaseClient,
-  task: { project: string; sprint: string | null; title: string }
+  task: { project: string; sprint: string | null; title: string },
 ): Promise<GateResult> {
   // Check for any approved PRD in the task's project
   const { data: prds } = await supabase
@@ -92,7 +94,7 @@ export async function checkGate1_PRD(
  */
 export async function checkGate2_Architecture(
   supabase: SupabaseClient,
-  task: { id: string; title: string; description: string | null }
+  task: { id: string; title: string; description: string | null },
 ): Promise<GateResult> {
   // Fetch full task data to check BMad artefacts
   const { data: fullTask } = await supabase
@@ -101,8 +103,10 @@ export async function checkGate2_Architecture(
     .eq("id", task.id)
     .single();
 
-  const hasAcceptanceCriteria = fullTask?.acceptance_criteria && fullTask.acceptance_criteria.trim().length > 0;
-  const hasArchitectureRef = fullTask?.architecture_ref && fullTask.architecture_ref.trim().length > 0;
+  const hasAcceptanceCriteria =
+    fullTask?.acceptance_criteria && fullTask.acceptance_criteria.trim().length > 0;
+  const hasArchitectureRef =
+    fullTask?.architecture_ref && fullTask.architecture_ref.trim().length > 0;
   const hasDevNotes = fullTask?.dev_notes && fullTask.dev_notes.trim().length > 0;
   const hasSubtasks = Array.isArray(fullTask?.subtasks) && fullTask.subtasks.length > 0;
 
@@ -140,7 +144,13 @@ export async function checkGate2_Architecture(
  */
 export async function checkAllGates(
   supabase: SupabaseClient,
-  task: { id: string; title: string; description: string | null; project: string; sprint: string | null }
+  task: {
+    id: string;
+    title: string;
+    description: string | null;
+    project: string;
+    sprint: string | null;
+  },
 ): Promise<GateResult | null> {
   const gate1 = await checkGate1_PRD(supabase, task);
   if (!gate1.passed) return gate1;
@@ -157,7 +167,11 @@ export async function checkAllGates(
  * Record that a user explicitly overrode a gate for a task.
  * Persisted in workflow_audit table so overrides survive restarts.
  */
-export async function overrideGate(supabase: SupabaseClient, taskId: string, gateName: string): Promise<void> {
+export async function overrideGate(
+  supabase: SupabaseClient,
+  taskId: string,
+  gateName: string,
+): Promise<void> {
   const { error } = await supabase.from("workflow_audit").insert({
     task_id: taskId,
     action: "gate_override",
@@ -166,14 +180,18 @@ export async function overrideGate(supabase: SupabaseClient, taskId: string, gat
     to_value: "overridden",
     reason: "User override via Telegram button",
   });
-  if (error) console.error("overrideGate error:", error);
+  if (error) log.error("overrideGate error", { error: String(error) });
 }
 
 /**
  * Check if a gate was overridden for a task.
  * Reads from workflow_audit table.
  */
-export async function isGateOverridden(supabase: SupabaseClient, taskId: string, gateName: string): Promise<boolean> {
+export async function isGateOverridden(
+  supabase: SupabaseClient,
+  taskId: string,
+  gateName: string,
+): Promise<boolean> {
   const { data } = await supabase
     .from("workflow_audit")
     .select("id")
@@ -196,7 +214,7 @@ export async function clearGateOverrides(supabase: SupabaseClient, taskId: strin
     .eq("task_id", taskId)
     .eq("action", "gate_override")
     .eq("to_value", "overridden");
-  if (error) console.error("clearGateOverrides error:", error);
+  if (error) log.error("clearGateOverrides error", { error: String(error) });
 }
 
 /**
@@ -205,7 +223,13 @@ export async function clearGateOverrides(supabase: SupabaseClient, taskId: strin
  */
 export async function checkGatesWithOverrides(
   supabase: SupabaseClient,
-  task: { id: string; title: string; description: string | null; project: string; sprint: string | null }
+  task: {
+    id: string;
+    title: string;
+    description: string | null;
+    project: string;
+    sprint: string | null;
+  },
 ): Promise<GateResult | null> {
   const gate1 = await checkGate1_PRD(supabase, task);
   if (!gate1.passed && !(await isGateOverridden(supabase, task.id, gate1.gate))) return gate1;

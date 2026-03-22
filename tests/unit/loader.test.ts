@@ -3,20 +3,17 @@
  *
  * Tests for auto-discovery, loading order, error boundaries,
  * and edge cases of the Composer loader.
+ *
+ * After migration to structured logger, loader.ts uses log.info("Loaded: file")
+ * instead of console.log("[loader] Loaded: file"). Tests intercept console.log
+ * (the underlying output) and parse the structured logger format.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { Bot, Composer, type Context } from "grammy";
+import { describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { Bot, Composer } from "grammy";
 import { join } from "path";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 
-// We need to test loadComposers which uses import.meta.dir internally.
-// Strategy: create a temp commands directory with controlled .ts files,
-// then mock the module so import.meta.dir points to our temp parent dir.
-// Alternative: test the actual loadComposers against the real src/commands.
-
-// Since loadComposers hardcodes import.meta.dir for the commands path,
-// we test it by importing and calling it with a real Bot and BotContext mock.
 import { loadComposers } from "../../src/loader.ts";
 
 // Minimal BotContext mock — factory functions just need to not crash
@@ -35,6 +32,39 @@ function makeBotContext(): any {
 function makeBot(): Bot {
   // Grammy Bot requires a token; "test:token" is enough for testing without polling
   return new Bot("test:token");
+}
+
+/**
+ * Extract loaded filenames from logger output.
+ * The structured logger outputs either:
+ * - Dev mode: "HH:mm:ss.SSS INFO  [loader]  Loaded: filename.ts"
+ * - JSON mode: {"module":"loader","message":"Loaded: filename.ts",...}
+ * We capture any output containing "Loaded: " and extract the filename.
+ */
+function extractLoadedFiles(calls: any[][]): string[] {
+  const files: string[] = [];
+  for (const args of calls) {
+    const msg = args.join(" ");
+    // Match "Loaded: <filename>" in any format
+    const match = msg.match(/Loaded:\s+(\S+\.ts)/);
+    if (match) {
+      files.push(match[1]);
+    }
+  }
+  return files;
+}
+
+/**
+ * Extract the summary line "N/M composers loaded" from logger output.
+ */
+function extractSummary(calls: any[][]): string | null {
+  for (const args of calls) {
+    const msg = args.join(" ");
+    if (msg.includes("composers loaded")) {
+      return msg;
+    }
+  }
+  return null;
 }
 
 describe("loader", () => {
@@ -79,16 +109,11 @@ describe("loader", () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      // Capture the order of console.log calls to verify load order
-      const loadOrder: string[] = [];
+      // Capture console.log output (the logger writes to console.log for info level)
+      const logCalls: any[][] = [];
       const origLog = console.log;
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.startsWith("[loader] Loaded:")) {
-          // Extract filename from "[loader] Loaded: filename.ts"
-          const filename = msg.replace("[loader] Loaded: ", "").trim();
-          loadOrder.push(filename);
-        }
+        logCalls.push(args);
       };
 
       try {
@@ -96,6 +121,8 @@ describe("loader", () => {
       } finally {
         console.log = origLog;
       }
+
+      const loadOrder = extractLoadedFiles(logCalls);
 
       // zz-messages.ts must be the last loaded file
       expect(loadOrder.length).toBeGreaterThan(0);
@@ -111,13 +138,10 @@ describe("loader", () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const loadOrder: string[] = [];
+      const logCalls: any[][] = [];
       const origLog = console.log;
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.startsWith("[loader] Loaded:")) {
-          loadOrder.push(msg.replace("[loader] Loaded: ", "").trim());
-        }
+        logCalls.push(args);
       };
 
       try {
@@ -126,6 +150,7 @@ describe("loader", () => {
         console.log = origLog;
       }
 
+      const loadOrder = extractLoadedFiles(logCalls);
       const helpIdx = loadOrder.indexOf("help.ts");
       const zzIdx = loadOrder.indexOf("zz-messages.ts");
 
@@ -174,10 +199,7 @@ describe("loader", () => {
       mkdirSync(commandsDir, { recursive: true });
 
       // Module with no default export
-      writeFileSync(
-        join(commandsDir, "bad-no-default.ts"),
-        'export const notDefault = "hello";\n',
-      );
+      writeFileSync(join(commandsDir, "bad-no-default.ts"), 'export const notDefault = "hello";\n');
 
       // Valid module with default Composer export
       writeFileSync(
@@ -188,24 +210,14 @@ export default c;
 `,
       );
 
-      const warnings: string[] = [];
       const origWarn = console.warn;
       const origLog = console.log;
       const origErr = console.error;
-      console.warn = (...args: any[]) => warnings.push(args.join(" "));
+      console.warn = () => {};
       console.log = () => {};
       console.error = () => {};
 
       try {
-        // We can't change import.meta.dir, so we test the warning behavior
-        // by verifying the function handles missing exports gracefully.
-        // The real loadComposers uses its own import.meta.dir.
-        // Instead, let's verify the warning would be produced for the real commands:
-        // If we try to import a module without default export, it logs a warning.
-        // This is already covered by the "returns count" test — skipped modules
-        // don't increment the count. We verify the logging behavior indirectly.
-
-        // Test with the real loader — it should handle all real modules
         const bot = makeBot();
         const ctx = makeBotContext();
         const count = await loadComposers(bot, ctx);
@@ -224,16 +236,13 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const errors: string[] = [];
       const origErr = console.error;
       const origLog = console.log;
-      console.error = (...args: any[]) => errors.push(args.join(" "));
+      console.error = () => {};
       console.log = () => {};
 
       try {
         const count = await loadComposers(bot, ctx);
-        // Even if some modules had issues, the loader continues
-        // With real modules, all should load successfully
         expect(count).toBeGreaterThan(0);
       } finally {
         console.error = origErr;
@@ -256,23 +265,21 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      // Suppress logs
+      // Suppress logs and capture summary
+      const logCalls: any[][] = [];
       const origLog = console.log;
-      const summary: string[] = [];
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.includes("composers loaded")) {
-          summary.push(msg);
-        }
+        logCalls.push(args);
       };
 
       try {
         const count = await loadComposers(bot, ctx);
 
-        // The summary log should show "N/M composers loaded"
-        expect(summary.length).toBe(1);
+        // The summary log should contain "N/M composers loaded"
+        const summary = extractSummary(logCalls);
+        expect(summary).toBeTruthy();
         // Parse "N/M" from summary
-        const match = summary[0].match(/(\d+)\/(\d+)/);
+        const match = summary!.match(/(\d+)\/(\d+)/);
         expect(match).toBeTruthy();
 
         const loaded = parseInt(match![1], 10);
@@ -289,16 +296,17 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
+      const logCalls: any[][] = [];
       const origLog = console.log;
-      let summaryMsg = "";
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.includes("composers loaded")) summaryMsg = msg;
+        logCalls.push(args);
       };
 
       try {
         const count = await loadComposers(bot, ctx);
-        const match = summaryMsg.match(/(\d+)\/(\d+)/);
+        const summary = extractSummary(logCalls);
+        expect(summary).toBeTruthy();
+        const match = summary!.match(/(\d+)\/(\d+)/);
         expect(match).toBeTruthy();
         // All real modules should load successfully
         expect(match![1]).toBe(match![2]);
@@ -333,17 +341,16 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const loadedFiles: string[] = [];
+      const logCalls: any[][] = [];
       const origLog = console.log;
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.startsWith("[loader] Loaded:")) {
-          loadedFiles.push(msg.replace("[loader] Loaded: ", "").trim());
-        }
+        logCalls.push(args);
       };
 
       try {
         await loadComposers(bot, ctx);
+
+        const loadedFiles = extractLoadedFiles(logCalls);
 
         // Should have logged loading of known files
         expect(loadedFiles).toContain("help.ts");
@@ -358,17 +365,16 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const loadedFiles: string[] = [];
+      const logCalls: any[][] = [];
       const origLog = console.log;
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.startsWith("[loader] Loaded:")) {
-          loadedFiles.push(msg.replace("[loader] Loaded: ", "").trim());
-        }
+        logCalls.push(args);
       };
 
       try {
         await loadComposers(bot, ctx);
+
+        const loadedFiles = extractLoadedFiles(logCalls);
 
         // All loaded files must end with .ts
         for (const file of loadedFiles) {
@@ -383,17 +389,16 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const loadedFiles: string[] = [];
+      const logCalls: any[][] = [];
       const origLog = console.log;
       console.log = (...args: any[]) => {
-        const msg = args.join(" ");
-        if (msg.startsWith("[loader] Loaded:")) {
-          loadedFiles.push(msg.replace("[loader] Loaded: ", "").trim());
-        }
+        logCalls.push(args);
       };
 
       try {
         await loadComposers(bot, ctx);
+
+        const loadedFiles = extractLoadedFiles(logCalls);
 
         const expected = [
           "documents.ts",
@@ -426,9 +431,6 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      // Real command modules use factory pattern: (ctx: BotContext) => Composer
-      // The loader handles both factory and direct Composer exports.
-      // We verify this works by checking all modules load without errors.
       const errors: string[] = [];
       const origErr = console.error;
       const origLog = console.log;
@@ -438,8 +440,8 @@ export default c;
       try {
         const count = await loadComposers(bot, ctx);
 
-        // No errors should have occurred
-        const loaderErrors = errors.filter((e) => e.startsWith("[loader]"));
+        // No loader errors should have occurred
+        const loaderErrors = errors.filter((e) => e.includes("Failed to load"));
         expect(loaderErrors.length).toBe(0);
         expect(count).toBeGreaterThan(0);
       } finally {
@@ -449,8 +451,6 @@ export default c;
     });
 
     it("passes BotContext to factory functions", async () => {
-      // Verify the bot context is passed through by ensuring all modules
-      // that need it (factories) load without error.
       const bot = makeBot();
       const ctx = makeBotContext();
 
@@ -464,9 +464,7 @@ export default c;
         const count = await loadComposers(bot, ctx);
 
         // If BotContext was not passed, factory functions would throw
-        const factoryErrors = errors.filter((e) =>
-          e.includes("factory did not return a Composer"),
-        );
+        const factoryErrors = errors.filter((e) => e.includes("factory did not return a Composer"));
         expect(factoryErrors.length).toBe(0);
         expect(count).toBeGreaterThanOrEqual(13);
       } finally {

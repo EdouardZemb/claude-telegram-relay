@@ -9,7 +9,7 @@
  * with real Supabase are in tests/integration/.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -57,7 +57,7 @@ describe("MCP Memory Server — S32 Project Tools", () => {
 
   it("callRpc uses POST with JSON body", () => {
     expect(serverCode).toContain("async function callRpc");
-    expect(serverCode).toContain("method: \"POST\"");
+    expect(serverCode).toContain('method: "POST"');
     expect(serverCode).toContain("JSON.stringify(params)");
   });
 
@@ -69,7 +69,9 @@ describe("MCP Memory Server — S32 Project Tools", () => {
   });
 
   it("write_blackboard validates section enum", () => {
-    expect(serverCode).toContain('z.enum(["spec", "plan", "tasks", "implementation", "verification"])');
+    expect(serverCode).toContain(
+      '.enum(["spec", "plan", "tasks", "implementation", "verification"])',
+    );
   });
 
   it("write_blackboard uses optimistic locking", () => {

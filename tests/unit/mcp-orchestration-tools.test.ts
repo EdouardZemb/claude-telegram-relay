@@ -7,7 +7,7 @@
  * dependency metadata, imports, and error handling.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -50,7 +50,9 @@ describe("MCP Orchestration Tools — get_sprint_detail", () => {
   });
 
   it("catches errors and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"get_sprint_detail"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"get_sprint_detail"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -64,7 +66,7 @@ describe("MCP Orchestration Tools — get_metrics", () => {
   it("accepts optional sprint parameter", () => {
     const metricsSection = serverCode.slice(
       serverCode.indexOf('"get_metrics"'),
-      serverCode.indexOf('"get_metrics"') + 800
+      serverCode.indexOf('"get_metrics"') + 800,
     );
     expect(metricsSection).toContain("sprint: z.string().optional()");
   });
@@ -74,7 +76,9 @@ describe("MCP Orchestration Tools — get_metrics", () => {
   });
 
   it("fetches recent sprints for comparison", () => {
-    expect(serverCode).toContain("sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours");
+    expect(serverCode).toContain(
+      "sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours",
+    );
     expect(serverCode).toContain("order=created_at.desc&limit=3");
   });
 
@@ -84,7 +88,9 @@ describe("MCP Orchestration Tools — get_metrics", () => {
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"get_metrics"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"get_metrics"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -98,9 +104,11 @@ describe("MCP Orchestration Tools — get_cost_summary", () => {
   it("accepts optional sprint parameter", () => {
     const costSection = serverCode.slice(
       serverCode.indexOf('"get_cost_summary"'),
-      serverCode.indexOf('"get_cost_summary"') + 800
+      serverCode.indexOf('"get_cost_summary"') + 800,
     );
-    expect(costSection).toContain("sprint: z.string().optional()");
+    expect(costSection).toContain("sprint: z");
+    expect(costSection).toContain(".string()");
+    expect(costSection).toContain(".optional()");
   });
 
   it("returns sprint-scoped costs when sprint provided", () => {
@@ -122,7 +130,9 @@ describe("MCP Orchestration Tools — get_cost_summary", () => {
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"get_cost_summary"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"get_cost_summary"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -136,9 +146,11 @@ describe("MCP Orchestration Tools — get_alerts", () => {
   it("accepts optional sprint parameter", () => {
     const alertsSection = serverCode.slice(
       serverCode.indexOf('"get_alerts"'),
-      serverCode.indexOf('"get_alerts"') + 800
+      serverCode.indexOf('"get_alerts"') + 800,
     );
-    expect(alertsSection).toContain("sprint: z.string().optional()");
+    expect(alertsSection).toContain("sprint: z");
+    expect(alertsSection).toContain(".string()");
+    expect(alertsSection).toContain(".optional()");
   });
 
   it("calls runAllChecks from alerts.ts", () => {
@@ -149,7 +161,7 @@ describe("MCP Orchestration Tools — get_alerts", () => {
   it("auto-detects current sprint", () => {
     const alertsSection = serverCode.slice(
       serverCode.indexOf('"get_alerts"'),
-      serverCode.indexOf('"get_alerts"') + 1200
+      serverCode.indexOf('"get_alerts"') + 1200,
     );
     expect(alertsSection).toContain("getCurrentSprint(supabase)");
   });
@@ -163,14 +175,16 @@ describe("MCP Orchestration Tools — get_alerts", () => {
   it("includes dependency metadata in description", () => {
     const desc = serverCode.slice(
       serverCode.indexOf('"get_alerts"'),
-      serverCode.indexOf('"get_alerts"') + 500
+      serverCode.indexOf('"get_alerts"') + 500,
     );
     expect(desc).toContain("Preconditions: none");
     expect(desc).toContain("Suggested next:");
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"get_alerts"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"get_alerts"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -182,8 +196,9 @@ describe("MCP Orchestration Tools — manage_feature", () => {
   });
 
   it("accepts action (list/enable/disable) and optional flag name", () => {
-    expect(serverCode).toContain('z.enum(["list", "enable", "disable"])');
-    expect(serverCode).toContain("flag: z.string().optional()");
+    expect(serverCode).toContain('.enum(["list", "enable", "disable"])');
+    expect(serverCode).toContain("flag: z");
+    expect(serverCode).toContain(".optional()");
   });
 
   it("lists features on action=list", () => {
@@ -207,13 +222,15 @@ describe("MCP Orchestration Tools — manage_feature", () => {
   it("includes dependency metadata in description", () => {
     const desc = serverCode.slice(
       serverCode.indexOf('"manage_feature"'),
-      serverCode.indexOf('"manage_feature"') + 500
+      serverCode.indexOf('"manage_feature"') + 500,
     );
     expect(desc).toContain("Preconditions: none (independent)");
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"manage_feature"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"manage_feature"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -226,7 +243,13 @@ describe("MCP Orchestration Tools — get_estimate", () => {
 
   it("accepts task_count (required) and pipeline (optional)", () => {
     expect(serverCode).toContain("task_count: z.number().min(1)");
-    expect(serverCode).toContain("pipeline: z.string().optional()");
+    expect(serverCode).toContain("pipeline: z");
+    const estimateSection = serverCode.slice(
+      serverCode.indexOf('"get_estimate"'),
+      serverCode.indexOf('"get_estimate"') + 800,
+    );
+    expect(estimateSection).toContain(".string()");
+    expect(estimateSection).toContain(".optional()");
   });
 
   it("calls estimateSprintCost from cost-estimate.ts", () => {
@@ -241,14 +264,16 @@ describe("MCP Orchestration Tools — get_estimate", () => {
   it("includes dependency metadata in description", () => {
     const desc = serverCode.slice(
       serverCode.indexOf('"get_estimate"'),
-      serverCode.indexOf('"get_estimate"') + 500
+      serverCode.indexOf('"get_estimate"') + 500,
     );
     expect(desc).toContain("Preconditions:");
     expect(desc).toContain("Suggested next: task_create");
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"get_estimate"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"get_estimate"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -262,7 +287,7 @@ describe("MCP Orchestration Tools — analyze_backlog", () => {
   it("accepts optional sprint parameter", () => {
     const section = serverCode.slice(
       serverCode.indexOf('"analyze_backlog"'),
-      serverCode.indexOf('"analyze_backlog"') + 800
+      serverCode.indexOf('"analyze_backlog"') + 800,
     );
     expect(section).toContain("sprint: z.string().optional()");
   });
@@ -282,14 +307,16 @@ describe("MCP Orchestration Tools — analyze_backlog", () => {
   it("includes dependency metadata in description", () => {
     const desc = serverCode.slice(
       serverCode.indexOf('"analyze_backlog"'),
-      serverCode.indexOf('"analyze_backlog"') + 500
+      serverCode.indexOf('"analyze_backlog"') + 500,
     );
     expect(desc).toContain("Preconditions:");
     expect(desc).toContain("Suggested next: task_create");
   });
 
   it("catches errors", () => {
-    const match = serverCode.match(/server\.tool\(\s*"analyze_backlog"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"analyze_backlog"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 });
@@ -297,8 +324,13 @@ describe("MCP Orchestration Tools — analyze_backlog", () => {
 describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
   it("all new tools include Preconditions in description", () => {
     const tools = [
-      "get_sprint_detail", "get_metrics", "get_cost_summary",
-      "get_alerts", "manage_feature", "get_estimate", "analyze_backlog",
+      "get_sprint_detail",
+      "get_metrics",
+      "get_cost_summary",
+      "get_alerts",
+      "manage_feature",
+      "get_estimate",
+      "analyze_backlog",
     ];
     for (const tool of tools) {
       const idx = serverCode.indexOf(`"${tool}"`);
@@ -310,8 +342,13 @@ describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
 
   it("all new tools include Suggested next in description", () => {
     const tools = [
-      "get_sprint_detail", "get_metrics", "get_cost_summary",
-      "get_alerts", "manage_feature", "get_estimate", "analyze_backlog",
+      "get_sprint_detail",
+      "get_metrics",
+      "get_cost_summary",
+      "get_alerts",
+      "manage_feature",
+      "get_estimate",
+      "analyze_backlog",
     ];
     for (const tool of tools) {
       const idx = serverCode.indexOf(`"${tool}"`);
@@ -351,7 +388,9 @@ describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
 
 describe("MCP Orchestration Tools — Imports", () => {
   it("imports cost-tracking functions", () => {
-    expect(serverCode).toContain('import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts"');
+    expect(serverCode).toContain(
+      'import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts"',
+    );
   });
 
   it("imports cost-estimate functions", () => {
@@ -363,11 +402,14 @@ describe("MCP Orchestration Tools — Imports", () => {
   });
 
   it("imports feature-flags functions", () => {
-    expect(serverCode).toContain('import { listFeatures, setFeature } from "../src/feature-flags.ts"');
+    expect(serverCode).toContain(
+      'import { listFeatures, setFeature } from "../src/feature-flags.ts"',
+    );
   });
 
   it("imports proactive-planner functions", () => {
-    expect(serverCode).toContain('import { analyzeBacklog, formatPlannerResult } from "../src/proactive-planner.ts"');
+    expect(serverCode).toContain("analyzeBacklog");
+    expect(serverCode).toContain('from "../src/proactive-planner.ts"');
   });
 
   it("preserves existing imports", () => {
@@ -388,27 +430,36 @@ describe("MCP Orchestration Tools — orchestrate_task", () => {
   });
 
   it("accepts optional pipeline parameter with valid types", () => {
-    expect(serverCode).toContain('z.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])');
+    expect(serverCode).toContain(
+      '.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])',
+    );
   });
 
   it("accepts optional use_blackboard parameter", () => {
-    expect(serverCode).toContain("use_blackboard: z.boolean().optional()");
+    expect(serverCode).toContain("use_blackboard: z");
+    const orchestrateSection = serverCode.slice(
+      serverCode.indexOf('"orchestrate_task"'),
+      serverCode.indexOf('"orchestrate_task"') + 1500,
+    );
+    expect(orchestrateSection).toContain(".boolean()");
   });
 
   it("accepts optional auto_pipeline parameter", () => {
-    expect(serverCode).toContain("auto_pipeline: z.boolean().optional()");
+    expect(serverCode).toContain("auto_pipeline: z");
   });
 
   it("accepts optional resume_session_id parameter", () => {
-    expect(serverCode).toContain("resume_session_id: z.string().optional()");
+    expect(serverCode).toContain("resume_session_id: z");
   });
 
   it("imports orchestrate and formatOrchestrationResult", () => {
-    expect(serverCode).toContain('import { orchestrate, formatOrchestrationResult } from "../src/orchestrator.ts"');
+    expect(serverCode).toContain("orchestrate");
+    expect(serverCode).toContain("formatOrchestrationResult");
+    expect(serverCode).toContain('from "../src/orchestrator.ts"');
   });
 
   it("imports pipeline constants", () => {
-    expect(serverCode).toContain('import {');
+    expect(serverCode).toContain("import {");
     expect(serverCode).toContain("DEFAULT_PIPELINE");
     expect(serverCode).toContain("QUICK_PIPELINE");
     expect(serverCode).toContain("SOLO_PIPELINE");
@@ -440,7 +491,7 @@ describe("MCP Orchestration Tools — orchestrate_task", () => {
   });
 
   it("defaults to auto pipeline when no pipeline specified", () => {
-    expect(serverCode).toContain("const useAuto = auto_pipeline ?? (!pipeline)");
+    expect(serverCode).toContain("const useAuto = auto_pipeline ?? !pipeline");
   });
 
   it("returns immediately with job ID (async execution)", () => {

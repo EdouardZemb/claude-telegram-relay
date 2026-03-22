@@ -13,7 +13,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnClaude } from "./agent.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("adversarial-verifier");
 // ── Types ────────────────────────────────────────────────────
 
 export interface DriftItem {
@@ -42,11 +44,11 @@ const VERIFIER_TIMEOUT = 180_000; // 3 minutes
 export async function verifySpecVsImplementation(
   spec: any,
   implementation: any,
-  pipelineType?: string
+  pipelineType?: string,
 ): Promise<DriftReport | null> {
   // EC-006: Skip on QUICK pipeline
   if (pipelineType === "QUICK" || pipelineType === "quick") {
-    console.log("adversarial-verifier: skipping for QUICK pipeline (EC-006)");
+    log.info("adversarial-verifier: skipping for QUICK pipeline (EC-006)");
     return null;
   }
 
@@ -101,7 +103,7 @@ export async function verifySpecVsImplementation(
     const result = await Promise.race([resultPromise, timeoutPromise]);
 
     if (!result) {
-      console.warn("adversarial-verifier: timed out");
+      log.warn("adversarial-verifier: timed out");
       return {
         coverage_score: 50,
         drift_items: [],
@@ -111,7 +113,7 @@ export async function verifySpecVsImplementation(
 
     return parseDriftReport(result.stdout);
   } catch (error) {
-    console.error("adversarial-verifier error:", error);
+    log.error("adversarial-verifier error", { error: String(error) });
     return {
       coverage_score: 0,
       drift_items: [],
@@ -150,9 +152,8 @@ export function parseDriftReport(output: string): DriftReport {
 }
 
 function normalizeDriftReport(obj: any): DriftReport {
-  const coverage = typeof obj.coverage_score === "number"
-    ? Math.min(100, Math.max(0, obj.coverage_score))
-    : 50;
+  const coverage =
+    typeof obj.coverage_score === "number" ? Math.min(100, Math.max(0, obj.coverage_score)) : 50;
 
   const driftItems: DriftItem[] = Array.isArray(obj.drift_items)
     ? obj.drift_items.map((item: any) => ({
@@ -166,7 +167,11 @@ function normalizeDriftReport(obj: any): DriftReport {
 
   const verdict = ["pass", "fail", "warning"].includes(obj.overall_verdict)
     ? obj.overall_verdict
-    : coverage >= 80 ? "pass" : coverage >= 50 ? "warning" : "fail";
+    : coverage >= 80
+      ? "pass"
+      : coverage >= 50
+        ? "warning"
+        : "fail";
 
   return { coverage_score: coverage, drift_items: driftItems, overall_verdict: verdict };
 }
@@ -182,9 +187,12 @@ function normalizeDriftReport(obj: any): DriftReport {
  * R9: Only called if P1 produced V-criteria.
  */
 export async function checkConformance(
-  protoSpec: { objective: string; v_criteria: Array<{ id: string; description: string; level: string }> },
+  protoSpec: {
+    objective: string;
+    v_criteria: Array<{ id: string; description: string; level: string }>;
+  },
   devOutput: any,
-  pipelineType?: string
+  pipelineType?: string,
 ): Promise<DriftReport | null> {
   // Skip on QUICK pipeline
   if (pipelineType === "QUICK" || pipelineType === "quick") {
@@ -214,9 +222,7 @@ export async function checkConformance(
   // Build spec in the format expected by the verifier, with V-criteria notation
   const specForVerifier = {
     objective: protoSpec.objective,
-    requirements: protoSpec.v_criteria.map(
-      (c) => `[${c.id}] ${c.description} (${c.level})`
-    ),
+    requirements: protoSpec.v_criteria.map((c) => `[${c.id}] ${c.description} (${c.level})`),
   };
 
   const prompt = [
@@ -260,7 +266,7 @@ export async function checkConformance(
     const result = await Promise.race([resultPromise, timeoutPromise]);
 
     if (!result) {
-      console.warn("checkConformance: timed out");
+      log.warn("checkConformance: timed out");
       return {
         coverage_score: 50,
         drift_items: [],
@@ -270,7 +276,7 @@ export async function checkConformance(
 
     return parseDriftReport(result.stdout);
   } catch (error) {
-    console.error("checkConformance error:", error);
+    log.error("checkConformance error", { error: String(error) });
     return {
       coverage_score: 0,
       drift_items: [],
@@ -286,7 +292,7 @@ export async function persistDriftReport(
   supabase: SupabaseClient,
   sessionId: string,
   taskId: string | null,
-  report: DriftReport
+  report: DriftReport,
 ): Promise<void> {
   // Store in workflow_logs
   const { error } = await supabase.from("workflow_logs").insert({
@@ -304,7 +310,7 @@ export async function persistDriftReport(
       drift_items: report.drift_items,
     },
   });
-  if (error) console.error("persistDriftReport error:", error);
+  if (error) log.error("persistDriftReport error", { error: String(error) });
 }
 
 /**

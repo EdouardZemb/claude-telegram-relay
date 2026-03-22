@@ -4,36 +4,60 @@
  * to investigate a topic, module, or question in the codebase and produce a structured report.
  */
 
-import { Composer, Context } from "grammy";
-import type { BotContext } from "../bot-context.ts";
+import { Composer, type Context } from "grammy";
 import { spawnClaude } from "../agent.ts";
-import { getAgent } from "../bmad-agents.ts";
 import { buildAgentContext } from "../agent-context.ts";
 import {
+  buildStructuredOutputInstructions,
+  formatStructuredOutput,
   getJsonSchemaForRole,
   parseAgentOutput,
-  formatStructuredOutput,
-  buildStructuredOutputInstructions,
 } from "../agent-schemas.ts";
-import {
-  buildAgentSystemPromptPart,
-  buildAgentTaskPromptPart,
-} from "../bmad-prompts.ts";
-import { resolveProjectContext } from "../projects.ts";
+import { getAgent } from "../bmad-agents.ts";
+import { buildAgentSystemPromptPart, buildAgentTaskPromptPart } from "../bmad-prompts.ts";
+import type { BotContext } from "../bot-context.ts";
 import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
-import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
+import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
+import { resolveProjectContext } from "../projects.ts";
 
 // ── Web Research Detection ───────────────────────────────────
 
 const WEB_RESEARCH_KEYWORDS = [
-  "api", "library", "librairie", "package", "alternative", "comparaison",
-  "benchmark", "trend", "best practice", "meilleure pratique", "how to",
-  "comment implementer", "outil", "tool", "framework", "service", "saas",
-  "cloud", "pricing", "documentation externe", "standard", "specification",
-  "rfc", "protocol", "npm", "crate", "pip", "gem", "etat de l'art",
-  "state of the art", "open source", "solution", "comparatif",
+  "api",
+  "library",
+  "librairie",
+  "package",
+  "alternative",
+  "comparaison",
+  "benchmark",
+  "trend",
+  "best practice",
+  "meilleure pratique",
+  "how to",
+  "comment implementer",
+  "outil",
+  "tool",
+  "framework",
+  "service",
+  "saas",
+  "cloud",
+  "pricing",
+  "documentation externe",
+  "standard",
+  "specification",
+  "rfc",
+  "protocol",
+  "npm",
+  "crate",
+  "pip",
+  "gem",
+  "etat de l'art",
+  "state of the art",
+  "open source",
+  "solution",
+  "comparatif",
 ];
 
 /**
@@ -55,7 +79,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     }
 
     const blocked = bctx.commandGuard(ctx, "explore");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
@@ -66,12 +93,12 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     if (!query) {
       await ctx.reply(
         "Usage: /explore <sujet a investiguer>\n\n" +
-        "Exemples:\n" +
-        "  /explore comment fonctionne le systeme de notifications\n" +
-        "  /explore impact de modifier le module orchestrator\n" +
-        "  /explore options pour ajouter du caching\n" +
-        "  /explore architecture du pipeline multi-agents",
-        bctx.threadOpts(ctx)
+          "Exemples:\n" +
+          "  /explore comment fonctionne le systeme de notifications\n" +
+          "  /explore impact de modifier le module orchestrator\n" +
+          "  /explore options pour ajouter du caching\n" +
+          "  /explore architecture du pipeline multi-agents",
+        bctx.threadOpts(ctx),
       );
       return;
     }
@@ -81,7 +108,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
       const graph = getGraph();
       const graphResult = tryGraphResponse(query, graph);
       if (graphResult) {
-        await bctx.sendResponse(ctx, `EXPLORATION (code-graph): ${query}\n\n${graphResult.response}`);
+        await bctx.sendResponse(
+          ctx,
+          `EXPLORATION (code-graph): ${query}\n\n${graphResult.response}`,
+        );
         return;
       }
     } catch {
@@ -99,7 +129,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
 
     // ── Explore function (shared between sync/async) ──────────
     const exploreFn = async (): Promise<string> => {
-      const currentProject = await resolveProjectContext(bctx.supabase!, ctx.message?.message_thread_id);
+      const currentProject = await resolveProjectContext(
+        bctx.supabase!,
+        ctx.message?.message_thread_id,
+      );
 
       const agentContext = await buildAgentContext(bctx.supabase!, {
         role: "explorer",
@@ -132,7 +165,9 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         "",
         "Explore le codebase, analyse les fichiers pertinents, et produis un rapport structure.",
         outputInstructions,
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const jsonSchema = getJsonSchemaForRole("explorer");
       const model = isWebResearch ? "claude-sonnet-4-6" : explorer.model;
@@ -157,9 +192,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
       if (parsed) {
         return `EXPLORATION: ${query}\n\n${formatStructuredOutput(parsed)}`;
       }
-      const output = result.stdout.length > 4000
-        ? result.stdout.substring(0, 4000) + "\n...(tronque)"
-        : result.stdout;
+      const output =
+        result.stdout.length > 4000
+          ? result.stdout.substring(0, 4000) + "\n...(tronque)"
+          : result.stdout;
       return `EXPLORATION: ${query}\n\n${output}`;
     };
 
@@ -179,7 +215,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         const resultMsg = await exploreFn();
         await bctx.sendResponse(ctx, resultMsg);
       } catch (error: any) {
-        await ctx.reply(`Exploration echouee:\n${(error.message || "").substring(0, 2000)}`, bctx.threadOpts(ctx));
+        await ctx.reply(
+          `Exploration echouee:\n${(error.message || "").substring(0, 2000)}`,
+          bctx.threadOpts(ctx),
+        );
       }
     }
   });

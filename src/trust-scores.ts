@@ -6,7 +6,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAgent } from "./bmad-agents.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("trust-scores");
 // ── Types ────────────────────────────────────────────────────
 
 export interface TrustScore {
@@ -70,14 +72,12 @@ function makeDefaultTrustScore(role: string): TrustScore {
 // ── Load from Supabase ───────────────────────────────────────
 
 export async function loadTrustScores(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
 ): Promise<Record<string, TrustScore>> {
-  const { data, error } = await supabase
-    .from("trust_scores")
-    .select("*");
+  const { data, error } = await supabase.from("trust_scores").select("*");
 
   if (error) {
-    console.error("loadTrustScores error:", error);
+    log.error("loadTrustScores error", { error: String(error) });
     return trustScoreCache;
   }
 
@@ -108,7 +108,7 @@ export async function loadTrustScores(
 export async function updateTrustScore(
   supabase: SupabaseClient | null,
   agentRole: string,
-  update: TrustScoreUpdate
+  update: TrustScoreUpdate,
 ): Promise<TrustScore> {
   const current = trustScoreCache[agentRole] || makeDefaultTrustScore(agentRole);
 
@@ -120,9 +120,10 @@ export async function updateTrustScore(
   } else if (update.passed && update.hadRework) {
     delta = PASS_WITH_REWORK_DELTA;
   } else {
-    delta = current.consecutiveFailures >= CONSECUTIVE_FAIL_THRESHOLD - 1
-      ? ACCELERATED_FAIL_DELTA
-      : FAIL_DELTA;
+    delta =
+      current.consecutiveFailures >= CONSECUTIVE_FAIL_THRESHOLD - 1
+        ? ACCELERATED_FAIL_DELTA
+        : FAIL_DELTA;
   }
 
   // Apply
@@ -144,9 +145,8 @@ export async function updateTrustScore(
 
   // Persist to Supabase
   if (supabase) {
-    const { error } = await supabase
-      .from("trust_scores")
-      .upsert({
+    const { error } = await supabase.from("trust_scores").upsert(
+      {
         agent_role: agentRole,
         score: updated.score,
         consecutive_passes: updated.consecutivePasses,
@@ -155,10 +155,12 @@ export async function updateTrustScore(
         total_passes: updated.totalPasses,
         last_evaluation_at: updated.lastEvaluationAt,
         updated_at: updated.updatedAt,
-      }, { onConflict: "agent_role" });
+      },
+      { onConflict: "agent_role" },
+    );
 
     if (error) {
-      console.error("updateTrustScore persist error:", error);
+      log.error("updateTrustScore persist error", { error: String(error) });
     }
   }
 
@@ -194,7 +196,7 @@ export function getAutoApproveThresholds(agentRole: string): { spec: number; imp
 export function shouldAutoApprove(
   agentRole: string,
   gateName: string,
-  taskPriority: number
+  taskPriority: number,
 ): boolean {
   // P1/P2 always requires full evaluation
   if (taskPriority < AUTO_APPROVE_MAX_PRIORITY) return false;
@@ -242,11 +244,12 @@ export function formatTrustScores(): string {
   const lines: string[] = ["Trust scores par role:"];
   for (const role of roles.sort()) {
     const ts = trustScoreCache[role];
-    const passRate = ts.totalEvaluations > 0
-      ? Math.round((ts.totalPasses / ts.totalEvaluations) * 100)
-      : 0;
+    const passRate =
+      ts.totalEvaluations > 0 ? Math.round((ts.totalPasses / ts.totalEvaluations) * 100) : 0;
     const autonomy = getAutonomyLevel(role);
-    lines.push(`  ${role}: ${ts.score}/100 [${autonomy.label}] (${ts.consecutivePasses} passes consecutives, ${passRate}% succes, ${ts.totalEvaluations} evals)`);
+    lines.push(
+      `  ${role}: ${ts.score}/100 [${autonomy.label}] (${ts.consecutivePasses} passes consecutives, ${passRate}% succes, ${ts.totalEvaluations} evals)`,
+    );
   }
   return lines.join("\n");
 }
@@ -255,7 +258,7 @@ export function formatTrustScores(): string {
  * Format recent gate evaluations for /monitor.
  */
 export async function formatRecentGateEvaluations(
-  supabase: SupabaseClient | null
+  supabase: SupabaseClient | null,
 ): Promise<string> {
   if (!supabase) return "Pas de connexion Supabase";
 
@@ -269,7 +272,7 @@ export async function formatRecentGateEvaluations(
 
   const lines: string[] = ["Evaluations recentes:"];
   for (const row of data) {
-    const status = row.auto_approved ? "AUTO" : (row.passed ? "PASS" : "FAIL");
+    const status = row.auto_approved ? "AUTO" : row.passed ? "PASS" : "FAIL";
     const date = new Date(row.created_at).toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
     lines.push(`  ${row.agent_role}/${row.gate_name}: ${status} (${row.score}/100) ${date}`);
   }

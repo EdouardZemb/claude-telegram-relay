@@ -4,12 +4,8 @@
  * Tests cascade routing, escalation, and backward compatibility.
  */
 
-import { describe, it, expect } from "bun:test";
-import {
-  CASCADE_MODELS,
-  type SpawnClaudeOptions,
-  type SpawnClaudeResult,
-} from "../../src/agent";
+import { describe, expect, it } from "bun:test";
+import { CASCADE_MODELS, type SpawnClaudeOptions, type SpawnClaudeResult } from "../../src/agent";
 
 // ── CASCADE_MODELS constant ──────────────────────────────────
 

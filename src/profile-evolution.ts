@@ -12,7 +12,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const PROJECT_ROOT = process.env.PROJECT_DIR || join(import.meta.dir, "..");
@@ -26,8 +26,8 @@ export interface ProfileInsights {
     language: string;
   };
   activityPattern: {
-    activeHours: number[];   // hours of the day with most activity (0-23)
-    activeDays: string[];    // days of the week with most activity
+    activeHours: number[]; // hours of the day with most activity (0-23)
+    activeDays: string[]; // days of the week with most activity
     peakHour: number;
   };
   taskPreferences: {
@@ -53,9 +53,7 @@ export interface ProfileUpdate {
 /**
  * Analyse les messages recents pour deduire le profil de l'utilisateur.
  */
-export async function analyzeProfile(
-  supabase: SupabaseClient
-): Promise<ProfileInsights> {
+export async function analyzeProfile(supabase: SupabaseClient): Promise<ProfileInsights> {
   // Get messages from the last 30 days
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -77,12 +75,14 @@ export async function analyzeProfile(
 
   // Communication style
   const userMessages = msgs.filter((m: any) => m.role === "user");
-  const avgLen = userMessages.length > 0
-    ? userMessages.reduce((sum: number, m: any) => sum + (m.content?.length ?? 0), 0) / userMessages.length
-    : 0;
+  const avgLen =
+    userMessages.length > 0
+      ? userMessages.reduce((sum: number, m: any) => sum + (m.content?.length ?? 0), 0) /
+        userMessages.length
+      : 0;
 
   const frenchIndicators = userMessages.filter((m: any) =>
-    /\b(je|tu|nous|vous|est|sont|les|des|une|sur|dans|pour|avec|pas|que)\b/i.test(m.content ?? "")
+    /\b(je|tu|nous|vous|est|sont|les|des|une|sur|dans|pour|avec|pas|que)\b/i.test(m.content ?? ""),
   ).length;
   const language = frenchIndicators > userMessages.length * 0.3 ? "francais" : "english";
 
@@ -128,9 +128,10 @@ export async function analyzeProfile(
   const avgTasksPerSprint = sprints.size > 0 ? Math.round(allTasks.length / sprints.size) : 0;
 
   const priorities = allTasks.map((t: any) => t.priority).filter((p: any) => p != null);
-  const preferredPriority = priorities.length > 0
-    ? Math.round(priorities.reduce((a: number, b: number) => a + b, 0) / priorities.length)
-    : 3;
+  const preferredPriority =
+    priorities.length > 0
+      ? Math.round(priorities.reduce((a: number, b: number) => a + b, 0) / priorities.length)
+      : 3;
 
   return {
     communicationStyle: {
@@ -162,7 +163,7 @@ export async function analyzeProfile(
  */
 export function proposeProfileUpdates(
   insights: ProfileInsights,
-  currentProfile: string
+  currentProfile: string,
 ): ProfileUpdate[] {
   const updates: ProfileUpdate[] = [];
 
@@ -227,9 +228,7 @@ export function proposeProfileUpdates(
 /**
  * Applique les mises a jour validees au profil.
  */
-export function applyProfileUpdates(
-  updates: ProfileUpdate[]
-): boolean {
+export function applyProfileUpdates(updates: ProfileUpdate[]): boolean {
   const profilePath = join(PROJECT_ROOT, "config", "profile.md");
   if (!existsSync(profilePath)) return false;
 

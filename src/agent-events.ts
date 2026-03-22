@@ -5,8 +5,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AgentRole } from "./orchestrator.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("agent-events");
 // ── Types ────────────────────────────────────────────────────
 
 export type AgentEventType =
@@ -55,7 +56,7 @@ export async function emitAgentEvent(
   sessionId: string,
   role: string,
   eventType: AgentEventType,
-  payload: Record<string, any> = {}
+  payload: Record<string, any> = {},
 ): Promise<void> {
   const event: AgentEvent = {
     session_id: sessionId,
@@ -93,17 +94,13 @@ export async function emitAgentEvent(
 export async function getAgentEvents(
   supabase: SupabaseClient | null,
   sessionId: string,
-  role?: string
+  role?: string,
 ): Promise<AgentEvent[]> {
   const memEvents = inMemoryEvents.get(sessionId) || [];
 
   if (!supabase) {
-    const filtered = role
-      ? memEvents.filter((e) => e.agent_role === role)
-      : memEvents;
-    return filtered.sort((a, b) =>
-      (a.created_at || "").localeCompare(b.created_at || "")
-    );
+    const filtered = role ? memEvents.filter((e) => e.agent_role === role) : memEvents;
+    return filtered.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
   }
 
   let query = supabase
@@ -120,25 +117,17 @@ export async function getAgentEvents(
 
   if (error) {
     // Return in-memory only
-    const filtered = role
-      ? memEvents.filter((e) => e.agent_role === role)
-      : memEvents;
-    return filtered.sort((a, b) =>
-      (a.created_at || "").localeCompare(b.created_at || "")
-    );
+    const filtered = role ? memEvents.filter((e) => e.agent_role === role) : memEvents;
+    return filtered.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
   }
 
   // Merge Supabase + in-memory (dedup by checking if in-memory events are also in DB)
   const dbEvents = (data || []) as AgentEvent[];
-  const memOnly = role
-    ? memEvents.filter((e) => e.agent_role === role)
-    : memEvents;
+  const memOnly = role ? memEvents.filter((e) => e.agent_role === role) : memEvents;
 
   // In-memory events that aren't in DB (no id = not persisted)
   const combined = [...dbEvents, ...memOnly.filter((e) => !e.id)];
-  return combined.sort((a, b) =>
-    (a.created_at || "").localeCompare(b.created_at || "")
-  );
+  return combined.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
 }
 
 /**
@@ -164,7 +153,11 @@ export function formatAgentTimeline(events: AgentEvent[]): string {
   const lines: string[] = ["TIMELINE AGENTS:"];
   for (const event of events) {
     const time = event.created_at
-      ? new Date(event.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      ? new Date(event.created_at).toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
       : "??:??:??";
     const payloadStr = event.payload.duration_ms
       ? ` (${Math.round(event.payload.duration_ms / 1000)}s)`
@@ -200,7 +193,7 @@ export async function captureAgentFailure(
   supabase: SupabaseClient | null,
   sessionId: string,
   role: string,
-  ctx: FailureContext
+  ctx: FailureContext,
 ): Promise<void> {
   const payload = {
     prompt_snippet: (ctx.promptSnippet || "").substring(0, 500),
@@ -226,7 +219,7 @@ export async function captureAgentFailure(
       });
     } catch {
       // Last resort: log to console
-      console.error("captureAgentFailure: failed to store event", { sessionId, role });
+      log.error("captureAgentFailure: failed to store event", { sessionId, role });
     }
   }
 }

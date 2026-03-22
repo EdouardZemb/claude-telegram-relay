@@ -12,11 +12,13 @@
  * et log chaque transition dans workflow_logs.
  */
 
-import { parse, stringify } from "yaml";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
+import { parse, stringify } from "yaml";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("workflow");
 // ── Types ────────────────────────────────────────────────────
 
 export interface CheckpointConfig {
@@ -70,7 +72,7 @@ export interface WorkflowLogEntry {
 const CONFIG_PATH = join(
   process.env.PROJECT_DIR || join(import.meta.dir, ".."),
   "config",
-  "workflow.yaml"
+  "workflow.yaml",
 );
 
 let _config: WorkflowConfig | null = null;
@@ -82,7 +84,7 @@ export function loadWorkflowConfig(): WorkflowConfig {
     _config = parse(raw) as WorkflowConfig;
     return _config;
   } catch (err) {
-    console.error("Failed to load workflow config:", err);
+    log.error("Failed to load workflow config", { error: String(err) });
     return getDefaultConfig();
   }
 }
@@ -96,12 +98,42 @@ function getDefaultConfig(): WorkflowConfig {
   return {
     version: 1,
     steps: [
-      { id: "request", label: "Demande", description: "Reception de la demande", checkpoint: { enabled: false, mode: "off" } },
-      { id: "decomposition", label: "Decomposition", description: "Decoupage en sous-taches", checkpoint: { enabled: true, mode: "light" } },
-      { id: "validation", label: "Validation", description: "Validation utilisateur", checkpoint: { enabled: false, mode: "off" } },
-      { id: "execution", label: "Execution", description: "Implementation", checkpoint: { enabled: true, mode: "strict" } },
-      { id: "review", label: "Review", description: "Verification", checkpoint: { enabled: true, mode: "light" } },
-      { id: "closure", label: "Cloture", description: "Merge et deploy", checkpoint: { enabled: false, mode: "off" } },
+      {
+        id: "request",
+        label: "Demande",
+        description: "Reception de la demande",
+        checkpoint: { enabled: false, mode: "off" },
+      },
+      {
+        id: "decomposition",
+        label: "Decomposition",
+        description: "Decoupage en sous-taches",
+        checkpoint: { enabled: true, mode: "light" },
+      },
+      {
+        id: "validation",
+        label: "Validation",
+        description: "Validation utilisateur",
+        checkpoint: { enabled: false, mode: "off" },
+      },
+      {
+        id: "execution",
+        label: "Execution",
+        description: "Implementation",
+        checkpoint: { enabled: true, mode: "strict" },
+      },
+      {
+        id: "review",
+        label: "Review",
+        description: "Verification",
+        checkpoint: { enabled: true, mode: "light" },
+      },
+      {
+        id: "closure",
+        label: "Cloture",
+        description: "Merge et deploy",
+        checkpoint: { enabled: false, mode: "off" },
+      },
     ],
     transitions: [
       { from: "request", to: "decomposition" },
@@ -188,7 +220,7 @@ export class WorkflowTracker {
 
   constructor(
     supabase: SupabaseClient,
-    opts?: { taskId?: string; sprintId?: string; startStep?: string }
+    opts?: { taskId?: string; sprintId?: string; startStep?: string },
   ) {
     this.supabase = supabase;
     this.taskId = opts?.taskId;
@@ -214,7 +246,7 @@ export class WorkflowTracker {
       checkpoint_notes?: string;
       agent_notes?: string;
       enforce?: boolean;
-    }
+    },
   ): Promise<boolean> {
     // S23-08: Enforce valid transitions (skip for orchestration internal steps)
     const isOrchestrationStep =
@@ -222,8 +254,8 @@ export class WorkflowTracker {
     if (opts?.enforce && !isOrchestrationStep) {
       if (!canTransition(this.currentStep, toStep)) {
         const valid = getValidTransitions(this.currentStep).map((t) => t.to);
-        console.error(
-          `Invalid workflow transition: ${this.currentStep} -> ${toStep}. Valid: ${valid.join(", ")}`
+        log.error(
+          `Invalid workflow transition: ${this.currentStep} -> ${toStep}. Valid: ${valid.join(", ")}`,
         );
         return false;
       }
@@ -247,7 +279,7 @@ export class WorkflowTracker {
 
     const { error } = await this.supabase.from("workflow_logs").insert(entry);
     if (error) {
-      console.error("workflow_logs insert error:", error);
+      log.error("workflow_logs insert error", { error: String(error) });
       return false;
     }
 
@@ -256,10 +288,7 @@ export class WorkflowTracker {
     return true;
   }
 
-  async logCheckpoint(
-    result: "pass" | "fail" | "corrected",
-    notes?: string
-  ): Promise<void> {
+  async logCheckpoint(result: "pass" | "fail" | "corrected", notes?: string): Promise<void> {
     const checkpoint = getCheckpointConfig(this.currentStep);
     await this.supabase.from("workflow_logs").insert({
       task_id: this.taskId,
@@ -278,7 +307,7 @@ export class WorkflowTracker {
 
 export async function collectSprintMetrics(
   supabase: SupabaseClient,
-  sprintId: string
+  sprintId: string,
 ): Promise<boolean> {
   // Get task stats
   const { data: tasks, error: tasksError } = await supabase
@@ -287,7 +316,7 @@ export async function collectSprintMetrics(
     .eq("sprint", sprintId);
 
   if (tasksError || !tasks) {
-    console.error("collectSprintMetrics tasks error:", tasksError);
+    log.error("collectSprintMetrics tasks error", { error: String(tasksError) });
     return false;
   }
 
@@ -326,9 +355,7 @@ export async function collectSprintMetrics(
   const reviewedTasks = new Set(reviewLogs?.map((l: any) => l.task_id) ?? []);
   const firstPassTasks = reviewLogs?.filter((l: any) => !l.had_rework) ?? [];
   const firstPassRate =
-    reviewedTasks.size > 0
-      ? (firstPassTasks.length / reviewedTasks.size) * 100
-      : null;
+    reviewedTasks.size > 0 ? (firstPassTasks.length / reviewedTasks.size) * 100 : null;
 
   // Aggregate cost data (S23-06)
   const { data: costData } = await supabase
@@ -345,26 +372,24 @@ export async function collectSprintMetrics(
   }
 
   // Upsert metrics
-  const { error: upsertError } = await supabase
-    .from("sprint_metrics")
-    .upsert(
-      {
-        sprint_id: sprintId,
-        tasks_planned: planned,
-        tasks_completed: completed,
-        avg_delivery_hours: avgDeliveryHours ? Math.round(avgDeliveryHours * 100) / 100 : null,
-        first_pass_rate: firstPassRate ? Math.round(firstPassRate * 100) / 100 : null,
-        rework_count: reworkCount,
-        sprint_ended_at: new Date().toISOString(),
-        total_tokens: totalTokens,
-        total_cost_usd: Math.round(totalCostUsd * 10000) / 10000,
-        agent_executions: agentExecutions,
-      },
-      { onConflict: "sprint_id" }
-    );
+  const { error: upsertError } = await supabase.from("sprint_metrics").upsert(
+    {
+      sprint_id: sprintId,
+      tasks_planned: planned,
+      tasks_completed: completed,
+      avg_delivery_hours: avgDeliveryHours ? Math.round(avgDeliveryHours * 100) / 100 : null,
+      first_pass_rate: firstPassRate ? Math.round(firstPassRate * 100) / 100 : null,
+      rework_count: reworkCount,
+      sprint_ended_at: new Date().toISOString(),
+      total_tokens: totalTokens,
+      total_cost_usd: Math.round(totalCostUsd * 10000) / 10000,
+      agent_executions: agentExecutions,
+    },
+    { onConflict: "sprint_id" },
+  );
 
   if (upsertError) {
-    console.error("collectSprintMetrics upsert error:", upsertError);
+    log.error("collectSprintMetrics upsert error", { error: String(upsertError) });
     return false;
   }
 
@@ -373,7 +398,7 @@ export async function collectSprintMetrics(
 
 export async function getSprintMetrics(
   supabase: SupabaseClient,
-  sprintId: string
+  sprintId: string,
 ): Promise<any | null> {
   const { data, error } = await supabase
     .from("sprint_metrics")
@@ -385,9 +410,7 @@ export async function getSprintMetrics(
   return data;
 }
 
-export async function getAllSprintMetrics(
-  supabase: SupabaseClient
-): Promise<any[]> {
+export async function getAllSprintMetrics(supabase: SupabaseClient): Promise<any[]> {
   const { data, error } = await supabase
     .from("sprint_metrics")
     .select("*")
@@ -422,7 +445,9 @@ export function formatMetrics(metrics: any): string {
   }
 
   if (metrics.total_tokens > 0 || metrics.total_cost_usd > 0) {
-    lines.push(`Tokens: ${metrics.total_tokens || 0} (~$${(metrics.total_cost_usd || 0).toFixed(4)})`);
+    lines.push(
+      `Tokens: ${metrics.total_tokens || 0} (~$${(metrics.total_cost_usd || 0).toFixed(4)})`,
+    );
     if (metrics.agent_executions > 0) {
       lines.push(`Executions agent: ${metrics.agent_executions}`);
     }
@@ -453,7 +478,7 @@ export function formatMetricsComparison(metricsList: any[]): string {
 
 export async function generateRetroData(
   supabase: SupabaseClient,
-  sprintId: string
+  sprintId: string,
 ): Promise<{
   metrics: any;
   workflowStats: {
@@ -474,10 +499,7 @@ export async function generateRetroData(
     .order("created_at", { ascending: true });
 
   // Get tasks
-  const { data: tasks } = await supabase
-    .from("tasks")
-    .select("*")
-    .eq("sprint", sprintId);
+  const { data: tasks } = await supabase.from("tasks").select("*").eq("sprint", sprintId);
 
   // Compute workflow stats
   const totalTransitions = logs?.length ?? 0;
@@ -493,9 +515,7 @@ export async function generateRetroData(
   }
   const avgStepDuration: Record<string, number> = {};
   for (const [step, durations] of Object.entries(stepDurations)) {
-    avgStepDuration[step] = Math.round(
-      durations.reduce((a, b) => a + b, 0) / durations.length
-    );
+    avgStepDuration[step] = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
   }
 
   // Checkpoint results
@@ -523,7 +543,7 @@ export async function saveRetro(
     patterns_detected: string[];
     actions_proposed: Array<{ action: string; priority: string }>;
     raw_analysis: string;
-  }
+  },
 ): Promise<boolean> {
   const { error } = await supabase.from("retros").upsert(
     {
@@ -534,11 +554,11 @@ export async function saveRetro(
       actions_proposed: retro.actions_proposed,
       raw_analysis: retro.raw_analysis,
     },
-    { onConflict: "sprint_id" }
+    { onConflict: "sprint_id" },
   );
 
   if (error) {
-    console.error("saveRetro error:", error);
+    log.error("saveRetro error", { error: String(error) });
     return false;
   }
   return true;
@@ -547,7 +567,7 @@ export async function saveRetro(
 export async function acceptRetroActions(
   supabase: SupabaseClient,
   sprintId: string,
-  acceptedActions: Array<{ action: string; priority: string }>
+  acceptedActions: Array<{ action: string; priority: string }>,
 ): Promise<boolean> {
   const { error } = await supabase
     .from("retros")
@@ -558,16 +578,13 @@ export async function acceptRetroActions(
     .eq("sprint_id", sprintId);
 
   if (error) {
-    console.error("acceptRetroActions error:", error);
+    log.error("acceptRetroActions error", { error: String(error) });
     return false;
   }
   return true;
 }
 
-export async function getRetro(
-  supabase: SupabaseClient,
-  sprintId: string
-): Promise<any | null> {
+export async function getRetro(supabase: SupabaseClient, sprintId: string): Promise<any | null> {
   const { data, error } = await supabase
     .from("retros")
     .select("*")
@@ -604,9 +621,7 @@ export function formatRetro(retro: any): string {
   if (retro.actions_proposed?.length > 0) {
     lines.push("Actions proposees :");
     for (const action of retro.actions_proposed) {
-      const status = retro.actions_accepted?.some(
-        (a: any) => a.action === action.action
-      )
+      const status = retro.actions_accepted?.some((a: any) => a.action === action.action)
         ? "[OK]"
         : "[ ]";
       lines.push(`  ${status} ${action.action} (${action.priority})`);
@@ -625,12 +640,12 @@ export function formatRetro(retro: any): string {
  */
 export function applyWorkflowSuggestions(
   suggestions: Array<{ action: string; target_step?: string; suggested_change?: string }>,
-  opts?: { author?: string; reason?: string; supabase?: any }
+  opts?: { author?: string; reason?: string; supabase?: any },
 ): string[] {
   const configPath = join(
     process.env.PROJECT_DIR || join(import.meta.dir, ".."),
     "config",
-    "workflow.yaml"
+    "workflow.yaml",
   );
   if (!existsSync(configPath)) return [];
 
@@ -680,7 +695,9 @@ export function applyWorkflowSuggestions(
         reason: opts.reason || `Applied ${applied.length} workflow suggestions`,
         changes,
         configVersion: config.version,
-      }).catch((err) => console.error("logWorkflowAudit fire-and-forget error:", err));
+      }).catch((err) =>
+        log.error("logWorkflowAudit fire-and-forget error", { error: String(err) }),
+      );
     }
   }
 
@@ -700,10 +717,7 @@ export interface WorkflowAuditEntry {
 /**
  * Log a workflow configuration change to the audit trail.
  */
-export async function logWorkflowAudit(
-  supabase: any,
-  entry: WorkflowAuditEntry
-): Promise<void> {
+export async function logWorkflowAudit(supabase: any, entry: WorkflowAuditEntry): Promise<void> {
   // Capture current config as snapshot
   let configSnapshot: WorkflowConfig | null = null;
   try {
@@ -720,7 +734,7 @@ export async function logWorkflowAudit(
   });
 
   if (error) {
-    console.error("logWorkflowAudit error:", error);
+    log.error("logWorkflowAudit error", { error: String(error) });
   }
 }
 
@@ -729,7 +743,7 @@ export async function logWorkflowAudit(
  */
 export async function getWorkflowAuditHistory(
   supabase: any,
-  limit: number = 10
+  limit: number = 10,
 ): Promise<WorkflowAuditEntry[]> {
   const { data, error } = await supabase
     .from("workflow_audit")

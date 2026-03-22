@@ -3,10 +3,10 @@
  * and intercept bot responses without needing the Telegram API.
  */
 
-import { createBot } from "../../src/relay.ts";
-import type { Bot } from "grammy";
-import type { Update, User, Message } from "grammy/types";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Bot } from "grammy";
+import type { Message, Update, User } from "grammy/types";
+import { createBot } from "../../src/relay.ts";
 
 export class E2EFramework {
   private bot!: Bot;
@@ -19,7 +19,7 @@ export class E2EFramework {
 
   constructor(options?: { runId?: string }) {
     this.runId = options?.runId || `local-${Date.now()}`;
-    this.userId = parseInt(process.env.TELEGRAM_USER_ID || "123456789");
+    this.userId = parseInt(process.env.TELEGRAM_USER_ID || "123456789", 10);
   }
 
   async setup(): Promise<void> {
@@ -36,7 +36,7 @@ export class E2EFramework {
         }
         return {
           ok: true as const,
-          result: this.fakeMessage(text as string || ""),
+          result: this.fakeMessage((text as string) || ""),
         };
       }
 
@@ -89,7 +89,7 @@ export class E2EFramework {
         }
         return {
           ok: true as const,
-          result: this.fakeMessage(text as string || ""),
+          result: this.fakeMessage((text as string) || ""),
         };
       }
 
@@ -111,10 +111,7 @@ export class E2EFramework {
 
     // Setup Supabase client for assertions and cleanup
     if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
-      this.supabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY
-      );
+      this.supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
     }
   }
 
@@ -140,7 +137,7 @@ export class E2EFramework {
   assertContains(response: string, expected: string): void {
     if (!response.toLowerCase().includes(expected.toLowerCase())) {
       throw new Error(
-        `Expected response to contain "${expected}"\nGot: ${response.substring(0, 500)}`
+        `Expected response to contain "${expected}"\nGot: ${response.substring(0, 500)}`,
       );
     }
   }
@@ -148,7 +145,7 @@ export class E2EFramework {
   assertNotContains(response: string, unexpected: string): void {
     if (response.toLowerCase().includes(unexpected.toLowerCase())) {
       throw new Error(
-        `Expected response NOT to contain "${unexpected}"\nGot: ${response.substring(0, 500)}`
+        `Expected response NOT to contain "${unexpected}"\nGot: ${response.substring(0, 500)}`,
       );
     }
   }
@@ -156,10 +153,7 @@ export class E2EFramework {
   /**
    * Query Supabase for assertions on side effects.
    */
-  async querySupabase(
-    table: string,
-    filter: Record<string, string>
-  ): Promise<any[]> {
+  async querySupabase(table: string, filter: Record<string, string>): Promise<any[]> {
     if (!this.supabase) return [];
     let query = this.supabase.from(table).select("*");
     for (const [key, value] of Object.entries(filter)) {
@@ -189,10 +183,7 @@ export class E2EFramework {
 
     for (const { table, column } of cleanups) {
       try {
-        const { error } = await this.supabase
-          .from(table)
-          .delete()
-          .like(column, tagPattern);
+        const { error } = await this.supabase.from(table).delete().like(column, tagPattern);
         if (error) {
           console.warn(`E2E cleanup warning (${table}): ${error.message}`);
         }
@@ -287,9 +278,7 @@ export class E2EFramework {
     if (text.startsWith("/")) {
       const spaceIdx = text.indexOf(" ");
       const cmdLength = spaceIdx === -1 ? text.length : spaceIdx;
-      message.entities = [
-        { type: "bot_command", offset: 0, length: cmdLength },
-      ];
+      message.entities = [{ type: "bot_command", offset: 0, length: cmdLength }];
     }
 
     return {
@@ -324,7 +313,13 @@ export class E2EFramework {
       date: Math.floor(Date.now() / 1000),
       photo: [
         { file_id: "e2e_small", file_unique_id: "s1", width: 90, height: 90, file_size: 5000 },
-        { file_id: "e2e_large", file_unique_id: "l1", width: 800, height: 600, file_size: fileSize || 100000 },
+        {
+          file_id: "e2e_large",
+          file_unique_id: "l1",
+          width: 800,
+          height: 600,
+          file_size: fileSize || 100000,
+        },
       ],
     };
 

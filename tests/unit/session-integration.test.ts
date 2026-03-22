@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach } from "bun:test";
-import { detectIntentWithLLM } from "../../src/intent-detection.ts";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  getSession,
-  addMessage,
-  addIntent,
+  _resetSessions,
   addConstraint,
-  formatSessionForIntent,
+  addIntent,
+  addMessage,
   buildConversationContext,
   extractConstraints,
-  _resetSessions,
+  formatSessionForIntent,
+  getSession,
 } from "../../src/conversation-session.ts";
+import { detectIntentWithLLM } from "../../src/intent-detection.ts";
 
 describe("session-integration", () => {
   beforeEach(() => {
@@ -25,7 +25,7 @@ describe("session-integration", () => {
 
       const sessionCtx = formatSessionForIntent(session);
 
-      const result = await detectIntentWithLLM("lance le pipeline", {
+      const _result = await detectIntentWithLLM("lance le pipeline", {
         callLLM: async (prompt) => {
           capturedPrompt = prompt;
           return '{"command": "exec", "args": "", "confidence": 0.85}';
@@ -93,7 +93,9 @@ describe("session-integration", () => {
       addConstraint(session, "speed", "fast", "msg1");
       addConstraint(session, "speed", "not urgent actually", "msg2");
       expect(session.constraints.filter((c) => c.type === "speed")).toHaveLength(1);
-      expect(session.constraints.find((c) => c.type === "speed")!.value).toBe("not urgent actually");
+      expect(session.constraints.find((c) => c.type === "speed")!.value).toBe(
+        "not urgent actually",
+      );
     });
   });
 

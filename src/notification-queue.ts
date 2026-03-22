@@ -12,19 +12,21 @@
  * Persistence via JSON file for crash recovery.
  */
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
-import { join, dirname } from "path";
-import { InlineKeyboard } from "grammy";
+import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import type { Bot } from "grammy";
+import { InlineKeyboard } from "grammy";
+import { join } from "path";
+import { createLogger } from "./logger.ts";
 import {
-  loadPrefs,
   getPrefs,
-  isTypeEnabled,
   isImmediate,
   isQuietHours,
+  isTypeEnabled,
+  loadPrefs,
   type NotificationType,
 } from "./notification-prefs.ts";
 
+const log = createLogger("notification-queue");
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const QUEUE_FILE = join(RELAY_DIR, "notification-queue.json");
 const MCP_PENDING_FILE = join(RELAY_DIR, "mcp-pending-notifications.json");
@@ -139,7 +141,7 @@ async function sendStandalone(item: NotificationItem): Promise<void> {
   try {
     await botInstance.api.sendMessage(chatId, item.message, opts);
   } catch (error) {
-    console.error(`Notification send error:`, error);
+    log.error(`Notification send error:`, { error: String(error) });
   }
 }
 
@@ -148,9 +150,7 @@ async function sendDigest(items: NotificationItem[], header?: string): Promise<v
   const chatId = groupId || process.env.TELEGRAM_USER_ID || "";
   if (!chatId) return;
 
-  const text = header
-    ? `${header}\n\n${formatDigest(items)}`
-    : formatDigest(items);
+  const text = header ? `${header}\n\n${formatDigest(items)}` : formatDigest(items);
 
   const opts: Record<string, unknown> = {};
   if (groupId && sprintThreadId) opts.message_thread_id = sprintThreadId;
@@ -158,7 +158,7 @@ async function sendDigest(items: NotificationItem[], header?: string): Promise<v
   try {
     await botInstance.api.sendMessage(chatId, text, opts);
   } catch (error) {
-    console.error(`Digest send error:`, error);
+    log.error(`Digest send error:`, { error: String(error) });
   }
 }
 
@@ -301,7 +301,7 @@ export async function flushMorningDigest(): Promise<void> {
   try {
     await botInstance.api.sendMessage(chatId, text, opts);
   } catch (error) {
-    console.error(`Morning digest send error:`, error);
+    log.error(`Morning digest send error:`, { error: String(error) });
   }
 }
 
@@ -339,8 +339,8 @@ export async function consumeMcpPending(): Promise<void> {
 export async function startQueue(bot: Bot): Promise<void> {
   botInstance = bot;
   groupId = process.env.TELEGRAM_GROUP_ID || "";
-  sprintThreadId = parseInt(process.env.SPRINT_THREAD_ID || "0");
-  devThreadId = parseInt(process.env.DEV_THREAD_ID || "0");
+  sprintThreadId = parseInt(process.env.SPRINT_THREAD_ID || "0", 10);
+  devThreadId = parseInt(process.env.DEV_THREAD_ID || "0", 10);
 
   await loadPrefs();
   await loadQueue();

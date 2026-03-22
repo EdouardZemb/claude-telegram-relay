@@ -14,10 +14,12 @@
  * gate-based workflow, validation before execution.
  */
 
-import { spawn } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getAgent, buildAgentSystemPrompt } from "./bmad-agents.ts";
+import { spawn } from "bun";
+import { buildAgentSystemPrompt, getAgent } from "./bmad-agents.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("prd");
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
@@ -104,27 +106,35 @@ export async function generatePRD(
   const constraintLines: string[] = [];
   if (sessionConstraints) {
     if (sessionConstraints.speed === "fast") {
-      constraintLines.push("- CONTRAINTE VITESSE: privilegie un scope minimal et un pipeline rapide (QUICK ou SOLO)");
+      constraintLines.push(
+        "- CONTRAINTE VITESSE: privilegie un scope minimal et un pipeline rapide (QUICK ou SOLO)",
+      );
     }
     if (sessionConstraints.quality === "high") {
-      constraintLines.push("- CONTRAINTE QUALITE: inclus des criteres de test plus stricts et une couverture exhaustive");
+      constraintLines.push(
+        "- CONTRAINTE QUALITE: inclus des criteres de test plus stricts et une couverture exhaustive",
+      );
     }
     if (sessionConstraints.budget === "low") {
-      constraintLines.push("- CONTRAINTE BUDGET: note l'estimation de cout et privilegie les pipelines economiques");
+      constraintLines.push(
+        "- CONTRAINTE BUDGET: note l'estimation de cout et privilegie les pipelines economiques",
+      );
     }
     if (sessionConstraints.scope === "minimal") {
-      constraintLines.push("- CONTRAINTE PERIMETRE: scope strictement minimal, pas de nice-to-have");
+      constraintLines.push(
+        "- CONTRAINTE PERIMETRE: scope strictement minimal, pas de nice-to-have",
+      );
     }
     if (sessionConstraints.deadline) {
       constraintLines.push(`- CONTRAINTE ECHEANCE: ${sessionConstraints.deadline}`);
     }
   }
-  const constraintBlock = constraintLines.length > 0
-    ? `\nCONTRAINTES UTILISATEUR:\n${constraintLines.join("\n")}\n`
-    : "";
+  const constraintBlock =
+    constraintLines.length > 0 ? `\nCONTRAINTES UTILISATEUR:\n${constraintLines.join("\n")}\n` : "";
 
   const prompt = [
-    agentPrefix + "Genere un PRD (Product Requirements Document) structure a partir de la description suivante.",
+    agentPrefix +
+      "Genere un PRD (Product Requirements Document) structure a partir de la description suivante.",
     "",
     `DESCRIPTION: ${description}`,
     `PROJET: ${project}`,
@@ -192,7 +202,7 @@ export async function generatePRD(
 
     return { title, summary, content };
   } catch (error) {
-    console.error("generatePRD error:", error);
+    log.error("generatePRD error", { error: String(error) });
     return null;
   }
 }
@@ -200,7 +210,7 @@ export async function generatePRD(
 export async function savePRD(
   supabase: SupabaseClient,
   prd: { title: string; summary: string; content: string },
-  opts?: { project?: string; tags?: string[]; requested_by?: string }
+  opts?: { project?: string; tags?: string[]; requested_by?: string },
 ): Promise<PRD | null> {
   const { data, error } = await supabase
     .from("prds")
@@ -216,22 +226,17 @@ export async function savePRD(
     .single();
 
   if (error) {
-    console.error("savePRD error:", error);
+    log.error("savePRD error", { error: String(error) });
     return null;
   }
   return data as PRD;
 }
 
-export async function getPRD(
-  supabase: SupabaseClient,
-  idPrefix: string
-): Promise<PRD | null> {
-  const { data: allPrds, error } = await supabase
-    .from("prds")
-    .select("*");
+export async function getPRD(supabase: SupabaseClient, idPrefix: string): Promise<PRD | null> {
+  const { data: allPrds, error } = await supabase.from("prds").select("*");
 
   if (error) {
-    console.error("getPRD error:", error);
+    log.error("getPRD error", { error: String(error) });
     return null;
   }
   const match = (allPrds || []).find((p: { id: string }) => p.id.startsWith(idPrefix));
@@ -240,19 +245,16 @@ export async function getPRD(
 
 export async function getPRDs(
   supabase: SupabaseClient,
-  opts?: { project?: string; status?: string }
+  opts?: { project?: string; status?: string },
 ): Promise<PRD[]> {
-  let query = supabase
-    .from("prds")
-    .select("*")
-    .order("created_at", { ascending: false });
+  let query = supabase.from("prds").select("*").order("created_at", { ascending: false });
 
   if (opts?.project) query = query.eq("project", opts.project);
   if (opts?.status) query = query.eq("status", opts.status);
 
   const { data, error } = await query;
   if (error) {
-    console.error("getPRDs error:", error);
+    log.error("getPRDs error", { error: String(error) });
     return [];
   }
   return (data ?? []) as PRD[];
@@ -261,7 +263,7 @@ export async function getPRDs(
 export async function updatePRDStatus(
   supabase: SupabaseClient,
   prdId: string,
-  status: PRD["status"]
+  status: PRD["status"],
 ): Promise<PRD | null> {
   const { data, error } = await supabase
     .from("prds")
@@ -271,7 +273,7 @@ export async function updatePRDStatus(
     .single();
 
   if (error) {
-    console.error("updatePRDStatus error:", error);
+    log.error("updatePRDStatus error", { error: String(error) });
     return null;
   }
   return data as PRD;
@@ -294,7 +296,7 @@ export async function updatePRDContent(
     .single();
 
   if (error) {
-    console.error("updatePRDContent error:", error);
+    log.error("updatePRDContent error", { error: String(error) });
     return null;
   }
   return data as PRD;

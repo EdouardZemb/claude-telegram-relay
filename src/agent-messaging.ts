@@ -5,14 +5,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AgentRole, AgentStepResult } from "./orchestrator.ts";
-import type { WorkingMemory } from "./blackboard.ts";
-import {
-  readSection,
-  writeSectionWithRetry,
-  type SectionName,
-} from "./blackboard.ts";
 import { emitAgentEvent } from "./agent-events.ts";
+import type { WorkingMemory } from "./blackboard.ts";
+import { readSection, type SectionName, writeSectionWithRetry } from "./blackboard.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -49,14 +44,18 @@ export async function sendAgentMessage(
   supabase: SupabaseClient | null,
   sessionId: string,
   message: AgentInterMessage,
-  expectedVersion: number
+  expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
   if (!supabase) {
     return { success: false, newVersion: expectedVersion, error: "No supabase" };
   }
 
   // Read current messages
-  const current = (await readSection(supabase, sessionId, "messages" as SectionName)) as MessagesSection | null;
+  const current = (await readSection(
+    supabase,
+    sessionId,
+    "messages" as SectionName,
+  )) as MessagesSection | null;
   const section: MessagesSection = current || { messages: [] };
 
   // EC-004: Truncate oldest if over limit
@@ -78,7 +77,7 @@ export async function sendAgentMessage(
     "messages" as SectionName,
     section,
     message.from,
-    expectedVersion
+    expectedVersion,
   );
 }
 
@@ -88,11 +87,15 @@ export async function sendAgentMessage(
 export async function getAgentMessages(
   supabase: SupabaseClient | null,
   sessionId: string,
-  forRole: string
+  forRole: string,
 ): Promise<AgentInterMessage[]> {
   if (!supabase) return [];
 
-  const section = (await readSection(supabase, sessionId, "messages" as SectionName)) as MessagesSection | null;
+  const section = (await readSection(
+    supabase,
+    sessionId,
+    "messages" as SectionName,
+  )) as MessagesSection | null;
   if (!section?.messages) return [];
 
   return section.messages
@@ -106,7 +109,7 @@ export async function getAgentMessages(
 export async function getPendingQuestions(
   supabase: SupabaseClient | null,
   sessionId: string,
-  forRole: string
+  forRole: string,
 ): Promise<AgentInterMessage[]> {
   const messages = await getAgentMessages(supabase, sessionId, forRole);
   return messages.filter((m) => m.type === "question" && !m.resolved);
@@ -120,13 +123,17 @@ export async function resolveQuestion(
   sessionId: string,
   questionId: string,
   responseMessage: AgentInterMessage,
-  expectedVersion: number
+  expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
   if (!supabase) {
     return { success: false, newVersion: expectedVersion, error: "No supabase" };
   }
 
-  const section = (await readSection(supabase, sessionId, "messages" as SectionName)) as MessagesSection | null;
+  const section = (await readSection(
+    supabase,
+    sessionId,
+    "messages" as SectionName,
+  )) as MessagesSection | null;
   if (!section?.messages) {
     return { success: false, newVersion: expectedVersion, error: "No messages" };
   }
@@ -147,7 +154,7 @@ export async function resolveQuestion(
     "messages" as SectionName,
     section,
     responseMessage.from,
-    expectedVersion
+    expectedVersion,
   );
 }
 
@@ -160,9 +167,9 @@ export async function resolveQuestion(
 export function canRequestClarification(
   sessionId: string,
   fromRole: string,
-  toRole: string
+  toRole: string,
 ): boolean {
-  const key = `${sessionId}:${fromRole}->${toRole}`;
+  const _key = `${sessionId}:${fromRole}->${toRole}`;
   const pairKey = `${fromRole}->${toRole}`;
 
   if (!clarificationTracker.has(sessionId)) {
@@ -175,11 +182,7 @@ export function canRequestClarification(
 /**
  * Mark a clarification as used between two agents.
  */
-export function markClarificationUsed(
-  sessionId: string,
-  fromRole: string,
-  toRole: string
-): void {
+export function markClarificationUsed(sessionId: string, fromRole: string, toRole: string): void {
   if (!clarificationTracker.has(sessionId)) {
     clarificationTracker.set(sessionId, new Set());
   }
@@ -199,16 +202,18 @@ export function clearClarificationTracker(sessionId: string): void {
  */
 export async function checkPendingClarifications(
   supabase: SupabaseClient | null,
-  sessionId: string
+  sessionId: string,
 ): Promise<AgentInterMessage[]> {
   if (!supabase) return [];
 
-  const section = (await readSection(supabase, sessionId, "messages" as SectionName)) as MessagesSection | null;
+  const section = (await readSection(
+    supabase,
+    sessionId,
+    "messages" as SectionName,
+  )) as MessagesSection | null;
   if (!section?.messages) return [];
 
-  return section.messages.filter(
-    (m) => m.type === "question" && !m.resolved
-  );
+  return section.messages.filter((m) => m.type === "question" && !m.resolved);
 }
 
 // ── Conflict Detection (FR-004) ──────────────────────────────
@@ -381,7 +386,7 @@ export function getMessageFlowSummary(messages: AgentInterMessage[]): MessageFlo
     byType,
     clarificationsRequested,
     clarificationsResolved,
-    conflictsDetected: byType["escalation"] || 0,
+    conflictsDetected: byType.escalation || 0,
   };
 }
 
@@ -389,9 +394,7 @@ export function getMessageFlowSummary(messages: AgentInterMessage[]): MessageFlo
  * Format message flow for /monitor display.
  */
 export function formatMessageFlow(summary: MessageFlowSummary): string {
-  const lines: string[] = [
-    `MESSAGES INTER-AGENTS: ${summary.totalMessages} total`,
-  ];
+  const lines: string[] = [`MESSAGES INTER-AGENTS: ${summary.totalMessages} total`];
 
   if (summary.totalMessages === 0) return lines[0];
 
@@ -402,7 +405,7 @@ export function formatMessageFlow(summary: MessageFlowSummary): string {
 
   if (summary.clarificationsRequested > 0) {
     lines.push(
-      `  Clarifications: ${summary.clarificationsResolved}/${summary.clarificationsRequested} resolues`
+      `  Clarifications: ${summary.clarificationsResolved}/${summary.clarificationsRequested} resolues`,
     );
   }
 

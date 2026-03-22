@@ -5,22 +5,24 @@
  * that display bot capabilities, system health, and production monitoring.
  */
 
-import { Composer, Context } from "grammy";
-import { cpus, totalmem, freemem, loadavg, uptime as osUptime, hostname } from "os";
 import { execSync } from "child_process";
+import { Composer, type Context } from "grammy";
+import { cpus, freemem, hostname, loadavg, uptime as osUptime, totalmem } from "os";
+import { formatAgentTimeline, getAgentEvents } from "../agent-events.ts";
+import { formatMessageFlow, getAgentMessages, getMessageFlowSummary } from "../agent-messaging.ts";
+import { formatMonitoringStats } from "../alerts.ts";
+import { formatAgentList } from "../bmad-agents.ts";
 import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
-import { formatAgentList } from "../bmad-agents.ts";
-import { formatMonitoringStats } from "../alerts.ts";
-import { formatRecentGateEvaluations, formatTrustScores } from "../trust-scores.ts";
-import { formatDoubleLoopRules } from "../gate-persistence.ts";
-import { formatFeedbackRules, getFeedbackRules } from "../feedback-loop.ts";
-import { getAgentEvents, formatAgentTimeline } from "../agent-events.ts";
-import { getAgentMessages, getMessageFlowSummary, formatMessageFlow } from "../agent-messaging.ts";
-import { loadGraph, formatGraphStatsForMonitor } from "../code-graph.ts";
+import { formatGraphStatsForMonitor, loadGraph } from "../code-graph.ts";
 import { getActiveSessionCount } from "../conversation-session.ts";
-import { getLlmOpsSnapshot, formatLlmOpsSnapshot } from "../llm-ops.ts";
+import { getFeedbackRules } from "../feedback-loop.ts";
+import { formatDoubleLoopRules } from "../gate-persistence.ts";
+import { formatLlmOpsSnapshot, getLlmOpsSnapshot } from "../llm-ops.ts";
+import { createLogger } from "../logger.ts";
+import { formatRecentGateEvaluations, formatTrustScores } from "../trust-scores.ts";
 
+const log = createLogger("help");
 export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
   const { commandGuard, threadOpts, sendResponse, supabase } = bctx;
@@ -123,14 +125,20 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
   // /agents — list BMad agents and their capabilities
   composer.command("agents", async (ctx) => {
     const blocked = commandGuard(ctx, "agents");
-    if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, threadOpts(ctx));
+      return;
+    }
     await ctx.reply(formatAgentList(), threadOpts(ctx));
   });
 
   // /status — server health and system info
   composer.command("status", async (ctx) => {
     const blocked = commandGuard(ctx, "status");
-    if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, threadOpts(ctx));
+      return;
+    }
     try {
       const uptimeSec = Math.round((Date.now() - RELAY_START_TIME) / 1000);
       const uptimeStr = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
@@ -174,7 +182,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
 
       await sendResponse(ctx, parts.join("\n"));
     } catch (error) {
-      console.error("Status error:", error);
+      log.error("Status error", { error: String(error) });
       await ctx.reply("Erreur lors de la recuperation du statut.", threadOpts(ctx));
     }
   });
@@ -182,7 +190,10 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
   // /monitor — production monitoring stats (S35: trust scores, evaluations, double-loop)
   composer.command("monitor", async (ctx) => {
     const blocked = commandGuard(ctx, "monitor");
-    if (blocked) { await ctx.reply(blocked, threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, threadOpts(ctx));
+      return;
+    }
 
     const parts = [formatMonitoringStats()];
 
@@ -201,7 +212,10 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       const activeRules = getFeedbackRules();
       if (activeRules.length > 0) {
         const promoted = activeRules.filter((r) => r.promoted).length;
-        parts.push("", `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`);
+        parts.push(
+          "",
+          `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`,
+        );
       }
 
       // S38: Inter-agent communication monitoring

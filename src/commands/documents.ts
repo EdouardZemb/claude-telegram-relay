@@ -6,21 +6,23 @@
  * S45-T3.
  */
 
-import { Composer, Context, InlineKeyboard } from "grammy";
+import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, escapeHtml } from "../bot-context.ts";
+import type { Document, DocumentCreateInput } from "../documents.ts";
 import {
-  listDocuments,
-  getDocumentById,
-  deleteDocument,
-  searchDocuments,
-  getDocumentStats,
-  getCategories,
-  createSignedUrls,
   createDocument,
+  createSignedUrls,
+  deleteDocument,
+  getCategories,
+  getDocumentById,
+  getDocumentStats,
+  listDocuments,
+  searchDocuments,
 } from "../documents.ts";
-import type { Document, DocumentCategory, DocumentCreateInput } from "../documents.ts";
+import { createLogger } from "../logger.ts";
 
+const log = createLogger("documents-cmd");
 // ── Constants ────────────────────────────────────────────────
 
 const CLASSIFICATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -38,14 +40,14 @@ interface PendingClassification {
 const pendingClassifications = new Map<number, PendingClassification>();
 
 // Auto-confirm after timeout
-function schedulePendingTimeout(chatId: number, supabase: NonNullable<BotContext["supabase"]>) {
+function schedulePendingTimeout(chatId: number, _supabase: NonNullable<BotContext["supabase"]>) {
   setTimeout(async () => {
     const pending = pendingClassifications.get(chatId);
     if (!pending) return;
 
     // Still the same pending? Auto-confirm
     pendingClassifications.delete(chatId);
-    console.log(`Auto-confirmed classification for document ${pending.documentId} after timeout`);
+    log.info(`Auto-confirmed classification for document ${pending.documentId} after timeout`);
   }, CLASSIFICATION_TIMEOUT_MS);
 }
 
@@ -123,7 +125,10 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
   // /docs — Document management subcommands
   composer.command("docs", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "docs");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -159,7 +164,10 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       if (hasUrls) {
         await bctx.sendResponseHtml(ctx, text);
       } else {
-        await bctx.sendResponse(ctx, `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search <query> pour chercher.`);
+        await bctx.sendResponse(
+          ctx,
+          `DOCUMENTS RECENTS (${docs.length})\n\n${lines.join("\n")}\n\nUtilise /docs search <query> pour chercher.`,
+        );
       }
       return;
     }
@@ -198,7 +206,9 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         const line = `${i + 1}. ${title} [${id}] (${score}%)${desc}`;
         return url ? `${line}\n  ${url}` : line;
       });
-      const header = hasUrls ? escapeHtml(`RESULTATS POUR "${arg}" (${results.length})`) : `RESULTATS POUR "${arg}" (${results.length})`;
+      const header = hasUrls
+        ? escapeHtml(`RESULTATS POUR "${arg}" (${results.length})`)
+        : `RESULTATS POUR "${arg}" (${results.length})`;
       if (hasUrls) {
         await bctx.sendResponseHtml(ctx, `${header}\n\n${lines.join("\n")}`);
       } else {
@@ -316,7 +326,7 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
+    const _userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
 
     // ── doc_confirm:<docId> — confirm classification ────────
     if (data.startsWith("doc_confirm:")) {
@@ -406,7 +416,7 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
         .eq("id", docRow.id);
 
       if (error) {
-        console.error("dsc error:", error);
+        log.error("dsc error", { error: String(error) });
         await ctx.answerCallbackQuery({ text: "Erreur lors de la mise a jour." });
         return;
       }
@@ -520,18 +530,23 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
           );
         }
 
-        const extractionFailed = (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
+        const extractionFailed =
+          (createdDoc.metadata as Record<string, unknown>)?.extraction_failed === true;
         const resultText = [
           `Document enregistre [${createdDoc.id.substring(0, 8)}]`,
           createdDoc.title ? `Titre: ${createdDoc.title}` : "",
           createdDoc.description ? `Description: ${createdDoc.description}` : "",
           createdDoc.document_date ? `Date: ${createdDoc.document_date}` : "",
-          extractionFailed ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche." : "",
-        ].filter(Boolean).join("\n");
+          extractionFailed
+            ? "\nAttention : l'extraction du texte a echoue. Le document est stocke mais non indexe pour la recherche."
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
 
         await ctx.editMessageText(resultText, { reply_markup: keyboard });
       } catch (err) {
-        console.error("doc_dup_add createDocument error:", err);
+        log.error("doc_dup_add createDocument error", { error: String(err) });
         await ctx.editMessageText("Erreur lors de l'ajout du document.");
       }
       return;
@@ -559,10 +574,7 @@ export default function documentsCommands(bctx: BotContext): Composer<Context> {
  * Build inline keyboard for classification confirmation.
  * Used by the document message handler after creating a document.
  */
-export function buildClassificationKeyboard(
-  docId: string,
-  categoryName: string,
-): InlineKeyboard {
+export function buildClassificationKeyboard(docId: string, categoryName: string): InlineKeyboard {
   return new InlineKeyboard()
     .text(`Confirmer (${categoryName})`, `doc_confirm:${docId}`)
     .row()

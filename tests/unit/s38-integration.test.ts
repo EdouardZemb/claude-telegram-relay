@@ -3,14 +3,10 @@
  * context enrichment, and backward compatibility.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  InMemoryBlackboard,
-  type SectionName,
-} from "../../src/blackboard.ts";
-import { buildStructuredChainContext } from "../../src/agent-schemas.ts";
+import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "../../src/agent-schemas.ts";
-
+import { buildStructuredChainContext } from "../../src/agent-schemas.ts";
+import { InMemoryBlackboard, type SectionName } from "../../src/blackboard.ts";
 
 // ── Blackboard Messages Section ──────────────────────────────
 
@@ -18,8 +14,13 @@ describe("Blackboard messages section", () => {
   // AC-006: Section messages available in blackboard
   it("includes messages in SectionName type", () => {
     const validSections: SectionName[] = [
-      "spec", "plan", "tasks", "implementation",
-      "verification", "working_memory", "messages",
+      "spec",
+      "plan",
+      "tasks",
+      "implementation",
+      "verification",
+      "working_memory",
+      "messages",
     ];
     expect(validSections.length).toBe(7);
   });
@@ -71,14 +72,16 @@ describe("Blackboard messages section", () => {
 describe("buildStructuredChainContext with inter-agent context", () => {
   // AC-023: buildStructuredChainContext includes inter-agent messages
   it("includes inter-agent context when provided", () => {
-    const messages: AgentMessage[] = [{
-      agentId: "analyst",
-      agentName: "Analyst",
-      success: true,
-      structured: null,
-      rawOutput: "Analysis result",
-      durationMs: 1000,
-    }];
+    const messages: AgentMessage[] = [
+      {
+        agentId: "analyst",
+        agentName: "Analyst",
+        success: true,
+        structured: null,
+        rawOutput: "Analysis result",
+        durationMs: 1000,
+      },
+    ];
 
     const interCtx = "MESSAGES INTER-AGENTS:\n[WARNING] qa -> dev: Missing tests";
     const result = buildStructuredChainContext(messages, interCtx);
@@ -90,14 +93,16 @@ describe("buildStructuredChainContext with inter-agent context", () => {
   });
 
   it("works without inter-agent context (backward compatible)", () => {
-    const messages: AgentMessage[] = [{
-      agentId: "dev",
-      agentName: "Dev",
-      success: true,
-      structured: null,
-      rawOutput: "Dev output",
-      durationMs: 500,
-    }];
+    const messages: AgentMessage[] = [
+      {
+        agentId: "dev",
+        agentName: "Dev",
+        success: true,
+        structured: null,
+        rawOutput: "Dev output",
+        durationMs: 500,
+      },
+    ];
 
     const result = buildStructuredChainContext(messages);
     expect(result).toContain("Dev output");
@@ -115,7 +120,6 @@ describe("buildStructuredChainContext with inter-agent context", () => {
     expect(result).toBe("");
   });
 });
-
 
 // ── SC-007: Backward Compatibility ───────────────────────────
 

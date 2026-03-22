@@ -16,12 +16,14 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { readSection, writeSection, type BlackboardSections, type SectionName } from "./blackboard.ts";
-import { spawnClaude } from "./agent.ts";
 import { spawnSync } from "bun";
-import { updateTrustScore, shouldAutoApprove, getCachedTrustScore } from "./trust-scores.ts";
-import { persistGateEvaluation, runDoubleLoopAnalysis } from "./gate-persistence.ts";
+import { spawnClaude } from "./agent.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { persistGateEvaluation, runDoubleLoopAnalysis } from "./gate-persistence.ts";
+import { createLogger } from "./logger.ts";
+import { getCachedTrustScore, shouldAutoApprove, updateTrustScore } from "./trust-scores.ts";
+
+const log = createLogger("gate-evaluator");
 const EVALUATOR_TIMEOUT = 120_000; // 120s (EC-004)
 const DETERMINISTIC_CHECK_TIMEOUT = 30_000; // 30s per check (S34 EC-001)
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
@@ -95,9 +97,9 @@ export const EXPLORATION_RUBRIC_DIMENSIONS = [
   "confidence",
 ] as const;
 
-export type CodeRubricDimension = typeof CODE_RUBRIC_DIMENSIONS[number];
-export type SpecRubricDimension = typeof SPEC_RUBRIC_DIMENSIONS[number];
-export type ExplorationRubricDimension = typeof EXPLORATION_RUBRIC_DIMENSIONS[number];
+export type CodeRubricDimension = (typeof CODE_RUBRIC_DIMENSIONS)[number];
+export type SpecRubricDimension = (typeof SPEC_RUBRIC_DIMENSIONS)[number];
+export type ExplorationRubricDimension = (typeof EXPLORATION_RUBRIC_DIMENSIONS)[number];
 
 function getRubricDimensions(gateName: GateName): readonly string[] {
   if (gateName === "implementation") return CODE_RUBRIC_DIMENSIONS;
@@ -115,7 +117,7 @@ export function runSingleCheck(
   command: string[],
   checkName: string,
   timeout: number = DETERMINISTIC_CHECK_TIMEOUT,
-  cwd: string = PROJECT_DIR
+  cwd: string = PROJECT_DIR,
 ): DeterministicCheckResult {
   const start = Date.now();
 
@@ -169,20 +171,10 @@ export function runDeterministicChecks(cwd?: string): DeterministicCheckResult[]
   const results: DeterministicCheckResult[] = [];
 
   // Check 1: TypeScript type check
-  results.push(runSingleCheck(
-    ["npx", "tsc", "--noEmit"],
-    "tsc",
-    DETERMINISTIC_CHECK_TIMEOUT,
-    cwd
-  ));
+  results.push(runSingleCheck(["npx", "tsc", "--noEmit"], "tsc", DETERMINISTIC_CHECK_TIMEOUT, cwd));
 
   // Check 2: Run tests
-  results.push(runSingleCheck(
-    ["bun", "test"],
-    "bun_test",
-    DETERMINISTIC_CHECK_TIMEOUT,
-    cwd
-  ));
+  results.push(runSingleCheck(["bun", "test"], "bun_test", DETERMINISTIC_CHECK_TIMEOUT, cwd));
 
   return results;
 }
@@ -278,15 +270,15 @@ function buildRubricJsonSchema(gateName: GateName): string {
     .join(",\n");
 
   return [
-    '{',
+    "{",
     '  "pass": true/false,',
     '  "score": 0-100,',
     '  "rubric": {',
     rubricFields,
-    '  },',
+    "  },",
     '  "issues": [{"severity": "critical|major|minor", "description": "...", "suggestion": "..."}],',
     '  "gate_name": "' + gateName + '"',
-    '}',
+    "}",
   ].join("\n");
 }
 
@@ -334,11 +326,15 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
 
   // Coverage: check findings count
   const findings = Array.isArray(sectionData?.findings) ? sectionData.findings : [];
-  const coverageScore = findings.length >= 3 ? 25 : findings.length >= 2 ? 18 : findings.length === 1 ? 10 : 0;
+  const coverageScore =
+    findings.length >= 3 ? 25 : findings.length >= 2 ? 18 : findings.length === 1 ? 10 : 0;
   rubric.push({
     name: "coverage",
     score: coverageScore,
-    feedback: findings.length >= 2 ? `${findings.length} findings` : `Only ${findings.length} findings (need >= 2)`,
+    feedback:
+      findings.length >= 2
+        ? `${findings.length} findings`
+        : `Only ${findings.length} findings (need >= 2)`,
     critical: coverageScore < 10,
   });
   if (findings.length < 2) {
@@ -350,9 +346,15 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
   }
 
   // Depth: check for sources in findings
-  const findingsWithSources = findings.filter((f: any) => Array.isArray(f?.sources) && f.sources.length > 0);
-  const depthScore = findingsWithSources.length >= findings.length * 0.5 ? 20
-    : findingsWithSources.length > 0 ? 15 : 5;
+  const findingsWithSources = findings.filter(
+    (f: any) => Array.isArray(f?.sources) && f.sources.length > 0,
+  );
+  const depthScore =
+    findingsWithSources.length >= findings.length * 0.5
+      ? 20
+      : findingsWithSources.length > 0
+        ? 15
+        : 5;
   rubric.push({
     name: "depth",
     score: depthScore,
@@ -361,7 +363,8 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
   });
 
   // Actionability: check recommendation and alternatives
-  const hasRecommendation = typeof sectionData?.recommendation === "string" && sectionData.recommendation.length > 10;
+  const hasRecommendation =
+    typeof sectionData?.recommendation === "string" && sectionData.recommendation.length > 10;
   const alternatives = Array.isArray(sectionData?.alternatives) ? sectionData.alternatives : [];
   const actionScore = hasRecommendation ? (alternatives.length >= 2 ? 25 : 18) : 5;
   rubric.push({
@@ -382,7 +385,8 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
 
   // Confidence: check confidence score
   const confidence = typeof sectionData?.confidence === "number" ? sectionData.confidence : 0;
-  const confidenceScore = confidence >= 0.8 ? 25 : confidence >= 0.6 ? 20 : confidence >= 0.4 ? 12 : 5;
+  const confidenceScore =
+    confidence >= 0.8 ? 25 : confidence >= 0.6 ? 20 : confidence >= 0.4 ? 12 : 5;
   rubric.push({
     name: "confidence",
     score: confidenceScore,
@@ -399,23 +403,25 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
 
   const totalScore = rubric.reduce((sum, r) => sum + r.score, 0);
   const hasCritical = rubric.some((r) => r.critical);
-  const pass = totalScore >= 60 && !hasCritical && issues.filter((i) => i.severity === "critical").length === 0;
+  const pass =
+    totalScore >= 60 &&
+    !hasCritical &&
+    issues.filter((i) => i.severity === "critical").length === 0;
 
   return { pass, score: totalScore, issues, rubric };
 }
 
 export async function evaluateGate(
-  supabase: SupabaseClient | null,
-  sessionId: string,
+  _supabase: SupabaseClient | null,
+  _sessionId: string,
   gateName: GateName,
   sectionData: any,
   /** S34: Working directory for deterministic checks (or S35 options) */
-  cwdOrOptions?: string | EvaluateGateOptions
+  cwdOrOptions?: string | EvaluateGateOptions,
 ): Promise<GateEvaluation> {
   // S35: Normalize options
-  const opts: EvaluateGateOptions = typeof cwdOrOptions === "string"
-    ? { cwd: cwdOrOptions }
-    : (cwdOrOptions || {});
+  const opts: EvaluateGateOptions =
+    typeof cwdOrOptions === "string" ? { cwd: cwdOrOptions } : cwdOrOptions || {};
   const cwd = opts.cwd;
 
   // S35: Auto-approval check for high-trust agents on low-priority tasks
@@ -444,7 +450,9 @@ export async function evaluateGate(
         };
       }
       // Deterministic checks passed — auto-approve without LLM
-      console.log(`evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based, deterministic OK)`);
+      log.info(
+        `evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based, deterministic OK)`,
+      );
       return {
         pass: true,
         score: 100,
@@ -456,7 +464,7 @@ export async function evaluateGate(
     }
 
     // Non-implementation gates: auto-approve entirely
-    console.log(`evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based)`);
+    log.info(`evaluateGate: auto-approved ${gateName} for ${opts.agentRole} (trust-based)`);
     return {
       pass: true,
       score: 100,
@@ -560,11 +568,15 @@ export async function evaluateGate(
     const result = await Promise.race([resultPromise, timeoutPromise]);
 
     if (!result) {
-      console.warn(`evaluateGate: timeout for gate "${gateName}" (${EVALUATOR_TIMEOUT}ms). Passing with warning.`);
+      log.warn(
+        `evaluateGate: timeout for gate "${gateName}" (${EVALUATOR_TIMEOUT}ms). Passing with warning.`,
+      );
       return {
         pass: true,
         score: 50,
-        issues: [{ severity: "minor", description: "Evaluator timed out", suggestion: "Review manually" }],
+        issues: [
+          { severity: "minor", description: "Evaluator timed out", suggestion: "Review manually" },
+        ],
         gate_name: gateName,
         deterministicChecks: deterministicResults,
       };
@@ -575,12 +587,18 @@ export async function evaluateGate(
     evaluation.deterministicChecks = deterministicResults;
     return evaluation;
   } catch (error) {
-    console.error(`evaluateGate error for gate "${gateName}":`, error);
+    log.error(`evaluateGate error for gate "${gateName}":`, { error: String(error) });
     // On error, pass with warning (don't block pipeline)
     return {
       pass: true,
       score: 50,
-      issues: [{ severity: "minor", description: `Evaluator error: ${String(error)}`, suggestion: "Review manually" }],
+      issues: [
+        {
+          severity: "minor",
+          description: `Evaluator error: ${String(error)}`,
+          suggestion: "Review manually",
+        },
+      ],
       gate_name: gateName,
       deterministicChecks: deterministicResults,
     };
@@ -615,7 +633,13 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
   return {
     pass: true,
     score: 50,
-    issues: [{ severity: "minor", description: "Could not parse evaluator output", suggestion: "Review manually" }],
+    issues: [
+      {
+        severity: "minor",
+        description: "Could not parse evaluator output",
+        suggestion: "Review manually",
+      },
+    ],
     gate_name: gateName,
   };
 }
@@ -671,9 +695,8 @@ export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimen
     const dimData = obj.rubric[dim];
     if (!dimData) continue;
 
-    const score = typeof dimData.score === "number"
-      ? Math.min(25, Math.max(0, Math.round(dimData.score)))
-      : 0;
+    const score =
+      typeof dimData.score === "number" ? Math.min(25, Math.max(0, Math.round(dimData.score))) : 0;
 
     rubric.push({
       name: dim,
@@ -722,12 +745,13 @@ export async function evaluateAndRework(
   runAgent: (feedback: string) => Promise<any>,
   maxIterationsOrOpts?: number | EvaluateAndReworkOptions,
   /** Override evaluator for testing (legacy compat) */
-  customEvaluator?: (data: any) => Promise<GateEvaluation>
+  customEvaluator?: (data: any) => Promise<GateEvaluation>,
 ): Promise<EvaluateReworkResult> {
   // S35: Normalize options (backward compatible)
-  const opts: EvaluateAndReworkOptions = typeof maxIterationsOrOpts === "number"
-    ? { maxIterations: maxIterationsOrOpts, customEvaluator }
-    : (maxIterationsOrOpts || {});
+  const opts: EvaluateAndReworkOptions =
+    typeof maxIterationsOrOpts === "number"
+      ? { maxIterations: maxIterationsOrOpts, customEvaluator }
+      : maxIterationsOrOpts || {};
   if (customEvaluator && !opts.customEvaluator) opts.customEvaluator = customEvaluator;
   const maxIterations = opts.maxIterations ?? 2;
 
@@ -760,7 +784,7 @@ export async function evaluateAndRework(
       reworkIteration: i,
       reworkTriggered: !evaluation.pass && i < maxIterations,
       autoApproved: evaluation.autoApproved || false,
-    }).catch((err) => console.error("Gate persistence error:", err));
+    }).catch((err) => log.error("Gate persistence error", { error: String(err) }));
 
     if (evaluation.pass) {
       passedAtIteration = i;
@@ -771,19 +795,26 @@ export async function evaluateAndRework(
         const { notifyGateResult } = await import("./prd-workflow.ts");
         const trustScore = getCachedTrustScore(agentRole).score;
         notifyGateResult(
-          gateName, true, evaluation.score, evaluation.autoApproved || false,
-          agentRole, trustScore, i,
-        ).catch((err) => console.error("Gate notification error:", err));
+          gateName,
+          true,
+          evaluation.score,
+          evaluation.autoApproved || false,
+          agentRole,
+          trustScore,
+          i,
+        ).catch((err) => log.error("Gate notification error", { error: String(err) }));
       }
 
       // S35: Update trust score
-      updateTrustScore(supabase, agentRole, { passed: true, hadRework })
-        .catch((err) => console.error("Trust score update error:", err));
+      updateTrustScore(supabase, agentRole, { passed: true, hadRework }).catch((err) =>
+        log.error("Trust score update error", { error: String(err) }),
+      );
 
       // S35: Run double-loop analysis (non-blocking)
       if (supabase) {
-        runDoubleLoopAnalysis(supabase, agentRole)
-          .catch((err) => console.error("Double-loop analysis error:", err));
+        runDoubleLoopAnalysis(supabase, agentRole).catch((err) =>
+          log.error("Double-loop analysis error", { error: String(err) }),
+        );
       }
 
       return { finalEvaluation: evaluation, iterations: i, passedAtIteration };
@@ -791,8 +822,8 @@ export async function evaluateAndRework(
 
     // Max iterations reached — continue with warning (AC-012)
     if (i >= maxIterations) {
-      console.warn(
-        `evaluateAndRework: gate "${gateName}" still failing after ${maxIterations} iterations. Continuing with warning.`
+      log.warn(
+        `evaluateAndRework: gate "${gateName}" still failing after ${maxIterations} iterations. Continuing with warning.`,
       );
       evaluation.issues.push({
         severity: "major",
@@ -803,18 +834,21 @@ export async function evaluateAndRework(
       // Notify gate failure if prd_to_deploy workflow is active
       if (isFeatureEnabled("prd_to_deploy")) {
         const { notifyGateResult } = await import("./prd-workflow.ts");
-        notifyGateResult(gateName, false, evaluation.score, false, agentRole, undefined, i)
-          .catch((err) => console.error("Gate notification error:", err));
+        notifyGateResult(gateName, false, evaluation.score, false, agentRole, undefined, i).catch(
+          (err) => log.error("Gate notification error", { error: String(err) }),
+        );
       }
 
       // S35: Update trust score (failure)
-      updateTrustScore(supabase, agentRole, { passed: false, hadRework: true })
-        .catch((err) => console.error("Trust score update error:", err));
+      updateTrustScore(supabase, agentRole, { passed: false, hadRework: true }).catch((err) =>
+        log.error("Trust score update error", { error: String(err) }),
+      );
 
       // S35: Run double-loop analysis (non-blocking)
       if (supabase) {
-        runDoubleLoopAnalysis(supabase, agentRole)
-          .catch((err) => console.error("Double-loop analysis error:", err));
+        runDoubleLoopAnalysis(supabase, agentRole).catch((err) =>
+          log.error("Double-loop analysis error", { error: String(err) }),
+        );
       }
 
       return { finalEvaluation: evaluation, iterations: i, passedAtIteration: null };
@@ -831,7 +865,9 @@ export async function evaluateAndRework(
     finalEvaluation: {
       pass: false,
       score: 0,
-      issues: [{ severity: "critical", description: "Unexpected loop exit", suggestion: "Review code" }],
+      issues: [
+        { severity: "critical", description: "Unexpected loop exit", suggestion: "Review code" },
+      ],
       gate_name: gateName,
     },
     iterations,

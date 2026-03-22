@@ -4,21 +4,29 @@
  * cancel a running job. Part of S46 background job system.
  */
 
-import { Composer, Context } from "grammy";
+import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { list, get, cancel, formatJobList, isJobManagerEnabled } from "../job-manager.ts";
-import { updateTaskStatus, getCurrentSprint, getBacklog } from "../tasks.ts";
-import { getPRD, formatPRDDetail } from "../prd.ts";
+import { cancel, formatJobList, get, isJobManagerEnabled, list } from "../job-manager.ts";
+import { createLogger } from "../logger.ts";
+import { formatPRDDetail, getPRD } from "../prd.ts";
+import { getBacklog, getCurrentSprint, updateTaskStatus } from "../tasks.ts";
 
+const log = createLogger("jobs");
 export default function jobsCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
   composer.command("jobs", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "jobs");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     if (!isJobManagerEnabled()) {
-      await ctx.reply("Le job manager n'est pas actif. Utilise /feature enable job_manager pour l'activer.", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Le job manager n'est pas actif. Utilise /feature enable job_manager pour l'activer.",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -36,7 +44,10 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
       if (job.error === "cancelled") {
         await ctx.reply(`Job ${job.id} (${job.type}) annule.`, bctx.threadOpts(ctx));
       } else {
-        await ctx.reply(`Job ${job.id} (${job.type}) est deja termine (${job.status}).`, bctx.threadOpts(ctx));
+        await ctx.reply(
+          `Job ${job.id} (${job.type}) est deja termine (${job.status}).`,
+          bctx.threadOpts(ctx),
+        );
       }
       return;
     }
@@ -89,7 +100,10 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
     }
 
     // jc_ prefix: job completion action buttons
-    if (!data.startsWith("jc_")) { await next(); return; }
+    if (!data.startsWith("jc_")) {
+      await next();
+      return;
+    }
 
     const [action, param] = data.split(":");
 
@@ -118,9 +132,12 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
         await ctx.answerCallbackQuery({ text: "Backlog vide." });
       } else {
         await ctx.answerCallbackQuery();
-        const lines = backlog.slice(0, 10).map((t: any, i: number) =>
-          `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}] (${t.status})`
-        );
+        const lines = backlog
+          .slice(0, 10)
+          .map(
+            (t: any, i: number) =>
+              `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}] (${t.status})`,
+          );
         const text = `Backlog (${backlog.length} taches):\n\n${lines.join("\n")}`;
         await ctx.reply(text, bctx.threadOpts(ctx));
       }
@@ -139,9 +156,11 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
 
           // Truncate if too long for Telegram (4096 char limit)
           const MAX_DISPLAY = 3800;
-          const displayText = detail.length > MAX_DISPLAY
-            ? detail.substring(0, MAX_DISPLAY) + `\n\n... (tronque, utilise /prd ${shortId} pour le texte complet)`
-            : detail;
+          const displayText =
+            detail.length > MAX_DISPLAY
+              ? detail.substring(0, MAX_DISPLAY) +
+                `\n\n... (tronque, utilise /prd ${shortId} pour le texte complet)`
+              : detail;
 
           // Add action buttons for draft PRDs (same as /prd command)
           if (prd.status === "draft") {
@@ -160,9 +179,13 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
           callbackAnswered = true;
         }
       } catch (err) {
-        console.error("[jobs] jc_prd callback error:", err);
+        log.error("[jobs] jc_prd callback error", { error: String(err) });
         if (!callbackAnswered) {
-          try { await ctx.answerCallbackQuery({ text: "Erreur lors de l'affichage du PRD." }); } catch { /* already answered */ }
+          try {
+            await ctx.answerCallbackQuery({ text: "Erreur lors de l'affichage du PRD." });
+          } catch {
+            /* already answered */
+          }
         }
       }
       return;

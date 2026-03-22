@@ -5,7 +5,7 @@
  * photo-as-document detection, MIME type filtering, fallback behavior.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 
 // ── Import the exported heuristic ────────────────────────────
 
@@ -193,13 +193,7 @@ describe("isPhotoDocument", () => {
 
 describe("DOCUMENT_MIME_TYPES", () => {
   // These mime types should be routed through document pipeline
-  const eligibleMimes = [
-    "application/pdf",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif",
-  ];
+  const eligibleMimes = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"];
 
   const nonEligibleMimes = [
     "text/plain",
@@ -214,7 +208,11 @@ describe("DOCUMENT_MIME_TYPES", () => {
   for (const mime of eligibleMimes) {
     it(`recognizes ${mime} as eligible for document pipeline`, () => {
       const DOCUMENT_MIME_TYPES = new Set([
-        "application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif",
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
       ]);
       expect(DOCUMENT_MIME_TYPES.has(mime)).toBe(true);
     });
@@ -223,7 +221,11 @@ describe("DOCUMENT_MIME_TYPES", () => {
   for (const mime of nonEligibleMimes) {
     it(`rejects ${mime} from document pipeline`, () => {
       const DOCUMENT_MIME_TYPES = new Set([
-        "application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif",
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
       ]);
       expect(DOCUMENT_MIME_TYPES.has(mime)).toBe(false);
     });
@@ -277,7 +279,11 @@ describe("document handler routing", () => {
   it("PDF mime type is routable to document pipeline", () => {
     const mimeType = "application/pdf";
     const DOCUMENT_MIME_TYPES = new Set([
-      "application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif",
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
     ]);
     const supabase = {}; // truthy
     expect(supabase && DOCUMENT_MIME_TYPES.has(mimeType)).toBe(true);
@@ -286,7 +292,11 @@ describe("document handler routing", () => {
   it("text/plain falls through to Claude analysis", () => {
     const mimeType = "text/plain";
     const DOCUMENT_MIME_TYPES = new Set([
-      "application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif",
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
     ]);
     expect(DOCUMENT_MIME_TYPES.has(mimeType)).toBe(false);
   });
@@ -308,16 +318,15 @@ describe("document handler routing", () => {
       "Document enregistre [abcdef12]",
       "Titre: Facture EDF",
       "Description: Facture electricite",
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     expect(lines).toContain("Titre: Facture EDF");
   });
 
   it("result text includes document date when present", () => {
     const docDate = "2026-03-15";
-    const lines = [
-      "Document enregistre [abcdef12]",
-      `Date: ${docDate}`,
-    ].filter(Boolean).join("\n");
+    const lines = ["Document enregistre [abcdef12]", `Date: ${docDate}`].filter(Boolean).join("\n");
     expect(lines).toContain("Date: 2026-03-15");
   });
 
@@ -328,7 +337,9 @@ describe("document handler routing", () => {
       "", // empty description
       "", // empty date
       "Type: application/pdf",
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     const lineCount = lines.split("\n").length;
     expect(lineCount).toBe(2); // only non-empty lines
   });
@@ -395,10 +406,28 @@ describe("photo document detection scenarios", () => {
 describe("DOCUMENT_CAPTION_KEYWORDS completeness", () => {
   // Substring-matched keywords
   const substringKeywords = [
-    "facture", "contrat", "recu", "ordonnance", "document", "attestation",
-    "certificat", "devis", "fiche", "releve", "quittance", "bulletin",
-    "invoice", "receipt", "contract", "scan", "archive", "stocke",
-    "enregistre", "classe", "save", "store",
+    "facture",
+    "contrat",
+    "recu",
+    "ordonnance",
+    "document",
+    "attestation",
+    "certificat",
+    "devis",
+    "fiche",
+    "releve",
+    "quittance",
+    "bulletin",
+    "invoice",
+    "receipt",
+    "contract",
+    "scan",
+    "archive",
+    "stocke",
+    "enregistre",
+    "classe",
+    "save",
+    "store",
   ];
 
   // Word-boundary-matched keywords (to avoid false positives like "Regarde" -> "garde")

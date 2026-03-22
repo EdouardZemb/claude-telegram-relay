@@ -6,7 +6,7 @@
  * base categories, and match_documents RPC.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -25,12 +25,22 @@ describe("document_categories table", () => {
 
   it("has a UUID primary key", () => {
     // Match the PK definition within the document_categories block
-    const tableBlock = schema.split("CREATE TABLE IF NOT EXISTS document_categories")[1]?.split(");")[0];
+    const tableBlock = schema
+      .split("CREATE TABLE IF NOT EXISTS document_categories")[1]
+      ?.split(");")[0];
     expect(tableBlock).toContain("id UUID DEFAULT gen_random_uuid() PRIMARY KEY");
   });
 
   it("seeds 7 base categories", () => {
-    const baseCategories = ["facture", "contrat", "recu", "note", "identite", "attestation", "courrier"];
+    const baseCategories = [
+      "facture",
+      "contrat",
+      "recu",
+      "note",
+      "identite",
+      "attestation",
+      "courrier",
+    ];
     for (const cat of baseCategories) {
       expect(schema).toContain(`('${cat}',`);
     }
@@ -45,7 +55,9 @@ describe("document_categories table", () => {
   });
 
   it("has RLS policy for full access", () => {
-    expect(schema).toContain('CREATE POLICY "Allow all for authenticated" ON document_categories FOR ALL USING (true)');
+    expect(schema).toContain(
+      'CREATE POLICY "Allow all for authenticated" ON document_categories FOR ALL USING (true)',
+    );
   });
 });
 
@@ -83,10 +95,18 @@ describe("documents table", () => {
 
   it("has indexes for user, category, date, project, created_at", () => {
     expect(schema).toContain("CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id)");
-    expect(schema).toContain("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category_id)");
-    expect(schema).toContain("CREATE INDEX IF NOT EXISTS idx_documents_date ON documents(document_date DESC)");
-    expect(schema).toContain("CREATE INDEX IF NOT EXISTS idx_documents_project_id ON documents(project_id)");
-    expect(schema).toContain("CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC)");
+    expect(schema).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category_id)",
+    );
+    expect(schema).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_documents_date ON documents(document_date DESC)",
+    );
+    expect(schema).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_documents_project_id ON documents(project_id)",
+    );
+    expect(schema).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC)",
+    );
   });
 
   it("has IVFFlat embedding index with cosine ops", () => {
@@ -100,10 +120,16 @@ describe("documents table", () => {
   });
 
   it("has project-scoped RLS policies", () => {
-    expect(schema).toContain('CREATE POLICY "documents_insert" ON documents FOR INSERT WITH CHECK (true)');
+    expect(schema).toContain(
+      'CREATE POLICY "documents_insert" ON documents FOR INSERT WITH CHECK (true)',
+    );
     expect(schema).toContain('CREATE POLICY "documents_select_by_project" ON documents FOR SELECT');
-    expect(schema).toContain('CREATE POLICY "documents_update" ON documents FOR UPDATE USING (true)');
-    expect(schema).toContain('CREATE POLICY "documents_delete" ON documents FOR DELETE USING (true)');
+    expect(schema).toContain(
+      'CREATE POLICY "documents_update" ON documents FOR UPDATE USING (true)',
+    );
+    expect(schema).toContain(
+      'CREATE POLICY "documents_delete" ON documents FOR DELETE USING (true)',
+    );
   });
 });
 
@@ -117,14 +143,18 @@ describe("match_documents RPC", () => {
   it("accepts query_embedding, threshold, count, user_id params", () => {
     expect(schema).toContain("query_embedding VECTOR(1536)");
     // Check within match_documents context
-    const funcBlock = schema.split("CREATE OR REPLACE FUNCTION match_documents")[1]?.split("$$ LANGUAGE plpgsql")[0];
+    const funcBlock = schema
+      .split("CREATE OR REPLACE FUNCTION match_documents")[1]
+      ?.split("$$ LANGUAGE plpgsql")[0];
     expect(funcBlock).toContain("match_threshold FLOAT DEFAULT 0.7");
     expect(funcBlock).toContain("match_count INT DEFAULT 10");
     expect(funcBlock).toContain("p_user_id TEXT DEFAULT NULL");
   });
 
   it("returns document fields with similarity score", () => {
-    const funcBlock = schema.split("CREATE OR REPLACE FUNCTION match_documents")[1]?.split("$$ LANGUAGE plpgsql")[0];
+    const funcBlock = schema
+      .split("CREATE OR REPLACE FUNCTION match_documents")[1]
+      ?.split("$$ LANGUAGE plpgsql")[0];
     expect(funcBlock).toContain("similarity FLOAT");
     expect(funcBlock).toContain("d.title");
     expect(funcBlock).toContain("d.extracted_text");
@@ -133,12 +163,16 @@ describe("match_documents RPC", () => {
   });
 
   it("filters by user_id when provided", () => {
-    const funcBlock = schema.split("CREATE OR REPLACE FUNCTION match_documents")[1]?.split("$$ LANGUAGE plpgsql")[0];
+    const funcBlock = schema
+      .split("CREATE OR REPLACE FUNCTION match_documents")[1]
+      ?.split("$$ LANGUAGE plpgsql")[0];
     expect(funcBlock).toContain("p_user_id IS NULL OR d.user_id = p_user_id");
   });
 
   it("uses cosine distance for similarity", () => {
-    const funcBlock = schema.split("CREATE OR REPLACE FUNCTION match_documents")[1]?.split("$$ LANGUAGE plpgsql")[0];
+    const funcBlock = schema
+      .split("CREATE OR REPLACE FUNCTION match_documents")[1]
+      ?.split("$$ LANGUAGE plpgsql")[0];
     expect(funcBlock).toContain("1 - (d.embedding <=> query_embedding)");
   });
 });

@@ -5,33 +5,31 @@
  * P3 (DLQ), P4 (adaptive thresholds), P5 (correlation_id + tracing alias).
  */
 
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
-  scoreToPipeline,
-  type DifficultyScore,
-} from "../../src/llm-router";
-import {
-  selectAdaptivePipeline,
-  DEFAULT_PIPELINE,
-  LIGHT_PIPELINE,
-  SOLO_PIPELINE,
-  BREAKING_KEYWORDS,
-  hasBreakingKeywords,
-} from "../../src/pipeline-selection";
-import {
+  captureAgentFailure,
+  clearInMemoryEvents,
   emitAgentEvent,
+  type FailureContext,
   getAgentEvents,
   getInMemoryEventsForSession,
-  clearInMemoryEvents,
-  captureAgentFailure,
   getTracingTimeline,
-  type FailureContext,
 } from "../../src/agent-events";
+import { type DifficultyScore, scoreToPipeline } from "../../src/llm-router";
+import {
+  BREAKING_KEYWORDS,
+  DEFAULT_PIPELINE,
+  hasBreakingKeywords,
+  LIGHT_PIPELINE,
+} from "../../src/pipeline-selection";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function makeTask(title: string, opts?: { description?: string | null; priority?: number; subtasks?: any[] | null }) {
+function makeTask(
+  title: string,
+  opts?: { description?: string | null; priority?: number; subtasks?: any[] | null },
+) {
   return {
     id: "test-1",
     created_at: "2026-01-01",
@@ -98,7 +96,7 @@ describe("[V4] scoreToPipeline(0.7) retourne LIGHT (frontiere inclusive)", () =>
 describe("[V5] selectAdaptivePipeline retourne DEFAULT pour > 5 modules impactes", () => {
   test("tache avec 6 modules impactes et difficulty < 0.7 force DEFAULT", async () => {
     // Mock computeDifficultyScore to return score=0.5 with 6 affected modules
-    const { mock: bunMock } = await import("bun:test");
+    const { mock: _bunMock } = await import("bun:test");
     const originalImport = await import("../../src/llm-router");
 
     // Use a task that would normally get LIGHT (medium difficulty, no keywords)
@@ -268,7 +266,9 @@ describe("[V10] captureAgentFailure ne bloque jamais", () => {
     // Create a supabase mock that throws on insert
     const brokenSupabase = {
       from: () => ({
-        insert: () => { throw new Error("DB connection lost"); },
+        insert: () => {
+          throw new Error("DB connection lost");
+        },
       }),
     } as any;
 
@@ -422,9 +422,8 @@ describe("[V23] overlap=true + pipeline 1 agent → pas de changement", () => {
   test("pipeline [dev] avec overlap=true, overlapThreshold equals pipeline.length (no overlap)", () => {
     const pipeline = ["dev"];
     const effectiveOverlap = true;
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2
-      : pipeline.length;
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2 ? pipeline.length - 2 : pipeline.length;
 
     // With 1 agent, no overlap possible
     expect(overlapThreshold).toBe(pipeline.length);
@@ -436,9 +435,8 @@ describe("[V24] overlap=false (defaut) → pipeline sequentiel", () => {
   test("sans overlap, overlapThreshold equals pipeline.length (all sequential)", () => {
     const pipeline = ["analyst", "pm", "architect", "dev", "qa"];
     const effectiveOverlap = false;
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2
-      : pipeline.length;
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2 ? pipeline.length - 2 : pipeline.length;
 
     expect(overlapThreshold).toBe(pipeline.length);
   });
@@ -455,9 +453,8 @@ describe("[V20] overlap=true avec pipeline 3+ agents → 2 derniers en parallele
   test("pipeline [analyst, dev, qa] with overlap, overlapThreshold is at index 1", () => {
     const pipeline = ["analyst", "dev", "qa"];
     const effectiveOverlap = true;
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2
-      : pipeline.length;
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2 ? pipeline.length - 2 : pipeline.length;
 
     expect(overlapThreshold).toBe(1); // index 1 = dev and qa run in parallel
     expect(pipeline.slice(overlapThreshold)).toEqual(["dev", "qa"]);
@@ -467,9 +464,8 @@ describe("[V20] overlap=true avec pipeline 3+ agents → 2 derniers en parallele
   test("pipeline [analyst, pm, architect, dev, qa] with overlap, last 2 overlap", () => {
     const pipeline = ["analyst", "pm", "architect", "dev", "qa"];
     const effectiveOverlap = true;
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2
-      : pipeline.length;
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2 ? pipeline.length - 2 : pipeline.length;
 
     expect(overlapThreshold).toBe(3);
     expect(pipeline.slice(overlapThreshold)).toEqual(["dev", "qa"]);
@@ -482,9 +478,8 @@ describe("[V22] overlap=true + pipeline 2 agents → les 2 en parallele", () => 
   test("pipeline [dev, qa] with overlap, both agents overlap (threshold=0)", () => {
     const pipeline = ["dev", "qa"];
     const effectiveOverlap = true;
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2
-      : pipeline.length;
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2 ? pipeline.length - 2 : pipeline.length;
 
     expect(overlapThreshold).toBe(0);
     expect(pipeline.slice(overlapThreshold)).toEqual(["dev", "qa"]);

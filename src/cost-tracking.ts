@@ -12,7 +12,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("cost-tracking");
 // ── Types ────────────────────────────────────────────────────
 
 export interface TokenUsage {
@@ -59,9 +61,9 @@ export interface SprintCostSummary {
 
 /** S28: Multi-model pricing per 1M tokens */
 export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-4-6":   { input: 15.0, output: 75.0 },
-  "claude-sonnet-4-6": { input: 3.0,  output: 15.0 },
-  "claude-haiku-4-5":  { input: 0.80, output: 4.0 },
+  "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+  "claude-haiku-4-5": { input: 0.8, output: 4.0 },
 };
 
 /** Default pricing (Sonnet) for backward compatibility */
@@ -91,11 +93,11 @@ export function estimateCost(tokensInput: number, tokensOutput: number, model?: 
 export function parseTokenUsage(
   output: string,
   promptLength: number = 0,
-  model?: string
+  model?: string,
 ): TokenUsage {
   // Try to find structured usage data in output (Claude CLI may include it)
   const usageMatch = output.match(
-    /\{[^{}]*"input_tokens"\s*:\s*(\d+)[^{}]*"output_tokens"\s*:\s*(\d+)[^{}]*\}/
+    /\{[^{}]*"input_tokens"\s*:\s*(\d+)[^{}]*"output_tokens"\s*:\s*(\d+)[^{}]*\}/,
   );
 
   if (usageMatch) {
@@ -129,10 +131,7 @@ export function parseTokenUsage(
 /**
  * Log a cost entry to the cost_tracking table.
  */
-export async function logCost(
-  supabase: SupabaseClient | null,
-  entry: CostEntry
-): Promise<void> {
+export async function logCost(supabase: SupabaseClient | null, entry: CostEntry): Promise<void> {
   if (!supabase) return;
 
   try {
@@ -154,9 +153,9 @@ export async function logCost(
     if (entry.span_id) row.span_id = entry.span_id;
     if (entry.session_id) row.session_id = entry.session_id;
     const { error } = await supabase.from("cost_tracking").insert(row);
-    if (error) console.error("logCost error:", error);
+    if (error) log.error("logCost error", { error: String(error) });
   } catch (error) {
-    console.error("logCost error:", error);
+    log.error("logCost error", { error: String(error) });
   }
 }
 
@@ -167,7 +166,7 @@ export async function logCost(
  */
 export async function getSprintCostSummary(
   supabase: SupabaseClient | null,
-  sprintId: string
+  sprintId: string,
 ): Promise<SprintCostSummary | null> {
   if (!supabase) return null;
 
@@ -235,7 +234,7 @@ export async function getSprintCostSummary(
       costByTask,
     };
   } catch (error) {
-    console.error("getSprintCostSummary error:", error);
+    log.error("getSprintCostSummary error", { error: String(error) });
     return null;
   }
 }
@@ -244,7 +243,7 @@ export async function getSprintCostSummary(
  * Get total cost across all sprints.
  */
 export async function getTotalCost(
-  supabase: SupabaseClient | null
+  supabase: SupabaseClient | null,
 ): Promise<{ totalTokens: number; totalCostUsd: number; executions: number }> {
   if (!supabase) return { totalTokens: 0, totalCostUsd: 0, executions: 0 };
 
@@ -281,14 +280,12 @@ export async function getTotalCost(
  */
 export async function getHistoricalSprintAverage(
   supabase: SupabaseClient | null,
-  n: number = 3
+  n: number = 3,
 ): Promise<number | null> {
   if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase
-      .from("cost_tracking")
-      .select("sprint_id, cost_usd");
+    const { data, error } = await supabase.from("cost_tracking").select("sprint_id, cost_usd");
 
     if (error || !data?.length) return null;
 
@@ -332,15 +329,13 @@ export function formatCostSummary(summary: SprintCostSummary | null): string {
   ];
 
   // Cost by agent
-  const agents = Object.entries(summary.costByAgent).sort(
-    (a, b) => b[1].cost - a[1].cost
-  );
+  const agents = Object.entries(summary.costByAgent).sort((a, b) => b[1].cost - a[1].cost);
   if (agents.length > 0) {
     lines.push("");
     lines.push("Par agent:");
     for (const [role, stats] of agents) {
       lines.push(
-        `  ${role}: ${stats.count}x, ${formatTokenCount(stats.tokens)} tokens, $${stats.cost.toFixed(4)}`
+        `  ${role}: ${stats.count}x, ${formatTokenCount(stats.tokens)} tokens, $${stats.cost.toFixed(4)}`,
       );
     }
   }
@@ -351,7 +346,7 @@ export function formatCostSummary(summary: SprintCostSummary | null): string {
     lines.push("Top taches:");
     for (const task of summary.costByTask.slice(0, 5)) {
       lines.push(
-        `  ${task.taskId.slice(0, 8)}: ${formatTokenCount(task.tokens)} tokens, $${task.cost.toFixed(4)}`
+        `  ${task.taskId.slice(0, 8)}: ${formatTokenCount(task.tokens)} tokens, $${task.cost.toFixed(4)}`,
       );
     }
   }

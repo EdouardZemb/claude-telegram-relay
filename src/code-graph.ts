@@ -6,8 +6,8 @@
  * S39.
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
-import { join, dirname, relative, resolve } from "path";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join, relative, resolve } from "path";
 
 const PROJECT_ROOT = process.env.PROJECT_DIR || process.cwd();
 const GRAPH_CACHE_PATH = join(PROJECT_ROOT, "config", "code-graph.json");
@@ -93,7 +93,7 @@ export function extractExports(content: string): ExportedSymbol[] {
  */
 export function extractImports(
   content: string,
-  sourceFile: string
+  sourceFile: string,
 ): Array<{ target: string; imports: string[]; isTypeOnly: boolean }> {
   const results: Array<{ target: string; imports: string[]; isTypeOnly: boolean }> = [];
   const sourceDir = dirname(sourceFile);
@@ -111,7 +111,7 @@ export function extractImports(
     if (!fromPath.startsWith("./") && !fromPath.startsWith("../")) continue;
 
     // Resolve relative path
-    let resolvedPath = resolve(join(PROJECT_ROOT, sourceDir), fromPath);
+    const resolvedPath = resolve(join(PROJECT_ROOT, sourceDir), fromPath);
     // Make relative to project root
     let targetRelative = relative(PROJECT_ROOT, resolvedPath);
 
@@ -156,9 +156,26 @@ function findTypeScriptFiles(dir: string): string[] {
     const relPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       // Skip node_modules, .git, tests, dashboard, scripts, etc.
-      if (["node_modules", ".git", "tests", "dashboard", "scripts", "setup", "mcp", "supabase", "examples"].includes(entry.name)) continue;
+      if (
+        [
+          "node_modules",
+          ".git",
+          "tests",
+          "dashboard",
+          "scripts",
+          "setup",
+          "mcp",
+          "supabase",
+          "examples",
+        ].includes(entry.name)
+      )
+        continue;
       files.push(...findTypeScriptFiles(relPath));
-    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts") && !entry.name.endsWith(".d.ts")) {
+    } else if (
+      entry.name.endsWith(".ts") &&
+      !entry.name.endsWith(".test.ts") &&
+      !entry.name.endsWith(".d.ts")
+    ) {
       files.push(relPath);
     }
   }
@@ -204,9 +221,7 @@ export function indexCodebase(rootDir?: string): CodeGraph {
   let commitHash: string | undefined;
   try {
     const { execSync } = require("child_process");
-    commitHash = execSync("git rev-parse --short HEAD", { cwd: PROJECT_ROOT })
-      .toString()
-      .trim();
+    commitHash = execSync("git rev-parse --short HEAD", { cwd: PROJECT_ROOT }).toString().trim();
   } catch {
     // Not in a git repo or git not available
   }
@@ -293,7 +308,7 @@ export function getDependents(graph: CodeGraph, moduleId: string): GraphEdge[] {
 export function getImpactRadius(
   graph: CodeGraph,
   moduleId: string,
-  depth: number = 3
+  depth: number = 3,
 ): Array<{ module: string; distance: number }> {
   const visited = new Map<string, number>();
   const queue: Array<{ id: string; dist: number }> = [{ id: moduleId, dist: 0 }];
@@ -384,11 +399,7 @@ export function getGraphStats(graph: CodeGraph): GraphStats {
  * @param moduleId Target module being worked on
  * @param role Agent role (determines how much context to include)
  */
-export function formatGraphContext(
-  graph: CodeGraph,
-  moduleId: string,
-  role: string
-): string {
+export function formatGraphContext(graph: CodeGraph, moduleId: string, role: string): string {
   const node = findNode(graph, moduleId);
   if (!node) return "";
 
@@ -402,10 +413,15 @@ export function formatGraphContext(
   // Dependencies
   const deps = getModuleDependencies(graph, node.id);
   if (deps.length > 0) {
-    parts.push("Imports: " + deps.map((d) => {
-      const shortTarget = d.target.replace("src/", "");
-      return d.imports.length > 0 ? `${shortTarget} {${d.imports.join(", ")}}` : shortTarget;
-    }).join(", "));
+    parts.push(
+      "Imports: " +
+        deps
+          .map((d) => {
+            const shortTarget = d.target.replace("src/", "");
+            return d.imports.length > 0 ? `${shortTarget} {${d.imports.join(", ")}}` : shortTarget;
+          })
+          .join(", "),
+    );
   }
 
   // Dependents
@@ -418,9 +434,10 @@ export function formatGraphContext(
   if (role === "architect" || role === "qa") {
     const impact = getImpactRadius(graph, node.id, 2);
     if (impact.length > 0) {
-      parts.push("Impact (d<=2): " + impact.map((i) =>
-        `${i.module.replace("src/", "")} (d=${i.distance})`
-      ).join(", "));
+      parts.push(
+        "Impact (d<=2): " +
+          impact.map((i) => `${i.module.replace("src/", "")} (d=${i.distance})`).join(", "),
+      );
     }
   }
 
@@ -475,7 +492,10 @@ export function findAffectedModules(graph: CodeGraph, taskText: string): string[
 
   for (const node of graph.nodes) {
     // Extract module name from path (e.g., "src/orchestrator.ts" -> "orchestrator")
-    const moduleName = node.id.replace(/^src\//, "").replace(/\.ts$/, "").replace(/^commands\//, "");
+    const moduleName = node.id
+      .replace(/^src\//, "")
+      .replace(/\.ts$/, "")
+      .replace(/^commands\//, "");
     if (text.includes(moduleName.toLowerCase())) {
       affected.push(node.id);
     }

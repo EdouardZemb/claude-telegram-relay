@@ -6,24 +6,20 @@
  * saveMessage, rate limiting, circuit breaker, and reminders.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 
 // ── Direct imports of module-level exports ─────────────────
 import {
-  isRateLimited,
+  type BotContext,
   clearStaleState,
   createBotContext,
+  isRateLimited,
   PROJECT_ROOT,
-  BOT_TOKEN,
   RELAY_DIR,
+  RELAY_START_TIME,
   TEMP_DIR,
   UPLOADS_DIR,
   USER_TIMEZONE,
-  RELAY_START_TIME,
-  type BotContext,
-  type ClaudeCallOptions,
-  type Reminder,
-  type TopicConfig,
 } from "../../src/bot-context.ts";
 
 // ── Mock Grammy Context ────────────────────────────────────
@@ -41,11 +37,11 @@ function createMockCtx(overrides: Record<string, any> = {}) {
         message_id: overrides.messageId ?? 1,
         reply_to_message: overrides.replyToMessage,
       },
-      reply: async (text: string, opts?: any) => {
+      reply: async (text: string, _opts?: any) => {
         replies.push(text);
         return { message_id: 99 };
       },
-      replyWithVoice: async (file: any, opts?: any) => {
+      replyWithVoice: async (file: any, _opts?: any) => {
         voiceReplies.push(file);
         return { message_id: 100 };
       },
@@ -168,7 +164,9 @@ describe("bot-context", () => {
     it("includes current time", () => {
       const prompt = botCtx.buildPrompt("test");
       // Should contain a weekday name
-      expect(prompt).toMatch(/Current time: (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/);
+      expect(prompt).toMatch(
+        /Current time: (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/,
+      );
     });
 
     it("includes memory management instructions", () => {
@@ -196,19 +194,26 @@ describe("bot-context", () => {
 
     it("includes topic context for known topic", () => {
       const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, "claude-relay");
-      expect(prompt).toContain('TOPIC CONTEXT');
+      expect(prompt).toContain("TOPIC CONTEXT");
       expect(prompt).toContain("claude-relay");
     });
 
     it("includes generic topic context for unknown topic", () => {
       const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, "random-topic");
-      expect(prompt).toContain('TOPIC CONTEXT');
+      expect(prompt).toContain("TOPIC CONTEXT");
       expect(prompt).toContain("random-topic");
       expect(prompt).toContain("forum group");
     });
 
     it("includes dynamic profile when provided", () => {
-      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, "Dynamic: early bird");
+      const prompt = botCtx.buildPrompt(
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "Dynamic: early bird",
+      );
       expect(prompt).toContain("Dynamic: early bird");
     });
 
@@ -222,9 +227,19 @@ describe("bot-context", () => {
 
     it("includes document context and system instruction when documentContext is non-empty", () => {
       const docCtx = "DOCUMENTS PERTINENTS:\n- Facture EDF (facture, 0.85)";
-      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, docCtx);
+      const prompt = botCtx.buildPrompt(
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        docCtx,
+      );
       expect(prompt).toContain(docCtx);
-      expect(prompt).toContain("Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.");
+      expect(prompt).toContain(
+        "Si des documents pertinents sont listés ci-dessus, tu peux les mentionner naturellement dans ta réponse quand c'est utile. Ne force pas leur mention si le sujet n'est pas lié.",
+      );
       // Instruction appears before MEMORY MANAGEMENT
       const instrIdx = prompt.indexOf("Ne force pas leur mention");
       const memMgmtIdx = prompt.indexOf("MEMORY MANAGEMENT");
@@ -232,13 +247,29 @@ describe("bot-context", () => {
     });
 
     it("excludes document section and instruction when documentContext is undefined", () => {
-      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, undefined);
+      const prompt = botCtx.buildPrompt(
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      );
       expect(prompt).not.toContain("DOCUMENTS PERTINENTS");
       expect(prompt).not.toContain("Ne force pas leur mention");
     });
 
     it("excludes document section and instruction when documentContext is empty string", () => {
-      const prompt = botCtx.buildPrompt("test", undefined, undefined, undefined, undefined, undefined, "");
+      const prompt = botCtx.buildPrompt(
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "",
+      );
       expect(prompt).not.toContain("DOCUMENTS PERTINENTS");
       expect(prompt).not.toContain("Ne force pas leur mention");
     });
@@ -289,7 +320,7 @@ describe("bot-context", () => {
       const ctx = {
         chat: { id: 123 },
         message: { message_thread_id: 42 },
-        reply: async (text: string, opts?: any) => {
+        reply: async (_text: string, opts?: any) => {
           sentOpts.push(opts);
           return { message_id: 1 };
         },

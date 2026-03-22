@@ -5,13 +5,13 @@
  * and capabilities.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  buildFullAgentPrompt,
-  getAgentCapabilities,
-  checkAgentPermission,
-  buildIsolationInstructions,
   type AgentPromptContext,
+  buildFullAgentPrompt,
+  buildIsolationInstructions,
+  checkAgentPermission,
+  getAgentCapabilities,
 } from "../../src/bmad-prompts";
 
 describe("buildFullAgentPrompt", () => {

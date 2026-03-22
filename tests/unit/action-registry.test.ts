@@ -1,10 +1,10 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
+  formatActionsForLLM,
   getAction,
-  getAllActions,
   getActionsByRisk,
   getActionsRequiringParam,
-  formatActionsForLLM,
+  getAllActions,
 } from "../../src/action-registry.ts";
 
 describe("action-registry", () => {
@@ -60,16 +60,41 @@ describe("action-registry", () => {
     it("covers all known commands", () => {
       const commands = getAllActions().map((a) => a.command);
       const expected = [
-        "help", "workflow", "agents", "status", "monitor",
-        "task", "backlog", "sprint", "start", "done",
-        "exec", "orchestrate", "autopipeline",
-        "explore", "docs",
-        "plan", "prd", "planify",
-        "brain", "ideas", "remind",
-        "metrics", "retro", "patterns", "alerts", "cost",
-        "profile", "notify",
-        "projects", "project",
-        "speak", "export", "feature", "estimate", "rollback",
+        "help",
+        "workflow",
+        "agents",
+        "status",
+        "monitor",
+        "task",
+        "backlog",
+        "sprint",
+        "start",
+        "done",
+        "exec",
+        "orchestrate",
+        "autopipeline",
+        "explore",
+        "docs",
+        "plan",
+        "prd",
+        "planify",
+        "brain",
+        "ideas",
+        "remind",
+        "metrics",
+        "retro",
+        "patterns",
+        "alerts",
+        "cost",
+        "profile",
+        "notify",
+        "projects",
+        "project",
+        "speak",
+        "export",
+        "feature",
+        "estimate",
+        "rollback",
       ];
       for (const cmd of expected) {
         expect(commands).toContain(cmd);

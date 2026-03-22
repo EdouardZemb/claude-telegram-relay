@@ -14,10 +14,19 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("document-sharding");
 // ── Types ────────────────────────────────────────────────────
 
-export type DocumentType = "prd" | "architecture" | "story" | "research" | "memory" | "retro" | "analysis";
+export type DocumentType =
+  | "prd"
+  | "architecture"
+  | "story"
+  | "research"
+  | "memory"
+  | "retro"
+  | "analysis";
 
 export interface DocumentShard {
   id: string;
@@ -72,8 +81,7 @@ function getCached(key: string): string | null {
 function setCache(key: string, value: string): void {
   // Evict oldest entries if cache is full
   if (contextCache.size >= CACHE_MAX_SIZE) {
-    const oldest = [...contextCache.entries()]
-      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
+    const oldest = [...contextCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0];
     if (oldest) contextCache.delete(oldest[0]);
   }
   contextCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
@@ -188,7 +196,7 @@ export async function shardDocument(
     content: string;
     type: DocumentType;
     project_id?: string | null;
-  }
+  },
 ): Promise<ShardedDocument | null> {
   const sections = splitIntoSections(doc.content);
   if (sections.length === 0) return null;
@@ -206,18 +214,13 @@ export async function shardDocument(
   }));
 
   // Delete existing shards for this document (re-sharding)
-  await supabase
-    .from("document_shards")
-    .delete()
-    .eq("document_id", doc.id);
+  await supabase.from("document_shards").delete().eq("document_id", doc.id);
 
   // Insert new shards
-  const { error } = await supabase
-    .from("document_shards")
-    .insert(shardsToInsert);
+  const { error } = await supabase.from("document_shards").insert(shardsToInsert);
 
   if (error) {
-    console.error("shardDocument error:", error);
+    log.error("shardDocument error", { error: String(error) });
     return null;
   }
 
@@ -226,10 +229,7 @@ export async function shardDocument(
     invalidateProjectCache(doc.project_id);
   }
 
-  const totalTokens = shardsToInsert.reduce(
-    (sum, s) => sum + s.token_estimate,
-    0
-  );
+  const totalTokens = shardsToInsert.reduce((sum, s) => sum + s.token_estimate, 0);
 
   return {
     id: doc.id,
@@ -247,7 +247,7 @@ export async function shardDocument(
  */
 export async function getDocumentShards(
   supabase: SupabaseClient,
-  documentId: string
+  documentId: string,
 ): Promise<DocumentShard[]> {
   const { data, error } = await supabase
     .from("document_shards")
@@ -256,7 +256,7 @@ export async function getDocumentShards(
     .order("section_index", { ascending: true });
 
   if (error) {
-    console.error("getDocumentShards error:", error);
+    log.error("getDocumentShards error", { error: String(error) });
     return [];
   }
   return (data ?? []) as DocumentShard[];
@@ -269,7 +269,7 @@ export async function getDocumentShards(
 export async function getShardsByTitle(
   supabase: SupabaseClient,
   documentId: string,
-  sectionTitles: string[]
+  sectionTitles: string[],
 ): Promise<DocumentShard[]> {
   const { data, error } = await supabase
     .from("document_shards")
@@ -279,7 +279,7 @@ export async function getShardsByTitle(
     .order("section_index", { ascending: true });
 
   if (error) {
-    console.error("getShardsByTitle error:", error);
+    log.error("getShardsByTitle error", { error: String(error) });
     return [];
   }
   return (data ?? []) as DocumentShard[];
@@ -291,7 +291,7 @@ export async function getShardsByTitle(
  */
 export async function getDocumentTOC(
   supabase: SupabaseClient,
-  documentId: string
+  documentId: string,
 ): Promise<Array<{ title: string; index: number; tokens: number }>> {
   const { data, error } = await supabase
     .from("document_shards")
@@ -300,7 +300,7 @@ export async function getDocumentTOC(
     .order("section_index", { ascending: true });
 
   if (error) {
-    console.error("getDocumentTOC error:", error);
+    log.error("getDocumentTOC error", { error: String(error) });
     return [];
   }
   return (data ?? []).map(
@@ -308,7 +308,7 @@ export async function getDocumentTOC(
       title: d.section_title,
       index: d.section_index,
       tokens: d.token_estimate,
-    })
+    }),
   );
 }
 
@@ -320,13 +320,16 @@ export async function getRelevantShards(
   supabase: SupabaseClient,
   documentId: string,
   query: string,
-  tokenBudget: number = 2000
+  tokenBudget: number = 2000,
 ): Promise<DocumentShard[]> {
   const allShards = await getDocumentShards(supabase, documentId);
   if (allShards.length === 0) return [];
 
   // Score each shard by keyword overlap with query
-  const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  const queryWords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
   const scored = allShards.map((shard) => {
     const contentLower = shard.content.toLowerCase();
     const titleLower = shard.section_title.toLowerCase();
@@ -364,10 +367,7 @@ export async function getRelevantShards(
 /**
  * Build a context string from shards, with section markers.
  */
-export function buildShardedContext(
-  shards: DocumentShard[],
-  docTitle: string
-): string {
+export function buildShardedContext(shards: DocumentShard[], docTitle: string): string {
   if (shards.length === 0) return "";
 
   const parts = [`DOCUMENT: ${docTitle}`, ""];
@@ -389,16 +389,12 @@ export function buildShardedContext(
  */
 export async function resolveShardRefs(
   supabase: SupabaseClient,
-  shard: DocumentShard
+  shard: DocumentShard,
 ): Promise<DocumentShard[]> {
   if (shard.refs.length === 0) return [];
 
   // First, check same document
-  const sameDoc = await getShardsByTitle(
-    supabase,
-    shard.document_id,
-    shard.refs
-  );
+  const sameDoc = await getShardsByTitle(supabase, shard.document_id, shard.refs);
 
   return sameDoc;
 }
@@ -410,8 +406,15 @@ export async function resolveShardRefs(
 export async function findRelatedDocuments(
   supabase: SupabaseClient,
   documentId: string,
-  projectId: string
-): Promise<Array<{ document_id: string; document_type: string; section_title: string; overlap_score: number }>> {
+  projectId: string,
+): Promise<
+  Array<{
+    document_id: string;
+    document_type: string;
+    section_title: string;
+    overlap_score: number;
+  }>
+> {
   // Get this document's section titles
   const toc = await getDocumentTOC(supabase, documentId);
   const titles = toc.map((t) => t.title.toLowerCase());
@@ -426,9 +429,17 @@ export async function findRelatedDocuments(
   if (error || !data) return [];
 
   // Score by overlap: shards that reference sections from our document
-  const scored = new Map<string, { document_id: string; document_type: string; section_title: string; overlap_score: number }>();
+  const scored = new Map<
+    string,
+    { document_id: string; document_type: string; section_title: string; overlap_score: number }
+  >();
 
-  for (const row of data as Array<{ document_id: string; document_type: string; section_title: string; refs: string[] }>) {
+  for (const row of data as Array<{
+    document_id: string;
+    document_type: string;
+    section_title: string;
+    refs: string[];
+  }>) {
     const refs = row.refs || [];
     let score = 0;
 
@@ -461,7 +472,7 @@ export async function buildTaskContext(
   supabase: SupabaseClient,
   taskTitle: string,
   projectId: string,
-  tokenBudget: number = 3000
+  tokenBudget: number = 3000,
 ): Promise<string> {
   // Check cache first
   const cacheKey = `ctx:${projectId}:${taskTitle.substring(0, 50)}:${tokenBudget}`;
@@ -477,7 +488,13 @@ export async function buildTaskContext(
   if (!allShards || allShards.length === 0) return "";
 
   // Deduplicate document IDs
-  const docIds = [...new Set((allShards as Array<{ document_id: string; document_type: string }>).map((s) => s.document_id))];
+  const docIds = [
+    ...new Set(
+      (allShards as Array<{ document_id: string; document_type: string }>).map(
+        (s) => s.document_id,
+      ),
+    ),
+  ];
 
   // Get relevant shards from each document
   const contextParts: string[] = [];
@@ -488,9 +505,14 @@ export async function buildTaskContext(
 
     const shards = await getRelevantShards(supabase, docId, taskTitle, remainingBudget);
     if (shards.length > 0) {
-      const docType = (allShards as Array<{ document_id: string; document_type: string }>)
-        .find((s) => s.document_id === docId)?.document_type || "document";
-      const context = buildShardedContext(shards, `${docType.toUpperCase()} ${docId.substring(0, 8)}`);
+      const docType =
+        (allShards as Array<{ document_id: string; document_type: string }>).find(
+          (s) => s.document_id === docId,
+        )?.document_type || "document";
+      const context = buildShardedContext(
+        shards,
+        `${docType.toUpperCase()} ${docId.substring(0, 8)}`,
+      );
       contextParts.push(context);
       remainingBudget -= shards.reduce((sum, s) => sum + s.token_estimate, 0);
     }
@@ -525,13 +547,20 @@ export function formatShardOverview(doc: ShardedDocument): string {
  * Format cross-references for display.
  */
 export function formatCrossRefs(
-  refs: Array<{ document_id: string; document_type: string; section_title: string; overlap_score: number }>
+  refs: Array<{
+    document_id: string;
+    document_type: string;
+    section_title: string;
+    overlap_score: number;
+  }>,
 ): string {
   if (refs.length === 0) return "Aucune reference croisee trouvee.";
 
   const lines = ["References croisees:", ""];
   for (const ref of refs.slice(0, 10)) {
-    lines.push(`  ${ref.document_type.toUpperCase()} [${ref.document_id.substring(0, 8)}] > ${ref.section_title} (score: ${ref.overlap_score})`);
+    lines.push(
+      `  ${ref.document_type.toUpperCase()} [${ref.document_id.substring(0, 8)}] > ${ref.section_title} (score: ${ref.overlap_score})`,
+    );
   }
   return lines.join("\n");
 }
@@ -552,7 +581,7 @@ export async function shardRetro(
     actions_proposed?: Array<{ action: string; priority: string }>;
     raw_analysis?: string;
   },
-  projectId?: string
+  projectId?: string,
 ): Promise<ShardedDocument | null> {
   const sections: string[] = [];
 
@@ -563,10 +592,14 @@ export async function shardRetro(
     sections.push(`## Ce qui a coince\n${retro.what_didnt.map((w) => `- ${w}`).join("\n")}`);
   }
   if (retro.patterns_detected?.length > 0) {
-    sections.push(`## Patterns detectes\n${retro.patterns_detected.map((p) => `- ${p}`).join("\n")}`);
+    sections.push(
+      `## Patterns detectes\n${retro.patterns_detected.map((p) => `- ${p}`).join("\n")}`,
+    );
   }
   if (retro.actions_proposed?.length) {
-    sections.push(`## Actions proposees\n${retro.actions_proposed.map((a) => `- [${a.priority}] ${a.action}`).join("\n")}`);
+    sections.push(
+      `## Actions proposees\n${retro.actions_proposed.map((a) => `- [${a.priority}] ${a.action}`).join("\n")}`,
+    );
   }
   if (retro.raw_analysis) {
     sections.push(`## Analyse detaillee\n${retro.raw_analysis}`);
@@ -582,4 +615,3 @@ export async function shardRetro(
     project_id: projectId,
   });
 }
-

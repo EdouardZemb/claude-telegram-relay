@@ -6,8 +6,8 @@
 // ── Types ──────────────────────────────────────────────────────
 
 export interface HeartbeatState {
-  lastPulseAt: string;          // ISO timestamp
-  lastCommitSha: string;        // last seen commit
+  lastPulseAt: string; // ISO timestamp
+  lastCommitSha: string; // last seen commit
   lastSprintSnapshot: {
     sprint: string | null;
     done: number;
@@ -16,10 +16,10 @@ export interface HeartbeatState {
   recentActions: HeartbeatAction[]; // last 10 actions (dedup)
   cooldowns: Record<string, number>; // topic -> expiry timestamp
   // Periodic task tracking (consolidated from alert-cron + autonomy-cron)
-  lastAlertCheckAt: string | null;    // when alerts were last run (hourly)
-  lastArchivalAt: string | null;      // when memory archival last ran (hourly)
-  lastAutonomyScanAt: string | null;  // when autonomy scan last ran (daily)
-  lastLlmOpsCheckAt: string | null;   // when LLM-Ops check last ran (30min)
+  lastAlertCheckAt: string | null; // when alerts were last run (hourly)
+  lastArchivalAt: string | null; // when memory archival last ran (hourly)
+  lastAutonomyScanAt: string | null; // when autonomy scan last ran (daily)
+  lastLlmOpsCheckAt: string | null; // when LLM-Ops check last ran (30min)
 }
 
 export interface HeartbeatAction {
@@ -42,11 +42,11 @@ export interface HeartbeatDecision {
 }
 
 export interface HeartbeatDelta {
-  commits: string;           // git log output
-  sprintSummary: string;     // sprint status text
-  ciStatus: string;          // CI run status
-  openPRs: string;           // open PR list
-  staleTasks: string;        // in_progress tasks > 48h
+  commits: string; // git log output
+  sprintSummary: string; // sprint status text
+  ciStatus: string; // CI run status
+  openPRs: string; // open PR list
+  staleTasks: string; // in_progress tasks > 48h
   timeSinceLastPulse: string; // human-readable
 }
 
@@ -143,7 +143,9 @@ export function buildHeartbeatPrompt(state: HeartbeatState, delta: HeartbeatDelt
   const sections: string[] = [];
 
   sections.push(`PULSATION — ${new Date().toISOString()}`);
-  sections.push(`Derniere pulsation : ${state.lastPulseAt || "premiere pulsation"} (${delta.timeSinceLastPulse})`);
+  sections.push(
+    `Derniere pulsation : ${state.lastPulseAt || "premiere pulsation"} (${delta.timeSinceLastPulse})`,
+  );
   sections.push("");
 
   if (delta.commits) {
@@ -196,11 +198,15 @@ export function buildHeartbeatPrompt(state: HeartbeatState, delta: HeartbeatDelt
 
   sections.push("Analyse le delta et decide quelles actions prendre.");
   sections.push("");
-  sections.push("IMPORTANT: Tu DOIS repondre avec UNIQUEMENT un objet JSON valide, sans texte avant ou apres. Voici le schema exact:");
+  sections.push(
+    "IMPORTANT: Tu DOIS repondre avec UNIQUEMENT un objet JSON valide, sans texte avant ou apres. Voici le schema exact:",
+  );
   sections.push(JSON.stringify(HEARTBEAT_DECISION_SCHEMA, null, 2));
   sections.push("");
   sections.push("Exemple de reponse:");
-  sections.push('{"observations":["Sprint S44 complete"],"actions":[{"type":"none"}],"reasoning":"Tout va bien, rien a signaler"}');
+  sections.push(
+    '{"observations":["Sprint S44 complete"],"actions":[{"type":"none"}],"reasoning":"Tout va bien, rien a signaler"}',
+  );
 
   return sections.join("\n");
 }

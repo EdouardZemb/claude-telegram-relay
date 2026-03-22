@@ -5,20 +5,17 @@
  * S34 FR-004. S44 T7: difficulty scorer for adaptive pipeline selection.
  */
 
-import type { Task } from "./tasks.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnClaude } from "./agent.ts";
-import type { AgentRole } from "./orchestrator.ts";
-import {
-  getGraph,
-  estimateComplexity,
-  findAffectedModules,
-  type CodeGraph,
-} from "./code-graph.ts";
-import { findSimilarPastTasks, type SimilarTask } from "./memory.ts";
+import { type CodeGraph, estimateComplexity, findAffectedModules, getGraph } from "./code-graph.ts";
 import { computeExplorationScore } from "./exploration-scoring.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { createLogger } from "./logger.ts";
+import { findSimilarPastTasks, type SimilarTask } from "./memory.ts";
+import type { AgentRole } from "./orchestrator.ts";
+import type { Task } from "./tasks.ts";
 
+const log = createLogger("llm-router");
 const ROUTER_TIMEOUT = 5_000; // 5s (AC-018)
 
 // ── Types ────────────────────────────────────────────────────
@@ -109,8 +106,7 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
 
   const fullHint = [complexityHint, explorationHint].filter(Boolean).join("\n");
 
-  const prompt = ROUTER_PROMPT_TEMPLATE
-    .replace("{title}", task.title)
+  const prompt = ROUTER_PROMPT_TEMPLATE.replace("{title}", task.title)
     .replace("{description}", task.description || "No description")
     .replace("{priority}", String(task.priority || 3))
     .replace("{complexity_hint}", fullHint ? `Complexity: ${fullHint}` : "");
@@ -131,12 +127,12 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
     const result = await Promise.race([resultPromise, timeoutPromise]);
 
     if (!result) {
-      console.warn("llm-router: timeout (5s), falling back to keyword matching");
+      log.warn("llm-router: timeout (5s), falling back to keyword matching");
       return null;
     }
 
     if (result.exitCode !== 0) {
-      console.warn("llm-router: spawn failed, falling back to keyword matching");
+      log.warn("llm-router: spawn failed, falling back to keyword matching");
       return null;
     }
 
@@ -144,11 +140,13 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
     const decision = parseRouterResponse(result.stdout);
     if (decision) {
       // AC-020: Log reasoning
-      console.log(`llm-router: ${decision.pipeline} pipeline, budget=$${decision.budget}, reason=${decision.reasoning}`);
+      log.info(
+        `llm-router: ${decision.pipeline} pipeline, budget=$${decision.budget}, reason=${decision.reasoning}`,
+      );
     }
     return decision;
   } catch (error) {
-    console.warn("llm-router: error, falling back to keyword matching:", error);
+    log.warn("llm-router: error, falling back to keyword matching", { error: String(error) });
     return null;
   }
 }
@@ -188,7 +186,16 @@ function normalizeDecision(obj: any): RouterDecision | null {
   const validModels = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
   const models: Partial<Record<AgentRole, string>> = {};
   if (obj.models && typeof obj.models === "object") {
-    const validRoles: AgentRole[] = ["analyst", "pm", "architect", "dev", "qa", "sm", "planner", "explorer"];
+    const validRoles: AgentRole[] = [
+      "analyst",
+      "pm",
+      "architect",
+      "dev",
+      "qa",
+      "sm",
+      "planner",
+      "explorer",
+    ];
     for (const role of validRoles) {
       if (obj.models[role]) {
         models[role] = validModels.includes(obj.models[role])
@@ -219,7 +226,6 @@ export function routerPipelineToRoles(decision: RouterDecision): AgentRole[] {
       return ["dev", "qa"];
     case "REVIEW":
       return ["qa", "architect"];
-    case "DEFAULT":
     default:
       return ["analyst", "pm", "architect", "dev", "qa"];
   }
@@ -229,17 +235,49 @@ export function routerPipelineToRoles(decision: RouterDecision): AgentRole[] {
 
 /** Keywords suggesting low difficulty */
 const SIMPLE_KEYWORDS = [
-  "typo", "rename", "update text", "fix text", "label", "message",
-  "comment", "readme", "changelog", "log ", "string", "wording",
-  "version", "bump", "icon", "color", "spacing", "margin", "css",
+  "typo",
+  "rename",
+  "update text",
+  "fix text",
+  "label",
+  "message",
+  "comment",
+  "readme",
+  "changelog",
+  "log ",
+  "string",
+  "wording",
+  "version",
+  "bump",
+  "icon",
+  "color",
+  "spacing",
+  "margin",
+  "css",
 ];
 
 /** Keywords suggesting high difficulty */
 const COMPLEX_KEYWORDS = [
-  "architect", "refactor", "migration", "multi", "pipeline",
-  "parallel", "concurrent", "security", "auth", "database",
-  "schema", "performance", "optimi", "algorithm", "framework",
-  "engine", "protocol", "orchestrat", "workflow", "integration",
+  "architect",
+  "refactor",
+  "migration",
+  "multi",
+  "pipeline",
+  "parallel",
+  "concurrent",
+  "security",
+  "auth",
+  "database",
+  "schema",
+  "performance",
+  "optimi",
+  "algorithm",
+  "framework",
+  "engine",
+  "protocol",
+  "orchestrat",
+  "workflow",
+  "integration",
 ];
 
 /** Result of difficulty scoring */
@@ -264,10 +302,7 @@ export interface DifficultyScore {
  * Analyze task description to estimate difficulty.
  * Pure function, no external dependencies.
  */
-export function analyzeDescription(
-  taskText: string,
-  subtaskCount: number = 0,
-): number {
+export function analyzeDescription(taskText: string, subtaskCount: number = 0): number {
   const text = taskText.toLowerCase();
   const textLength = text.length;
 
@@ -328,28 +363,20 @@ export function computeGraphScoreFromGraph(
 export function computeHistoricalScore(similarTasks: SimilarTask[]): number {
   if (!similarTasks || similarTasks.length === 0) return -1;
 
-  const withActual = similarTasks.filter(
-    (t) => t.actualHours != null && t.actualHours > 0,
-  );
+  const withActual = similarTasks.filter((t) => t.actualHours != null && t.actualHours > 0);
   if (withActual.length === 0) return -1;
 
-  const avgHours =
-    withActual.reduce((sum, t) => sum + (t.actualHours || 0), 0) /
-    withActual.length;
+  const avgHours = withActual.reduce((sum, t) => sum + (t.actualHours || 0), 0) / withActual.length;
 
   // Map hours to 0-1: 0.5h→0.03, 2h→0.11, 4h→0.22, 8h→0.44, 16h→0.89
   let score = Math.min(avgHours / 18, 1.0);
 
   // Boost if tasks were systematically underestimated
-  const withBoth = withActual.filter(
-    (t) => t.estimatedHours != null && t.estimatedHours > 0,
-  );
+  const withBoth = withActual.filter((t) => t.estimatedHours != null && t.estimatedHours > 0);
   if (withBoth.length > 0) {
     const avgRatio =
-      withBoth.reduce(
-        (sum, t) => sum + (t.actualHours || 0) / (t.estimatedHours || 1),
-        0,
-      ) / withBoth.length;
+      withBoth.reduce((sum, t) => sum + (t.actualHours || 0) / (t.estimatedHours || 1), 0) /
+      withBoth.length;
     if (avgRatio > 1.5) score = Math.min(score + 0.1, 1.0);
   }
 
@@ -362,9 +389,7 @@ export function computeHistoricalScore(similarTasks: SimilarTask[]): number {
  * AC-008: 0.3-0.6 → LIGHT
  * AC-009: > 0.6 → DEFAULT
  */
-export function scoreToPipeline(
-  score: number,
-): "SOLO" | "LIGHT" | "DEFAULT" {
+export function scoreToPipeline(score: number): "SOLO" | "LIGHT" | "DEFAULT" {
   if (score < 0.3) return "SOLO";
   if (score <= 0.7) return "LIGHT";
   return "DEFAULT";

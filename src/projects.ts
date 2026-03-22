@@ -11,7 +11,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("projects");
 export interface Project {
   id: string;
   created_at: string;
@@ -52,7 +54,7 @@ export async function createProject(
     repo_url?: string;
     directory?: string;
     telegram_topic_id?: number;
-  }
+  },
 ): Promise<Project | null> {
   const { data, error } = await supabase
     .from("projects")
@@ -68,7 +70,7 @@ export async function createProject(
     .single();
 
   if (error) {
-    console.error("createProject error:", error);
+    log.error("createProject error", { error: String(error) });
     return null;
   }
   return data as Project;
@@ -76,7 +78,7 @@ export async function createProject(
 
 export async function getProject(
   supabase: SupabaseClient,
-  slugOrId: string
+  slugOrId: string,
 ): Promise<Project | null> {
   // Try by slug first
   const { data: bySlug } = await supabase
@@ -89,9 +91,7 @@ export async function getProject(
   if (bySlug) return bySlug as Project;
 
   // Try by ID prefix
-  const { data: allProjects } = await supabase
-    .from("projects")
-    .select("*");
+  const { data: allProjects } = await supabase.from("projects").select("*");
 
   const byId = (allProjects || []).find((p: { id: string }) => p.id.startsWith(slugOrId));
   return (byId as Project) ?? null;
@@ -99,18 +99,15 @@ export async function getProject(
 
 export async function listProjects(
   supabase: SupabaseClient,
-  opts?: { status?: string }
+  opts?: { status?: string },
 ): Promise<Project[]> {
-  let query = supabase
-    .from("projects")
-    .select("*")
-    .order("created_at", { ascending: true });
+  let query = supabase.from("projects").select("*").order("created_at", { ascending: true });
 
   if (opts?.status) query = query.eq("status", opts.status);
 
   const { data, error } = await query;
   if (error) {
-    console.error("listProjects error:", error);
+    log.error("listProjects error", { error: String(error) });
     return [];
   }
   return (data ?? []) as Project[];
@@ -119,7 +116,19 @@ export async function listProjects(
 export async function updateProject(
   supabase: SupabaseClient,
   id: string,
-  updates: Partial<Pick<Project, "name" | "description" | "status" | "telegram_topic_id" | "current_sprint" | "directory" | "repo_url" | "workflow_config">>
+  updates: Partial<
+    Pick<
+      Project,
+      | "name"
+      | "description"
+      | "status"
+      | "telegram_topic_id"
+      | "current_sprint"
+      | "directory"
+      | "repo_url"
+      | "workflow_config"
+    >
+  >,
 ): Promise<Project | null> {
   const { data, error } = await supabase
     .from("projects")
@@ -129,16 +138,13 @@ export async function updateProject(
     .single();
 
   if (error) {
-    console.error("updateProject error:", error);
+    log.error("updateProject error", { error: String(error) });
     return null;
   }
   return data as Project;
 }
 
-export async function archiveProject(
-  supabase: SupabaseClient,
-  id: string
-): Promise<boolean> {
+export async function archiveProject(supabase: SupabaseClient, id: string): Promise<boolean> {
   const result = await updateProject(supabase, id, { status: "archived" });
   return result !== null;
 }
@@ -151,7 +157,7 @@ export async function archiveProject(
  */
 export async function resolveProjectFromTopic(
   supabase: SupabaseClient,
-  topicThreadId: number
+  topicThreadId: number,
 ): Promise<Project | null> {
   const { data, error } = await supabase
     .from("projects")
@@ -170,7 +176,7 @@ export async function resolveProjectFromTopic(
  */
 export async function resolveProjectContext(
   supabase: SupabaseClient,
-  topicThreadId?: number
+  topicThreadId?: number,
 ): Promise<Project | null> {
   // 1. Try topic-based resolution
   if (topicThreadId) {

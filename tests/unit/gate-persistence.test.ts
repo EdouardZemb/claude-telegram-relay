@@ -5,11 +5,8 @@
  * and corrective instruction generation.
  */
 
-import { describe, it, expect } from "bun:test";
-import {
-  generateDoubleLoopInstruction,
-  type DimensionWeakness,
-} from "../../src/gate-persistence";
+import { describe, expect, it } from "bun:test";
+import { type DimensionWeakness, generateDoubleLoopInstruction } from "../../src/gate-persistence";
 
 // ── generateDoubleLoopInstruction ─────────────────────────────
 
@@ -65,8 +62,16 @@ describe("generateDoubleLoopInstruction", () => {
   });
 
   it("includes weakness count in all instructions", () => {
-    const dims = ["error_handling", "test_coverage", "code_style", "spec_conformity",
-      "completeness", "traceability", "clarity", "feasibility"];
+    const dims = [
+      "error_handling",
+      "test_coverage",
+      "code_style",
+      "spec_conformity",
+      "completeness",
+      "traceability",
+      "clarity",
+      "feasibility",
+    ];
     for (const dim of dims) {
       const instruction = generateDoubleLoopInstruction("dev", dim, 7);
       expect(instruction).toContain("7 evaluations");

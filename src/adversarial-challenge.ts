@@ -5,9 +5,11 @@
  */
 
 import { spawnClaude } from "./agent.ts";
-import { getGraph, getImpactRadius, type CodeGraph } from "./code-graph.ts";
 import type { AdversarialResult, ImpactAnalysisResult, ProtoSpec } from "./agent-schemas.ts";
+import { type CodeGraph, getGraph, getImpactRadius } from "./code-graph.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("adversarial-challenge");
 // ── Types ────────────────────────────────────────────────────
 
 export interface AdversarialInput {
@@ -36,7 +38,7 @@ export interface AdversarialInput {
  */
 export async function runAdversarialChallenge(
   input: AdversarialInput,
-  agentContext?: string
+  agentContext?: string,
 ): Promise<AdversarialResult> {
   const startTime = Date.now();
 
@@ -45,9 +47,7 @@ export async function runAdversarialChallenge(
         "PROTO-SPEC:",
         `Objectif: ${input.protoSpec.objective}`,
         "V-Criteres:",
-        ...input.protoSpec.v_criteria.map(
-          (c) => `  [${c.id}] ${c.description} (${c.level})`
-        ),
+        ...input.protoSpec.v_criteria.map((c) => `  [${c.id}] ${c.description} (${c.level})`),
         `Fichiers impactes: ${input.protoSpec.impacted_files.join(", ")}`,
       ].join("\n")
     : "";
@@ -95,7 +95,7 @@ export async function runAdversarialChallenge(
 
     if (result.exitCode !== 0 || !result.stdout) {
       // F-DA-3: Distinguish SKIPPED from PASS — agent failed to run
-      console.warn("adversarial-challenge: spawnClaude failed, returning SKIPPED");
+      log.warn("adversarial-challenge: spawnClaude failed, returning SKIPPED");
       return {
         findings: [],
         stats: { bloquants: 0, majeurs: 0, mineurs: 0 },
@@ -106,7 +106,7 @@ export async function runAdversarialChallenge(
 
     return parseAdversarialResult(result.stdout, startTime);
   } catch (error) {
-    console.error("adversarial-challenge error:", error);
+    log.error("adversarial-challenge error", { error: String(error) });
     // F-DA-3: SKIPPED on error, not PASS
     return {
       findings: [],
@@ -120,10 +120,7 @@ export async function runAdversarialChallenge(
 /**
  * Parse the Devil's Advocate output into an AdversarialResult.
  */
-export function parseAdversarialResult(
-  output: string,
-  startTime: number
-): AdversarialResult {
+export function parseAdversarialResult(output: string, startTime: number): AdversarialResult {
   let findings: AdversarialResult["findings"] = [];
 
   // Try direct JSON parse
@@ -167,9 +164,7 @@ export function parseAdversarialResult(
 /**
  * Normalize findings array: validate fields, cap at 10.
  */
-function normalizeFindings(
-  raw: any[]
-): AdversarialResult["findings"] {
+function normalizeFindings(raw: any[]): AdversarialResult["findings"] {
   return raw
     .filter((f: any) => f && typeof f === "object")
     .map((f: any, i: number) => ({
@@ -199,7 +194,7 @@ function normalizeFindings(
  */
 export async function runImpactAnalysis(
   impactedFiles: string[],
-  agentContext?: string
+  agentContext?: string,
 ): Promise<ImpactAnalysisResult> {
   const startTime = Date.now();
 
@@ -222,7 +217,7 @@ export async function runImpactAnalysis(
     graph = getGraph();
   } catch {
     // V21: Graph unavailable
-    console.warn("adversarial-challenge: code-graph not available");
+    log.warn("adversarial-challenge: code-graph not available");
     return {
       risk_level: "LOW",
       modules_impacted_direct: 0,
@@ -240,9 +235,7 @@ export async function runImpactAnalysis(
 
   for (const file of impactedFiles) {
     // Normalize file path to module ID (strip src/ prefix, .ts suffix)
-    const moduleId = file
-      .replace(/^src\//, "")
-      .replace(/\.ts$/, "");
+    const moduleId = file.replace(/^src\//, "").replace(/\.ts$/, "");
 
     const impacts = getImpactRadius(graph, moduleId, 3);
     for (const impact of impacts) {
@@ -275,11 +268,12 @@ export async function runImpactAnalysis(
     const agentResult = await spawnImpactAgent(
       impactedFiles,
       Array.from(allImpacted),
-      agentContext
+      agentContext,
     );
 
     return {
-      risk_level: agentResult.risk_level || (directCount <= 1 ? "LOW" : directCount <= 3 ? "MEDIUM" : "HIGH"),
+      risk_level:
+        agentResult.risk_level || (directCount <= 1 ? "LOW" : directCount <= 3 ? "MEDIUM" : "HIGH"),
       modules_impacted_direct: directCount,
       modules_impacted_transitive: transitiveCount,
       breaking_changes: agentResult.breaking_changes || [],
@@ -289,7 +283,9 @@ export async function runImpactAnalysis(
     };
   } catch (error) {
     // R17: Advisory — agent failure is not blocking
-    console.warn("adversarial-challenge: impact agent failed, using graph-only result", error);
+    log.warn("adversarial-challenge: impact agent failed, using graph-only result", {
+      error: String(error),
+    });
     const riskLevel = directCount <= 1 ? "LOW" : directCount <= 3 ? "MEDIUM" : "HIGH";
     return {
       risk_level: riskLevel,
@@ -309,7 +305,7 @@ export async function runImpactAnalysis(
 async function spawnImpactAgent(
   impactedFiles: string[],
   transitiveModules: string[],
-  agentContext?: string
+  agentContext?: string,
 ): Promise<{
   risk_level?: "LOW" | "MEDIUM" | "HIGH";
   breaking_changes?: string[];

@@ -5,35 +5,39 @@
  */
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
+import { formatAlerts, runAllChecks } from "../alerts.ts";
+import { getAgentForCommand } from "../bmad-agents.ts";
 import type { BotContext } from "../bot-context.ts";
+import { formatCostSummary, getSprintCostSummary, getTotalCost } from "../cost-tracking.ts";
+import { loadFeedbackRules, processRetroFeedback } from "../feedback-loop.ts";
+import { createLogger } from "../logger.ts";
+import { analyzePatterns, formatPatterns } from "../patterns.ts";
+import { getCurrentSprint } from "../tasks.ts";
 import {
+  acceptRetroActions,
+  applyWorkflowSuggestions,
   collectSprintMetrics,
-  getSprintMetrics,
-  getAllSprintMetrics,
   formatMetrics,
   formatMetricsComparison,
-  generateRetroData,
-  saveRetro,
-  acceptRetroActions,
-  getRetro,
   formatRetro,
-  WorkflowTracker,
-  applyWorkflowSuggestions,
+  generateRetroData,
+  getAllSprintMetrics,
+  getRetro,
+  getSprintMetrics,
+  saveRetro,
 } from "../workflow.ts";
-import { analyzePatterns, formatPatterns } from "../patterns.ts";
-import { runAllChecks, formatAlerts } from "../alerts.ts";
-import { getSprintCostSummary, getTotalCost, formatCostSummary } from "../cost-tracking.ts";
-import { getCurrentSprint } from "../tasks.ts";
-import { getAgentForCommand } from "../bmad-agents.ts";
-import { loadFeedbackRules, processRetroFeedback } from "../feedback-loop.ts";
 
+const log = createLogger("quality");
 export default function qualityComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
   // /metrics
   composer.command("metrics", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "metrics");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -47,9 +51,12 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const sprintId = arg || await getCurrentSprint(bctx.supabase);
+    const sprintId = arg || (await getCurrentSprint(bctx.supabase));
     if (!sprintId) {
-      await ctx.reply("Aucun sprint actif. Usage: /metrics S11 ou /metrics all", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Aucun sprint actif. Usage: /metrics S11 ou /metrics all",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -61,14 +68,17 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
   // /retro
   composer.command("retro", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "retro");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
     }
 
     const arg = ctx.match?.trim();
-    const sprintId = arg || await getCurrentSprint(bctx.supabase);
+    const sprintId = arg || (await getCurrentSprint(bctx.supabase));
     if (!sprintId) {
       await ctx.reply("Aucun sprint actif. Usage: /retro S11", bctx.threadOpts(ctx));
       return;
@@ -98,7 +108,8 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       ? `Tu es ${smAgent.name}, ${smAgent.title} (${smAgent.icon}). ${smAgent.communicationStyle}\n\n`
       : "";
     const retroPrompt = [
-      agentPrefix + "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
+      agentPrefix +
+        "Analyse les donnees suivantes pour generer une retrospective de sprint structuree.",
       "Reponds UNIQUEMENT en JSON valide, sans markdown, sans commentaires.",
       "",
       `Sprint: ${sprintId}`,
@@ -106,13 +117,13 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       `Stats workflow: ${JSON.stringify(retroData.workflowStats)}`,
       `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t: any) => ({ title: t.title, status: t.status, priority: t.priority })))}`,
       patternAnalysis.patterns.length > 0
-        ? `Patterns detectes automatiquement: ${JSON.stringify(patternAnalysis.patterns.map(p => p.description))}`
+        ? `Patterns detectes automatiquement: ${JSON.stringify(patternAnalysis.patterns.map((p) => p.description))}`
         : "",
       patternAnalysis.suggestions.length > 0
-        ? `Suggestions workflow automatiques: ${JSON.stringify(patternAnalysis.suggestions.map(s => ({ action: s.action, priority: s.priority, target_step: s.target_step, suggested_change: s.suggested_change })))}`
+        ? `Suggestions workflow automatiques: ${JSON.stringify(patternAnalysis.suggestions.map((s) => ({ action: s.action, priority: s.priority, target_step: s.target_step, suggested_change: s.suggested_change })))}`
         : "",
       "",
-      'Format JSON attendu:',
+      "Format JSON attendu:",
       '{"what_worked": ["..."], "what_didnt": ["..."], "patterns_detected": ["..."], "actions_proposed": [{"action": "...", "priority": "high|medium|low", "target_step": "optional_step_id", "suggested_change": "optional_change"}]}',
       "Inclus les suggestions workflow automatiques dans actions_proposed en conservant target_step et suggested_change.",
     ].join("\n");
@@ -142,10 +153,13 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
           .text("Valider toutes les actions", `retro_accept_all:${sprintId}`)
           .row()
           .text("Rejeter", `retro_reject:${sprintId}`);
-        await ctx.reply("Valider les actions proposees ?", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+        await ctx.reply("Valider les actions proposees ?", {
+          ...bctx.threadOpts(ctx),
+          reply_markup: keyboard,
+        });
       }
     } catch (error) {
-      console.error("Retro generation error:", error);
+      log.error("Retro generation error", { error: String(error) });
       await ctx.reply("Erreur lors de la generation de la retro.", bctx.threadOpts(ctx));
     }
   });
@@ -153,7 +167,10 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
   // /patterns
   composer.command("patterns", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "patterns");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -167,14 +184,17 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
   // /alerts
   composer.command("alerts", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "alerts");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
     }
 
     const arg = ctx.match?.trim();
-    const sprintId = arg || await getCurrentSprint(bctx.supabase) || undefined;
+    const sprintId = arg || (await getCurrentSprint(bctx.supabase)) || undefined;
 
     await ctx.replyWithChatAction("typing");
     const alerts = await runAllChecks(bctx.supabase, sprintId);
@@ -184,7 +204,10 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
   // /cost
   composer.command("cost", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "cost");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -194,13 +217,14 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     if (arg === "total" || arg === "all") {
       const total = await getTotalCost(bctx.supabase);
-      await bctx.sendResponse(ctx,
-        `Couts totaux\n\nTokens: ${total.totalTokens}\nCout estime: $${total.totalCostUsd.toFixed(4)}\nExecutions: ${total.executions}`
+      await bctx.sendResponse(
+        ctx,
+        `Couts totaux\n\nTokens: ${total.totalTokens}\nCout estime: $${total.totalCostUsd.toFixed(4)}\nExecutions: ${total.executions}`,
       );
       return;
     }
 
-    const sprintId = arg || await getCurrentSprint(bctx.supabase);
+    const sprintId = arg || (await getCurrentSprint(bctx.supabase));
     if (!sprintId) {
       await ctx.reply("Aucun sprint actif. Usage: /cost S22 ou /cost total", bctx.threadOpts(ctx));
       return;
@@ -214,7 +238,10 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
   // Retro validation callbacks
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("retro_")) { await next(); return; }
+    if (!data.startsWith("retro_")) {
+      await next();
+      return;
+    }
 
     if (!bctx.supabase) {
       await ctx.answerCallbackQuery({ text: "Supabase non configure." });
@@ -238,7 +265,9 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
           patterns_detected: retro.patterns_detected || [],
           actions_proposed: retro.actions_proposed,
         });
-        console.log(`Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`);
+        log.info(
+          `Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`,
+        );
 
         await loadFeedbackRules(bctx.supabase);
 
@@ -246,7 +275,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
         let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
         if (workflowChanges.length > 0) {
-          message += `\n\nModifications appliquees :\n${workflowChanges.map(c => `  ${c}`).join("\n")}`;
+          message += `\n\nModifications appliquees :\n${workflowChanges.map((c) => `  ${c}`).join("\n")}`;
         } else {
           message += " Elles seront prises en compte dans le prochain sprint.";
         }

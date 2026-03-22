@@ -4,13 +4,8 @@
  * Tests for story file generation, formatting, and AC parsing.
  */
 
-import { describe, it, expect } from "bun:test";
-import {
-  buildStoryFile,
-  formatStoryForAgent,
-  formatStoryPreview,
-  type StoryFile,
-} from "../../src/story-files";
+import { describe, expect, it } from "bun:test";
+import { buildStoryFile, formatStoryForAgent, formatStoryPreview } from "../../src/story-files";
 
 const baseTask = {
   id: "test-id-123",
@@ -58,7 +53,8 @@ describe("buildStoryFile", () => {
   it("converts bullet-point ACs to structured format", () => {
     const task = {
       ...baseTask,
-      acceptance_criteria: "- User can see their name\n- User can edit their email\n- Changes are saved",
+      acceptance_criteria:
+        "- User can see their name\n- User can edit their email\n- Changes are saved",
     };
     const story = buildStoryFile(task);
     expect(story.acceptanceCriteria.length).toBe(3);
@@ -130,9 +126,7 @@ describe("formatStoryForAgent", () => {
     const task = {
       ...baseTask,
       acceptance_criteria: "Given a user, When they visit /profile, Then they see info",
-      subtasks: [
-        { title: "Create component", ac_mapping: "AC-1", done: false },
-      ],
+      subtasks: [{ title: "Create component", ac_mapping: "AC-1", done: false }],
       architecture_ref: "Uses React SPA pattern",
     };
     const story = buildStoryFile(task);
@@ -167,7 +161,8 @@ describe("formatStoryPreview", () => {
   it("shows compact preview for Telegram", () => {
     const task = {
       ...baseTask,
-      acceptance_criteria: "- Can see name\n- Can edit email\n- Can upload avatar\n- Can delete account",
+      acceptance_criteria:
+        "- Can see name\n- Can edit email\n- Can upload avatar\n- Can delete account",
     };
     const story = buildStoryFile(task);
     const preview = formatStoryPreview(story);

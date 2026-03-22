@@ -5,23 +5,23 @@
  * context retrieval, and recent messages.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  processMemoryIntents,
+  archiveIdea,
+  archiveOldMemories,
+  autoRemember,
+  classifyMessage,
+  findDuplicateIdea,
+  formatIdeasList,
+  getIdea,
   getMemoryContext,
   getRecentMessages,
-  classifyMessage,
-  autoRemember,
-  archiveOldMemories,
-  findDuplicateIdea,
   listIdeas,
-  getIdea,
-  reviewIdea,
+  processMemoryIntents,
   promoteIdea,
-  archiveIdea,
-  formatIdeasList,
+  reviewIdea,
 } from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("processMemoryIntents", () => {
   let supabase: ReturnType<typeof createMockSupabase>;
@@ -75,9 +75,7 @@ describe("processMemoryIntents", () => {
 
   it("parses DONE tag and marks goal as completed", async () => {
     // First create a goal
-    supabase._store.memory = [
-      { id: "g1", type: "goal", content: "Deploy v2 to production" },
-    ];
+    supabase._store.memory = [{ id: "g1", type: "goal", content: "Deploy v2 to production" }];
 
     const input = "Done! [DONE: Deploy v2]";
     const result = await processMemoryIntents(supabase, input);
@@ -114,7 +112,7 @@ describe("processMemoryIntents", () => {
 
   it("is case insensitive for tags", async () => {
     const input = "[remember: lowercase test]";
-    const result = await processMemoryIntents(supabase, input);
+    const _result = await processMemoryIntents(supabase, input);
 
     const memory = supabase._getTable("memory");
     expect(memory.length).toBe(1);
@@ -389,13 +387,19 @@ describe("autoRemember", () => {
       summary: "Ajouter un mode sombre au dashboard",
     };
 
-    await autoRemember(supabase, "Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.", classification);
+    await autoRemember(
+      supabase,
+      "Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.",
+      classification,
+    );
 
     const memory = supabase._getTable("memory");
     expect(memory.length).toBe(1);
     expect(memory[0].type).toBe("idea");
     expect(memory[0].content).toBe("Ajouter un mode sombre au dashboard");
-    expect(memory[0].metadata.original_content).toBe("Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.");
+    expect(memory[0].metadata.original_content).toBe(
+      "Et si on ajoutait un mode sombre? Ca serait plus agreable le soir.",
+    );
   });
 
   it("does not store original_content when summary matches content", async () => {
@@ -460,7 +464,7 @@ describe("findDuplicateIdea", () => {
 
   it("ignores non-idea matches", async () => {
     supabase._registerFunction("search", () => [
-      { content: "Similar fact", type: "fact", similarity: 0.90 },
+      { content: "Similar fact", type: "fact", similarity: 0.9 },
     ]);
 
     const result = await findDuplicateIdea(supabase, "Some idea");
@@ -478,7 +482,9 @@ describe("findDuplicateIdea", () => {
   });
 
   it("returns null when search function fails", async () => {
-    supabase._registerFunction("search", () => { throw new Error("Network error"); });
+    supabase._registerFunction("search", () => {
+      throw new Error("Network error");
+    });
 
     const result = await findDuplicateIdea(supabase, "test");
     expect(result).toBeNull();
@@ -494,7 +500,7 @@ describe("autoRemember deduplication", () => {
 
   it("skips duplicate idea in autoRemember", async () => {
     supabase._registerFunction("search", () => [
-      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.90 },
+      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.9 },
     ]);
 
     const classification = {
@@ -561,7 +567,7 @@ describe("processMemoryIntents deduplication", () => {
 
   it("skips duplicate IDEA tag", async () => {
     supabase._registerFunction("search", () => [
-      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.90 },
+      { content: "Ajouter un mode sombre", type: "idea", similarity: 0.9 },
     ]);
 
     const input = "Voila une idee: [IDEA: Ajouter un dark mode au dashboard]";
@@ -591,11 +597,45 @@ describe("listIdeas", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: { topics: ["ui"] }, created_at: "2026-03-14T10:00:00Z" },
-        { id: "i2", type: "idea", content: "Cache Redis", idea_status: "reviewed", metadata: { topics: ["perf"] }, created_at: "2026-03-14T11:00:00Z" },
-        { id: "i3", type: "idea", content: "Old idea", idea_status: "archived", metadata: {}, created_at: "2026-03-10T10:00:00Z" },
-        { id: "i4", type: "idea", content: "Promoted one", idea_status: "promoted", metadata: {}, created_at: "2026-03-13T10:00:00Z" },
-        { id: "f1", type: "fact", content: "Not an idea", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "Mode sombre",
+          idea_status: "new",
+          metadata: { topics: ["ui"] },
+          created_at: "2026-03-14T10:00:00Z",
+        },
+        {
+          id: "i2",
+          type: "idea",
+          content: "Cache Redis",
+          idea_status: "reviewed",
+          metadata: { topics: ["perf"] },
+          created_at: "2026-03-14T11:00:00Z",
+        },
+        {
+          id: "i3",
+          type: "idea",
+          content: "Old idea",
+          idea_status: "archived",
+          metadata: {},
+          created_at: "2026-03-10T10:00:00Z",
+        },
+        {
+          id: "i4",
+          type: "idea",
+          content: "Promoted one",
+          idea_status: "promoted",
+          metadata: {},
+          created_at: "2026-03-13T10:00:00Z",
+        },
+        {
+          id: "f1",
+          type: "fact",
+          content: "Not an idea",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -634,8 +674,21 @@ describe("getIdea", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: { topics: ["ui"] }, created_at: "2026-03-14T10:00:00Z" },
-        { id: "f1", type: "fact", content: "Not an idea", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "Mode sombre",
+          idea_status: "new",
+          metadata: { topics: ["ui"] },
+          created_at: "2026-03-14T10:00:00Z",
+        },
+        {
+          id: "f1",
+          type: "fact",
+          content: "Not an idea",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -674,7 +727,14 @@ describe("reviewIdea", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "Mode sombre",
+          idea_status: "new",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -703,7 +763,14 @@ describe("promoteIdea", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "reviewed", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "Mode sombre",
+          idea_status: "reviewed",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -732,7 +799,14 @@ describe("archiveIdea", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       memory: [
-        { id: "i1", type: "idea", content: "Mode sombre", idea_status: "new", metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+        {
+          id: "i1",
+          type: "idea",
+          content: "Mode sombre",
+          idea_status: "new",
+          metadata: {},
+          created_at: "2026-03-14T10:00:00Z",
+        },
       ],
     });
   });
@@ -758,8 +832,20 @@ describe("archiveIdea", () => {
 describe("formatIdeasList", () => {
   it("formats ideas with status, id, content, topics, date", () => {
     const ideas = [
-      { id: "abcd1234-5678-9abc-def0-123456789abc", content: "Mode sombre", idea_status: "new" as const, metadata: { topics: ["ui", "dashboard"] }, created_at: "2026-03-14T10:00:00Z" },
-      { id: "efgh5678-9abc-def0-1234-56789abcdef0", content: "Cache Redis", idea_status: "reviewed" as const, metadata: {}, created_at: "2026-03-13T10:00:00Z" },
+      {
+        id: "abcd1234-5678-9abc-def0-123456789abc",
+        content: "Mode sombre",
+        idea_status: "new" as const,
+        metadata: { topics: ["ui", "dashboard"] },
+        created_at: "2026-03-14T10:00:00Z",
+      },
+      {
+        id: "efgh5678-9abc-def0-1234-56789abcdef0",
+        content: "Cache Redis",
+        idea_status: "reviewed" as const,
+        metadata: {},
+        created_at: "2026-03-13T10:00:00Z",
+      },
     ];
 
     const result = formatIdeasList(ideas);
@@ -778,7 +864,13 @@ describe("formatIdeasList", () => {
 
   it("handles ideas without topics", () => {
     const ideas = [
-      { id: "abcd1234-0000-0000-0000-000000000000", content: "Simple idea", idea_status: "new" as const, metadata: {}, created_at: "2026-03-14T10:00:00Z" },
+      {
+        id: "abcd1234-0000-0000-0000-000000000000",
+        content: "Simple idea",
+        idea_status: "new" as const,
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
     ];
 
     const result = formatIdeasList(ideas);

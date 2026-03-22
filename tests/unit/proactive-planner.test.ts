@@ -5,7 +5,7 @@
  * pacing, priority inversions, and formatting.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { formatPlannerResult, type PlannerResult } from "../../src/proactive-planner";
 
 // Helper: create a task-like object
@@ -99,8 +99,8 @@ describe("proactive-planner detection patterns", () => {
     // This tests the fix indirectly — if the code crashes on null, this test fails
     expect(() => {
       const updatedAt = task.updated_at ? new Date(task.updated_at).getTime() : NaN;
-      if (!isNaN(updatedAt)) {
-        const age = (Date.now() - updatedAt) / (60 * 60 * 1000);
+      if (!Number.isNaN(updatedAt)) {
+        const _age = (Date.now() - updatedAt) / (60 * 60 * 1000);
       }
     }).not.toThrow();
   });
@@ -127,7 +127,10 @@ describe("proactive-planner detection patterns", () => {
     const backlogTasks = tasks.filter((t) => t.status === "backlog");
     const wordGroups: Record<string, string[]> = {};
     for (const task of backlogTasks) {
-      const words = task.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
+      const words = task.title
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w: string) => w.length > 4);
       for (const word of words) {
         if (!wordGroups[word]) wordGroups[word] = [];
         wordGroups[word].push(task.id);
@@ -135,7 +138,7 @@ describe("proactive-planner detection patterns", () => {
     }
 
     // "dashboard" should group 2 tasks
-    expect(wordGroups["dashboard"]?.length).toBe(2);
+    expect(wordGroups.dashboard?.length).toBe(2);
   });
 
   it("detects priority inversions", () => {
@@ -152,7 +155,8 @@ describe("proactive-planner detection patterns", () => {
   });
 
   it("detects splittable tasks with long titles", () => {
-    const longTitle = "Implementer un systeme complet de gestion des utilisateurs avec authentification et autorisation";
+    const longTitle =
+      "Implementer un systeme complet de gestion des utilisateurs avec authentification et autorisation";
     const task = makeTask({ title: longTitle, status: "backlog" });
 
     expect(task.title.length).toBeGreaterThan(60);

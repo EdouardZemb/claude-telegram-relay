@@ -9,13 +9,13 @@
  */
 
 import "dotenv/config";
-import { readFile } from "fs/promises";
-import { join, dirname } from "path";
 import { createClient } from "@supabase/supabase-js";
 import { execSync } from "child_process";
-import { cpus, totalmem, freemem } from "os";
+import { readFile } from "fs/promises";
+import { cpus, freemem, totalmem } from "os";
+import { dirname, join } from "path";
 
-const PORT = parseInt(process.env.DASHBOARD_PORT || "3456");
+const PORT = parseInt(process.env.DASHBOARD_PORT || "3456", 10);
 const HOST = process.env.DASHBOARD_HOST || "0.0.0.0";
 const ROOT = dirname(import.meta.path);
 
@@ -27,9 +27,7 @@ if (!DASHBOARD_TOKEN) {
   console.warn("WARNING: DASHBOARD_TOKEN not set. Dashboard is unprotected!");
 }
 
-const supabase = SUPABASE_URL && SUPABASE_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_KEY)
-  : null;
+const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // Track server start time for uptime
 const SERVER_START = Date.now();
@@ -42,79 +40,81 @@ function checkAuth(req: Request): Response | null {
   return new Response("Unauthorized. Add ?token=YOUR_TOKEN to the URL.", { status: 401 });
 }
 
-const server = import.meta.main ? Bun.serve({
-  port: PORT,
-  hostname: HOST,
-  async fetch(req) {
-    const url = new URL(req.url);
+const _server = import.meta.main
+  ? Bun.serve({
+      port: PORT,
+      hostname: HOST,
+      async fetch(req) {
+        const url = new URL(req.url);
 
-    // Health-check endpoint — no auth required
-    if (url.pathname === "/api/health") {
-      return handleHealthCheck();
-    }
+        // Health-check endpoint — no auth required
+        if (url.pathname === "/api/health") {
+          return handleHealthCheck();
+        }
 
-    // All other routes require auth
-    const authError = checkAuth(req);
-    if (authError) return authError;
+        // All other routes require auth
+        const authError = checkAuth(req);
+        if (authError) return authError;
 
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      const html = await readFile(join(ROOT, "index.html"), "utf-8");
-      return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    }
+        if (url.pathname === "/" || url.pathname === "/index.html") {
+          const html = await readFile(join(ROOT, "index.html"), "utf-8");
+          return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        }
 
-    // API proxy — serve Supabase data without exposing keys to client
-    // Extract optional project_id filter from query params
-    const projectId = url.searchParams.get("project_id") || undefined;
+        // API proxy — serve Supabase data without exposing keys to client
+        // Extract optional project_id filter from query params
+        const projectId = url.searchParams.get("project_id") || undefined;
 
-    if (url.pathname === "/api/projects") {
-      return handleProxyProjects();
-    }
+        if (url.pathname === "/api/projects") {
+          return handleProxyProjects();
+        }
 
-    if (url.pathname === "/api/tasks") {
-      return handleProxyTasks(projectId);
-    }
+        if (url.pathname === "/api/tasks") {
+          return handleProxyTasks(projectId);
+        }
 
-    if (url.pathname === "/api/prds") {
-      return handleProxyPRDs(projectId);
-    }
+        if (url.pathname === "/api/prds") {
+          return handleProxyPRDs(projectId);
+        }
 
-    if (url.pathname === "/api/metrics") {
-      return handleProxyMetrics(projectId);
-    }
+        if (url.pathname === "/api/metrics") {
+          return handleProxyMetrics(projectId);
+        }
 
-    if (url.pathname === "/api/retros") {
-      return handleProxyRetros(projectId);
-    }
+        if (url.pathname === "/api/retros") {
+          return handleProxyRetros(projectId);
+        }
 
-    if (url.pathname === "/api/agent-metrics") {
-      return handleAgentMetrics(projectId);
-    }
+        if (url.pathname === "/api/agent-metrics") {
+          return handleAgentMetrics(projectId);
+        }
 
-    if (url.pathname === "/api/workflow-audit") {
-      return handleWorkflowAudit();
-    }
+        if (url.pathname === "/api/workflow-audit") {
+          return handleWorkflowAudit();
+        }
 
-    if (url.pathname === "/api/sprint-live") {
-      return handleSprintLive();
-    }
+        if (url.pathname === "/api/sprint-live") {
+          return handleSprintLive();
+        }
 
-    if (url.pathname === "/api/code-reviews") {
-      return handleCodeReviews();
-    }
+        if (url.pathname === "/api/code-reviews") {
+          return handleCodeReviews();
+        }
 
-    if (url.pathname === "/api/autonomy-status") {
-      return handleAutonomyStatus();
-    }
+        if (url.pathname === "/api/autonomy-status") {
+          return handleAutonomyStatus();
+        }
 
-    if (url.pathname === "/api/audit") {
-      const limitParam = url.searchParams.get("limit");
-      const axisParam = url.searchParams.get("axis") || undefined;
-      return handleAudit(limitParam, axisParam);
-    }
+        if (url.pathname === "/api/audit") {
+          const limitParam = url.searchParams.get("limit");
+          const axisParam = url.searchParams.get("axis") || undefined;
+          return handleAudit(limitParam, axisParam);
+        }
 
-    return new Response("Not found", { status: 404 });
-  },
-}) : null;
+        return new Response("Not found", { status: 404 });
+      },
+    })
+  : null;
 
 async function handleProxyProjects(): Promise<Response> {
   if (!supabase) {
@@ -165,10 +165,7 @@ async function handleProxyPRDs(projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
-  let query = supabase
-    .from("prds")
-    .select("*")
-    .order("created_at", { ascending: false });
+  let query = supabase.from("prds").select("*").order("created_at", { ascending: false });
 
   if (projectId) query = query.eq("project_id", projectId);
 
@@ -194,7 +191,13 @@ async function handleHealthCheck(): Promise<Response> {
       memory_total_mb: Math.round(totalmem() / 1024 / 1024),
       memory_free_mb: Math.round(freemem() / 1024 / 1024),
       memory_used_pct: Math.round((1 - freemem() / totalmem()) * 100),
-      load_avg: (() => { try { return require("os").loadavg(); } catch { return []; } })(),
+      load_avg: (() => {
+        try {
+          return require("os").loadavg();
+        } catch {
+          return [];
+        }
+      })(),
     },
     services: {} as Record<string, unknown>,
   };
@@ -258,10 +261,7 @@ async function handleProxyMetrics(projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
   }
-  let query = supabase
-    .from("sprint_metrics")
-    .select("*")
-    .order("created_at", { ascending: true });
+  let query = supabase.from("sprint_metrics").select("*").order("created_at", { ascending: true });
 
   if (projectId) query = query.eq("project_id", projectId);
 
@@ -283,7 +283,9 @@ async function handleProxyRetros(projectId?: string): Promise<Response> {
   }
   let query = supabase
     .from("retros")
-    .select("sprint_id, what_worked, what_didnt, patterns_detected, actions_proposed, actions_accepted, validated_at, created_at")
+    .select(
+      "sprint_id, what_worked, what_didnt, patterns_detected, actions_proposed, actions_accepted, validated_at, created_at",
+    )
     .order("created_at", { ascending: false });
 
   if (projectId) query = query.eq("project_id", projectId);
@@ -300,7 +302,7 @@ async function handleProxyRetros(projectId?: string): Promise<Response> {
   });
 }
 
-async function handleAgentMetrics(projectId?: string): Promise<Response> {
+async function handleAgentMetrics(_projectId?: string): Promise<Response> {
   if (!supabase) {
     return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
   }
@@ -321,13 +323,16 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
   }
 
   // Aggregate per-agent stats
-  const agentStats: Record<string, {
-    runs: number;
-    successes: number;
-    totalDurationMs: number;
-    avgDurationMs: number;
-    lastRun: string | null;
-  }> = {};
+  const agentStats: Record<
+    string,
+    {
+      runs: number;
+      successes: number;
+      totalDurationMs: number;
+      avgDurationMs: number;
+      lastRun: string | null;
+    }
+  > = {};
 
   for (const log of logs || []) {
     const metadataType = log.metadata?.type;
@@ -339,7 +344,13 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
         for (const r of results) {
           if (!r.agent) continue;
           if (!agentStats[r.agent]) {
-            agentStats[r.agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+            agentStats[r.agent] = {
+              runs: 0,
+              successes: 0,
+              totalDurationMs: 0,
+              avgDurationMs: 0,
+              lastRun: null,
+            };
           }
           const stats = agentStats[r.agent];
           stats.runs++;
@@ -354,7 +365,13 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
     if (metadataType === "code_review" && log.metadata) {
       const agent = "qa";
       if (!agentStats[agent]) {
-        agentStats[agent] = { runs: 0, successes: 0, totalDurationMs: 0, avgDurationMs: 0, lastRun: null };
+        agentStats[agent] = {
+          runs: 0,
+          successes: 0,
+          totalDurationMs: 0,
+          avgDurationMs: 0,
+          lastRun: null,
+        };
       }
       agentStats[agent].runs++;
       if (log.metadata.passes_gate) agentStats[agent].successes++;
@@ -384,7 +401,9 @@ async function handleAgentMetrics(projectId?: string): Promise<Response> {
     .map((l: any) => l.metadata?.score)
     .filter((s: any) => typeof s === "number");
   if (scores.length > 0) {
-    gateStats.avgScore = Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length);
+    gateStats.avgScore = Math.round(
+      scores.reduce((a: number, b: number) => a + b, 0) / scores.length,
+    );
   }
 
   const response = {
@@ -422,7 +441,9 @@ async function handleWorkflowAudit(): Promise<Response> {
 
 async function handleSprintLive(): Promise<Response> {
   if (!supabase) {
-    return new Response(JSON.stringify({ sprint: null }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ sprint: null }), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // Find the current sprint by looking at tasks with the latest sprint ID
@@ -435,7 +456,9 @@ async function handleSprintLive(): Promise<Response> {
 
   const currentSprint = latestTasks?.[0]?.sprint;
   if (!currentSprint) {
-    return new Response(JSON.stringify({ sprint: null }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ sprint: null }), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // Get all tasks for this sprint
@@ -518,10 +541,7 @@ async function handleCodeReviews(): Promise<Response> {
   const taskIds = [...new Set((data || []).map((d: any) => d.task_id).filter(Boolean))];
   let taskMap: Record<string, string> = {};
   if (taskIds.length > 0) {
-    const { data: tasks } = await supabase
-      .from("tasks")
-      .select("id, title")
-      .in("id", taskIds);
+    const { data: tasks } = await supabase.from("tasks").select("id, title").in("id", taskIds);
     if (tasks) {
       taskMap = Object.fromEntries(tasks.map((t: any) => [t.id, t.title]));
     }
@@ -553,15 +573,11 @@ async function handleAutonomyStatus(): Promise<Response> {
   }
 
   // Trust scores
-  const { data: trustData } = await supabase
-    .from("trust_scores")
-    .select("*")
-    .order("agent_role");
+  const { data: trustData } = await supabase.from("trust_scores").select("*").order("agent_role");
 
   const trustScores = (trustData || []).map((row: any) => {
-    const passRate = row.total_evaluations > 0
-      ? Math.round((row.total_passes / row.total_evaluations) * 100)
-      : 0;
+    const passRate =
+      row.total_evaluations > 0 ? Math.round((row.total_passes / row.total_evaluations) * 100) : 0;
     return {
       role: row.agent_role,
       score: row.score,
@@ -576,7 +592,9 @@ async function handleAutonomyStatus(): Promise<Response> {
   // Recent gate evaluations (last 10)
   const { data: gateData } = await supabase
     .from("gate_evaluations")
-    .select("agent_role, gate_name, score, passed, auto_approved, rework_iteration, rubric_dimensions, created_at")
+    .select(
+      "agent_role, gate_name, score, passed, auto_approved, rework_iteration, rubric_dimensions, created_at",
+    )
     .order("created_at", { ascending: false })
     .limit(10);
 
@@ -654,8 +672,9 @@ export async function handleAudit(
   let results = data ?? [];
 
   if (axisParam) {
-    results = results.filter((row: any) =>
-      row.axis_scores && typeof row.axis_scores === "object" && axisParam in row.axis_scores
+    results = results.filter(
+      (row: any) =>
+        row.axis_scores && typeof row.axis_scores === "object" && axisParam in row.axis_scores,
     );
   }
 

@@ -7,7 +7,7 @@
  * pending classification helpers.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ── Mock Supabase ────────────────────────────────────────────
@@ -62,9 +62,9 @@ function createMockSupabase(overrides: Record<string, unknown> = {}) {
 
 import {
   buildClassificationKeyboard,
-  registerPendingClassification,
-  getPendingClassification,
   clearPendingClassification,
+  getPendingClassification,
+  registerPendingClassification,
 } from "../../src/commands/documents.ts";
 
 // ── buildClassificationKeyboard ──────────────────────────────
@@ -316,7 +316,9 @@ describe("document formatting", () => {
       `Type: ${sampleDoc.file_type}`,
       sampleDoc.file_size ? `Taille: ${Math.round(sampleDoc.file_size / 1024)}Ko` : "",
       sampleDoc.document_date ? `Date document: ${sampleDoc.document_date}` : "",
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     expect(detail).toContain("DOCUMENT [abcdef12]");
     expect(detail).toContain("Facture EDF Janvier");
@@ -342,10 +344,38 @@ describe("document formatting", () => {
 describe("category grid layout", () => {
   it("builds keyboard with 2 categories per row + Autre on new row", () => {
     const categories = [
-      { id: "1", name: "facture", description: null, usage_count: 5, created_by: "system", created_at: "" },
-      { id: "2", name: "contrat", description: null, usage_count: 3, created_by: "system", created_at: "" },
-      { id: "3", name: "recu", description: null, usage_count: 2, created_by: "system", created_at: "" },
-      { id: "4", name: "note", description: null, usage_count: 1, created_by: "system", created_at: "" },
+      {
+        id: "1",
+        name: "facture",
+        description: null,
+        usage_count: 5,
+        created_by: "system",
+        created_at: "",
+      },
+      {
+        id: "2",
+        name: "contrat",
+        description: null,
+        usage_count: 3,
+        created_by: "system",
+        created_at: "",
+      },
+      {
+        id: "3",
+        name: "recu",
+        description: null,
+        usage_count: 2,
+        created_by: "system",
+        created_at: "",
+      },
+      {
+        id: "4",
+        name: "note",
+        description: null,
+        usage_count: 1,
+        created_by: "system",
+        created_at: "",
+      },
     ];
 
     const keyboard = new (require("grammy").InlineKeyboard)();
@@ -468,10 +498,7 @@ describe("edge cases", () => {
   });
 
   it("handles ID prefix matching", () => {
-    const docs = [
-      { id: "abcdef12-3456" },
-      { id: "fedcba98-7654" },
-    ];
+    const docs = [{ id: "abcdef12-3456" }, { id: "fedcba98-7654" }];
     const prefix = "abcdef";
     const found = docs.find((d) => d.id.startsWith(prefix));
     expect(found).toBeDefined();
@@ -479,9 +506,7 @@ describe("edge cases", () => {
   });
 
   it("handles non-matching ID prefix", () => {
-    const docs = [
-      { id: "abcdef12-3456" },
-    ];
+    const docs = [{ id: "abcdef12-3456" }];
     const found = docs.find((d) => d.id.startsWith("xxxxxx"));
     expect(found).toBeUndefined();
   });

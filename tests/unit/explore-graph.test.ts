@@ -5,14 +5,9 @@
  * that bypass the LLM entirely.
  */
 
-import { describe, it, expect } from "bun:test";
-import {
-  detectGraphQuery,
-  extractModuleName,
-  tryGraphResponse,
-  type GraphQueryType,
-} from "../../src/explore-graph";
+import { describe, expect, it } from "bun:test";
 import type { CodeGraph } from "../../src/code-graph";
+import { detectGraphQuery, extractModuleName, tryGraphResponse } from "../../src/explore-graph";
 
 // ── Test Graph Fixture ──────────────────────────────────────────
 
@@ -46,35 +41,59 @@ function buildTestGraph(): CodeGraph {
       },
       {
         id: "src/memory.ts",
-        exports: [
-          { name: "getMemoryContext", kind: "function" },
-        ],
+        exports: [{ name: "getMemoryContext", kind: "function" }],
         lineCount: 320,
       },
       {
         id: "src/commands/help.ts",
-        exports: [
-          { name: "default", kind: "default" },
-        ],
+        exports: [{ name: "default", kind: "default" }],
         lineCount: 80,
       },
       {
         id: "src/agent.ts",
-        exports: [
-          { name: "spawnClaude", kind: "function" },
-        ],
+        exports: [{ name: "spawnClaude", kind: "function" }],
         lineCount: 200,
       },
     ],
     edges: [
       // relay imports orchestrator, tasks, memory
-      { source: "src/relay.ts", target: "src/orchestrator.ts", imports: ["orchestrate"], isTypeOnly: false },
-      { source: "src/relay.ts", target: "src/tasks.ts", imports: ["createTask"], isTypeOnly: false },
-      { source: "src/relay.ts", target: "src/memory.ts", imports: ["getMemoryContext"], isTypeOnly: false },
+      {
+        source: "src/relay.ts",
+        target: "src/orchestrator.ts",
+        imports: ["orchestrate"],
+        isTypeOnly: false,
+      },
+      {
+        source: "src/relay.ts",
+        target: "src/tasks.ts",
+        imports: ["createTask"],
+        isTypeOnly: false,
+      },
+      {
+        source: "src/relay.ts",
+        target: "src/memory.ts",
+        imports: ["getMemoryContext"],
+        isTypeOnly: false,
+      },
       // orchestrator imports tasks, agent, memory
-      { source: "src/orchestrator.ts", target: "src/tasks.ts", imports: ["updateTask"], isTypeOnly: false },
-      { source: "src/orchestrator.ts", target: "src/agent.ts", imports: ["spawnClaude"], isTypeOnly: false },
-      { source: "src/orchestrator.ts", target: "src/memory.ts", imports: ["getMemoryContext"], isTypeOnly: false },
+      {
+        source: "src/orchestrator.ts",
+        target: "src/tasks.ts",
+        imports: ["updateTask"],
+        isTypeOnly: false,
+      },
+      {
+        source: "src/orchestrator.ts",
+        target: "src/agent.ts",
+        imports: ["spawnClaude"],
+        isTypeOnly: false,
+      },
+      {
+        source: "src/orchestrator.ts",
+        target: "src/memory.ts",
+        imports: ["getMemoryContext"],
+        isTypeOnly: false,
+      },
       // commands/help imports relay
       { source: "src/commands/help.ts", target: "src/relay.ts", imports: [], isTypeOnly: false },
     ],

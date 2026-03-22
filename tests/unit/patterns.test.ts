@@ -4,14 +4,9 @@
  * Tests for pattern detection, suggestion generation, and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { analyzePatterns, formatPatterns, type PatternAnalysis } from "../../src/patterns";
 import { createMockSupabase } from "../fixtures/mock-supabase";
-import {
-  analyzePatterns,
-  formatPatterns,
-  type PatternAnalysis,
-  type DetectedPattern,
-} from "../../src/patterns";
 
 describe("Pattern Analysis — Slow Steps", () => {
   let supabase: ReturnType<typeof createMockSupabase>;
@@ -24,13 +19,61 @@ describe("Pattern Analysis — Slow Steps", () => {
       ],
       workflow_logs: [
         // Execution step consistently slow (> 1 hour each)
-        { sprint_id: "S10", step_from: "execution", step_to: "review", duration_seconds: 5400, had_rework: false, checkpoint_result: "pass", created_at: "2026-01-16" },
-        { sprint_id: "S10", step_from: "execution", step_to: "review", duration_seconds: 4800, had_rework: false, checkpoint_result: "pass", created_at: "2026-01-17" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 6000, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-02" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 7200, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-03" },
+        {
+          sprint_id: "S10",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 5400,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-01-16",
+        },
+        {
+          sprint_id: "S10",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 4800,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-01-17",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 6000,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-02",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 7200,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-03",
+        },
         // Request step fast
-        { sprint_id: "S10", step_from: "request", step_to: "decomposition", duration_seconds: 30, had_rework: false, checkpoint_result: "skipped", created_at: "2026-01-16" },
-        { sprint_id: "S11", step_from: "request", step_to: "decomposition", duration_seconds: 25, had_rework: false, checkpoint_result: "skipped", created_at: "2026-02-02" },
+        {
+          sprint_id: "S10",
+          step_from: "request",
+          step_to: "decomposition",
+          duration_seconds: 30,
+          had_rework: false,
+          checkpoint_result: "skipped",
+          created_at: "2026-01-16",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "request",
+          step_to: "decomposition",
+          duration_seconds: 25,
+          had_rework: false,
+          checkpoint_result: "skipped",
+          created_at: "2026-02-02",
+        },
       ],
       retros: [],
     });
@@ -70,11 +113,51 @@ describe("Pattern Analysis — Checkpoints", () => {
           created_at: `2026-02-0${i}`,
         })),
         // Execution checkpoint: fails often (3/5)
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "fail", created_at: "2026-02-01" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "fail", created_at: "2026-02-02" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "corrected", created_at: "2026-02-03" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-04" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-05" },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "fail",
+          created_at: "2026-02-01",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "fail",
+          created_at: "2026-02-02",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "corrected",
+          created_at: "2026-02-03",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-04",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-05",
+        },
       ],
       retros: [],
     });
@@ -98,12 +181,42 @@ describe("Pattern Analysis — Checkpoints", () => {
 describe("Pattern Analysis — Rework", () => {
   it("detects high rework rate", async () => {
     const supabase = createMockSupabase({
-      sprint_metrics: [{ sprint_id: "S11", tasks_planned: 10, tasks_completed: 8, created_at: "2026-02-01" }],
+      sprint_metrics: [
+        { sprint_id: "S11", tasks_planned: 10, tasks_completed: 8, created_at: "2026-02-01" },
+      ],
       workflow_logs: [
-        { sprint_id: "S11", step_from: "review", step_to: "execution", had_rework: true, checkpoint_result: "fail", created_at: "2026-02-01" },
-        { sprint_id: "S11", step_from: "review", step_to: "execution", had_rework: true, checkpoint_result: "fail", created_at: "2026-02-02" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", had_rework: false, checkpoint_result: "pass", created_at: "2026-02-03" },
-        { sprint_id: "S11", step_from: "execution", step_to: "review", had_rework: false, checkpoint_result: "pass", created_at: "2026-02-04" },
+        {
+          sprint_id: "S11",
+          step_from: "review",
+          step_to: "execution",
+          had_rework: true,
+          checkpoint_result: "fail",
+          created_at: "2026-02-01",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "review",
+          step_to: "execution",
+          had_rework: true,
+          checkpoint_result: "fail",
+          created_at: "2026-02-02",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-03",
+        },
+        {
+          sprint_id: "S11",
+          step_from: "execution",
+          step_to: "review",
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-04",
+        },
       ],
       retros: [],
     });
@@ -158,7 +271,9 @@ describe("Pattern Analysis — Trends", () => {
     });
 
     const analysis = await analyzePatterns(supabase);
-    const trends = analysis.patterns.filter((p) => p.type === "improving" || p.type === "degrading");
+    const trends = analysis.patterns.filter(
+      (p) => p.type === "improving" || p.type === "degrading",
+    );
     expect(trends.length).toBe(0);
   });
 });
@@ -166,7 +281,9 @@ describe("Pattern Analysis — Trends", () => {
 describe("Pattern Analysis — Suggestions", () => {
   it("suggests disabling useless checkpoint", async () => {
     const supabase = createMockSupabase({
-      sprint_metrics: [{ sprint_id: "S11", tasks_planned: 10, tasks_completed: 10, created_at: "2026-02-01" }],
+      sprint_metrics: [
+        { sprint_id: "S11", tasks_planned: 10, tasks_completed: 10, created_at: "2026-02-01" },
+      ],
       workflow_logs: [
         ...[1, 2, 3, 4, 5].map((i) => ({
           sprint_id: "S11",
@@ -182,15 +299,15 @@ describe("Pattern Analysis — Suggestions", () => {
     });
 
     const analysis = await analyzePatterns(supabase);
-    const disableSuggestions = analysis.suggestions.filter((s) =>
-      s.action.includes("Desactiver")
-    );
+    const disableSuggestions = analysis.suggestions.filter((s) => s.action.includes("Desactiver"));
     expect(disableSuggestions.length).toBeGreaterThan(0);
   });
 
   it("filters out already-accepted actions", async () => {
     const supabase = createMockSupabase({
-      sprint_metrics: [{ sprint_id: "S11", tasks_planned: 10, tasks_completed: 10, created_at: "2026-02-01" }],
+      sprint_metrics: [
+        { sprint_id: "S11", tasks_planned: 10, tasks_completed: 10, created_at: "2026-02-01" },
+      ],
       workflow_logs: [
         ...[1, 2, 3, 4, 5].map((i) => ({
           sprint_id: "S11",
@@ -215,7 +332,7 @@ describe("Pattern Analysis — Suggestions", () => {
 
     const analysis = await analyzePatterns(supabase);
     const disableSuggestions = analysis.suggestions.filter((s) =>
-      s.action.includes('Desactiver le checkpoint sur "decomposition"')
+      s.action.includes('Desactiver le checkpoint sur "decomposition"'),
     );
     expect(disableSuggestions.length).toBe(0);
   });
@@ -241,11 +358,14 @@ describe("Pattern Formatting", () => {
     const analysis: PatternAnalysis = {
       patterns: [
         { type: "slow_step", severity: "warning", description: "Execution lente", data: {} },
-        { type: "useless_checkpoint", severity: "info", description: "Checkpoint inutile", data: {} },
+        {
+          type: "useless_checkpoint",
+          severity: "info",
+          description: "Checkpoint inutile",
+          data: {},
+        },
       ],
-      suggestions: [
-        { action: "Desactiver checkpoint", reason: "Inutile", priority: "low" },
-      ],
+      suggestions: [{ action: "Desactiver checkpoint", reason: "Inutile", priority: "low" }],
       sprintCount: 3,
       analyzedAt: new Date().toISOString(),
     };

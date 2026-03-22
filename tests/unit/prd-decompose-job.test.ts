@@ -1,11 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import {
-  launch,
-  list,
-  get,
-  isJobManagerEnabled,
-  _resetForTests,
-} from "../../src/job-manager.ts";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { _resetForTests, get, isJobManagerEnabled, launch, list } from "../../src/job-manager.ts";
 
 describe("prd-decompose background job", () => {
   beforeEach(() => {
@@ -80,12 +74,19 @@ describe("prd-decompose background job", () => {
     it("builds correct result message with task details", async () => {
       // Simulate the decompose function building a result message
       const mockTasks = [
-        { id: "abc12345-uuid", title: "Creer composant", priority: 2, acceptance_criteria: "AC1\nAC2" },
+        {
+          id: "abc12345-uuid",
+          title: "Creer composant",
+          priority: 2,
+          acceptance_criteria: "AC1\nAC2",
+        },
         { id: "def67890-uuid", title: "Ajouter tests", priority: 3, acceptance_criteria: "" },
       ];
 
       const lines = mockTasks.map((t, i) => {
-        const acCount = (t.acceptance_criteria || "").split("\n").filter((l: string) => l.trim()).length;
+        const acCount = (t.acceptance_criteria || "")
+          .split("\n")
+          .filter((l: string) => l.trim()).length;
         return `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}]${acCount > 0 ? ` (${acCount} ACs)` : ""}`;
       });
       const result = `${mockTasks.length} taches creees depuis le PRD "Test":\n${lines.join("\n")}`;

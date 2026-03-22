@@ -16,22 +16,16 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { executeTask } from "./agent.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
+import { checkGatesWithOverrides } from "./gates.ts";
+import { type RouterDecision, routerPipelineToRoles, routeTask } from "./llm-router.ts";
+import { type AgentRole, classifyPipeline, orchestrate, selectPipeline } from "./orchestrator.ts";
+import { Semaphore } from "./semaphore.ts";
+import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import type { Task } from "./tasks.ts";
 import { updateTaskStatus } from "./tasks.ts";
-import { executeTask } from "./agent.ts";
-import { checkGatesWithOverrides } from "./gates.ts";
-import {
-  orchestrate,
-  selectPipeline,
-  classifyPipeline,
-  type AgentRole,
-  type OrchestratedResult,
-} from "./orchestrator.ts";
-import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
 import { WorkflowTracker } from "./workflow.ts";
-import { Semaphore } from "./semaphore.ts";
-import { routeTask, routerPipelineToRoles, type RouterDecision } from "./llm-router.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -95,7 +89,7 @@ export interface PipelineOptions {
 export async function runAutoPipeline(
   supabase: SupabaseClient | null,
   task: Task,
-  options: PipelineOptions = {}
+  options: PipelineOptions = {},
 ): Promise<PipelineResult> {
   const startTime = Date.now();
   const {
@@ -119,7 +113,9 @@ export async function runAutoPipeline(
   if (useRouter) {
     routerDecision = await routeTask(task);
     if (routerDecision) {
-      await progress(`LLM Router: pipeline=${routerDecision.pipeline}, budget=$${routerDecision.budget}, reason=${routerDecision.reasoning}`);
+      await progress(
+        `LLM Router: pipeline=${routerDecision.pipeline}, budget=$${routerDecision.budget}, reason=${routerDecision.reasoning}`,
+      );
     } else {
       await progress("LLM Router: fallback to keyword-based selection");
     }
@@ -128,7 +124,9 @@ export async function runAutoPipeline(
   // S22-06: Log pipeline classification
   const pipelineType = routerDecision
     ? routerDecision.pipeline
-    : (autoPipeline ? classifyPipeline(task) : "DEFAULT");
+    : autoPipeline
+      ? classifyPipeline(task)
+      : "DEFAULT";
   await progress(`AUTO-PIPELINE demarre pour: ${task.title} (pipeline: ${pipelineType})`);
 
   // Track workflow
@@ -175,26 +173,27 @@ export async function runAutoPipeline(
   if (supabase) {
     await enrichTaskWithStory(supabase, task.id, story);
     // Refresh task with enriched data
-    const { data: refreshed } = await supabase
-      .from("tasks")
-      .select("*")
-      .eq("id", task.id)
-      .single();
+    const { data: refreshed } = await supabase.from("tasks").select("*").eq("id", task.id).single();
     if (refreshed) {
       Object.assign(task, refreshed);
     }
   }
-  await progress(`Story file genere: ${story.acceptanceCriteria.length} ACs, ${story.implementationSteps.length} steps.`);
+  await progress(
+    `Story file genere: ${story.acceptanceCriteria.length} ACs, ${story.implementationSteps.length} steps.`,
+  );
 
   // Phase 2b: Spec-lite (P1) — generate proto-spec if flag is active
   // R1: Only on DEFAULT and LIGHT. R4: Behind spec_phase_lite flag.
-  if (isFeatureEnabled("spec_phase_lite") && (pipelineType === "DEFAULT" || pipelineType === "LIGHT")) {
+  if (
+    isFeatureEnabled("spec_phase_lite") &&
+    (pipelineType === "DEFAULT" || pipelineType === "LIGHT")
+  ) {
     await progress("Phase 2b: Generation de la proto-spec (spec-lite)...");
     const { generateProtoSpec } = await import("./spec-lite.ts");
     const protoSpec = await generateProtoSpec(task, story);
     const vcCount = protoSpec.v_criteria.length;
     await progress(
-      `Proto-spec generee: ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`
+      `Proto-spec generee: ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`,
     );
   }
 
@@ -283,9 +282,9 @@ export async function runAutoPipeline(
 
   await progress(
     `AUTO-PIPELINE TERMINE en ${totalDuration}s\n` +
-    `Tache: ${task.title}\n` +
-    (execResult.prUrl ? `PR: ${execResult.prUrl}\n` : "") +
-    (execResult.reviewScore !== undefined ? `Review: ${execResult.reviewScore}/100` : "")
+      `Tache: ${task.title}\n` +
+      (execResult.prUrl ? `PR: ${execResult.prUrl}\n` : "") +
+      (execResult.reviewScore !== undefined ? `Review: ${execResult.reviewScore}/100` : ""),
   );
 
   return {
@@ -311,7 +310,7 @@ export async function runAutoPipeline(
 export async function runBatchPipeline(
   supabase: SupabaseClient | null,
   tasks: Task[],
-  options: PipelineOptions = {}
+  options: PipelineOptions = {},
 ): Promise<PipelineResult[]> {
   const maxConcurrency = options.maxConcurrency ?? 1;
 
@@ -339,7 +338,9 @@ export async function runBatchPipeline(
   const semaphore = new Semaphore(maxConcurrency);
 
   if (options.onProgress) {
-    await options.onProgress(`Batch parallele: ${tasks.length} taches, max concurrency: ${maxConcurrency}`);
+    await options.onProgress(
+      `Batch parallele: ${tasks.length} taches, max concurrency: ${maxConcurrency}`,
+    );
   }
 
   const settled = await Promise.allSettled(
@@ -353,7 +354,7 @@ export async function runBatchPipeline(
       } finally {
         semaphore.release();
       }
-    })
+    }),
   );
 
   return settled.map((r, i) => {

@@ -5,10 +5,13 @@
  * Files are loaded in alphabetical order; prefix with "zz-" for last-loaded handlers.
  */
 
-import { Bot, Composer, type Context } from "grammy";
 import { Glob } from "bun";
-import { join, basename } from "path";
+import { type Bot, Composer, type Context } from "grammy";
+import { basename, join } from "path";
 import type { BotContext } from "./bot-context.ts";
+import { createLogger } from "./logger.ts";
+
+const log = createLogger("loader");
 
 /**
  * Scan src/commands/*.ts, import each module, and mount the exported Composer
@@ -37,7 +40,7 @@ export async function loadComposers(bot: Bot, ctx: BotContext): Promise<number> 
       const exported = mod.default;
 
       if (!exported) {
-        console.warn(`[loader] ${file}: no default export, skipping`);
+        log.warn(`${file}: no default export, skipping`);
         continue;
       }
 
@@ -49,31 +52,31 @@ export async function loadComposers(bot: Bot, ctx: BotContext): Promise<number> 
         if (result instanceof Composer) {
           composer = result;
         } else {
-          console.warn(`[loader] ${file}: factory did not return a Composer, skipping`);
+          log.warn(`${file}: factory did not return a Composer, skipping`);
           continue;
         }
       } else if (exported instanceof Composer) {
         composer = exported;
       } else {
-        console.warn(`[loader] ${file}: default export is not a Composer or factory, skipping`);
+        log.warn(`${file}: default export is not a Composer or factory, skipping`);
         continue;
       }
 
       // Mount with errorBoundary for isolation
       bot.use(
         bot.errorBoundary((err) => {
-          console.error(`[${moduleName}] Error:`, err.error);
+          log.error(`${err.error}`, { errorModule: moduleName });
         }, composer),
       );
 
       loaded++;
-      console.log(`[loader] Loaded: ${file}`);
+      log.info(`Loaded: ${file}`);
     } catch (error) {
-      console.error(`[loader] Failed to load ${file}:`, error);
+      log.error(`Failed to load ${file}`, { error: String(error) });
       // Continue loading other modules
     }
   }
 
-  console.log(`[loader] ${loaded}/${files.length} composers loaded`);
+  log.info(`${loaded}/${files.length} composers loaded`);
   return loaded;
 }

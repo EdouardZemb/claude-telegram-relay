@@ -1,13 +1,13 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
-  scanMissingTests,
-  scanTodoMarkers,
-  scanStuckTasks,
-  scanStaleBacklog,
-  runAllScanners,
-  isDuplicate,
   formatScanResult,
+  isDuplicate,
+  runAllScanners,
   type ScanResult,
+  scanMissingTests,
+  scanStaleBacklog,
+  scanStuckTasks,
+  scanTodoMarkers,
 } from "../../src/autonomy-scanner.ts";
 
 // ── Mock Supabase ────────────────────────────────────────────
@@ -35,7 +35,7 @@ function mockSupabase(responses: Record<string, any> = {}) {
 
   return {
     from: (table: string) => ({
-      select: (cols?: string) => {
+      select: (_cols?: string) => {
         // Route dedup queries (contains → auto-generated) to separate key
         const base = chainable(table);
         return {
@@ -124,9 +124,7 @@ describe("scanStuckTasks", () => {
     const oldDate = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
     const supabase = mockSupabase({
       tasks: {
-        data: [
-          { id: "abc-123", title: "Stuck task", updated_at: oldDate },
-        ],
+        data: [{ id: "abc-123", title: "Stuck task", updated_at: oldDate }],
         error: null,
       },
     });
@@ -282,7 +280,7 @@ describe("runAllScanners", () => {
     const result = await runAllScanners(process.cwd(), supabase);
     for (let i = 1; i < result.opportunities.length; i++) {
       expect(result.opportunities[i].priority).toBeGreaterThanOrEqual(
-        result.opportunities[i - 1].priority
+        result.opportunities[i - 1].priority,
       );
     }
   });

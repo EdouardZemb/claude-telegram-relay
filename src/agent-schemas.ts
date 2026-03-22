@@ -688,10 +688,7 @@ export function buildStructuredOutputInstructions(role: AgentRole): string {
  * Then looks for <<<JSON>>> ... <<<END>>> markers.
  * Falls back to finding any JSON object in the output.
  */
-export function parseAgentOutput(
-  rawOutput: string,
-  role: AgentRole
-): StructuredAgentOutput | null {
+export function parseAgentOutput(rawOutput: string, role: AgentRole): StructuredAgentOutput | null {
   // S28: Try direct JSON parse first (output from --output-format json)
   try {
     const direct = JSON.parse(rawOutput);
@@ -703,9 +700,7 @@ export function parseAgentOutput(
   }
 
   // Try marked JSON (<<<JSON>>> markers — legacy fallback)
-  const markerMatch = rawOutput.match(
-    /<<<JSON>>>\s*([\s\S]*?)\s*<<<END>>>/
-  );
+  const markerMatch = rawOutput.match(/<<<JSON>>>\s*([\s\S]*?)\s*<<<END>>>/);
   if (markerMatch) {
     try {
       const parsed = JSON.parse(markerMatch[1].trim());
@@ -725,9 +720,7 @@ export function parseAgentOutput(
       if (validateAgentOutput(parsed, role)) {
         return { ...parsed, role } as StructuredAgentOutput;
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return null;
@@ -762,10 +755,7 @@ function findJsonObjects(text: string): string[] {
  * Validate that a parsed object matches the expected schema for a role.
  * Checks for required fields — lenient validation (missing optional fields are OK).
  */
-export function validateAgentOutput(
-  obj: any,
-  role: AgentRole
-): boolean {
+export function validateAgentOutput(obj: any, role: AgentRole): boolean {
   if (!obj || typeof obj !== "object") return false;
 
   switch (role) {
@@ -776,20 +766,11 @@ export function validateAgentOutput(
         Array.isArray(obj.recommendations)
       );
     case "pm":
-      return (
-        Array.isArray(obj.subtasks) &&
-        Array.isArray(obj.priorities)
-      );
+      return Array.isArray(obj.subtasks) && Array.isArray(obj.priorities);
     case "architect":
-      return (
-        typeof obj.design === "string" &&
-        Array.isArray(obj.files_impacted)
-      );
+      return typeof obj.design === "string" && Array.isArray(obj.files_impacted);
     case "dev":
-      return (
-        Array.isArray(obj.files_modified) &&
-        typeof obj.summary === "string"
-      );
+      return Array.isArray(obj.files_modified) && typeof obj.summary === "string";
     case "qa":
       return (
         typeof obj.score === "number" &&
@@ -797,10 +778,7 @@ export function validateAgentOutput(
         typeof obj.summary === "string"
       );
     case "sm":
-      return (
-        typeof obj.summary === "string" &&
-        Array.isArray(obj.next_steps)
-      );
+      return typeof obj.summary === "string" && Array.isArray(obj.next_steps);
     case "explorer":
       return (
         typeof obj.etat_des_lieux === "string" &&
@@ -828,7 +806,7 @@ export function validateAgentOutput(
  */
 export function buildStructuredChainContext(
   messages: AgentMessage[],
-  interAgentContext?: string
+  interAgentContext?: string,
 ): string {
   if (messages.length === 0 && !interAgentContext) return "";
 
@@ -878,9 +856,7 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         output.recommendations.length > 0
           ? `Recommandations: ${output.recommendations.join("; ")}`
           : "",
-        output.dependencies.length > 0
-          ? `Dependances: ${output.dependencies.join(", ")}`
-          : "",
+        output.dependencies.length > 0 ? `Dependances: ${output.dependencies.join(", ")}` : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -889,8 +865,7 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
       return [
         `Sous-taches (${output.subtasks.length}):`,
         ...output.subtasks.map(
-          (st, i) =>
-            `  ${i + 1}. [P${st.priority}] ${st.title}: ${st.description}`
+          (st, i) => `  ${i + 1}. [P${st.priority}] ${st.title}: ${st.description}`,
         ),
         output.risks.length > 0 ? `Risques: ${output.risks.join("; ")}` : "",
       ]
@@ -903,9 +878,7 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         output.components.length > 0
           ? `Composants: ${output.components.map((c) => `${c.name} (${c.responsibility})`).join(", ")}`
           : "",
-        output.files_impacted.length > 0
-          ? `Fichiers: ${output.files_impacted.join(", ")}`
-          : "",
+        output.files_impacted.length > 0 ? `Fichiers: ${output.files_impacted.join(", ")}` : "",
         output.decisions.length > 0
           ? `Decisions: ${output.decisions.map((d) => `${d.decision} (${d.rationale})`).join("; ")}`
           : "",
@@ -922,9 +895,7 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         output.files_modified.length > 0
           ? `Fichiers modifies: ${output.files_modified.join(", ")}`
           : "",
-        output.tests_added.length > 0
-          ? `Tests ajoutes: ${output.tests_added.join(", ")}`
-          : "",
+        output.tests_added.length > 0 ? `Tests ajoutes: ${output.tests_added.join(", ")}` : "",
         output.issues_encountered.length > 0
           ? `Problemes: ${output.issues_encountered.join("; ")}`
           : "",
@@ -949,12 +920,8 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
     case "sm":
       return [
         `Synthese: ${output.summary}`,
-        output.blockers.length > 0
-          ? `Blocages: ${output.blockers.join("; ")}`
-          : "",
-        output.next_steps.length > 0
-          ? `Prochaines etapes: ${output.next_steps.join("; ")}`
-          : "",
+        output.blockers.length > 0 ? `Blocages: ${output.blockers.join("; ")}` : "",
+        output.next_steps.length > 0 ? `Prochaines etapes: ${output.next_steps.join("; ")}` : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -968,8 +935,7 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
           : "",
         `Sous-taches (${output.subtasks.length}):`,
         ...output.subtasks.map(
-          (st, i) =>
-            `  ${i + 1}. [P${st.priority}] ${st.title}: ${st.description}`
+          (st, i) => `  ${i + 1}. [P${st.priority}] ${st.title}: ${st.description}`,
         ),
       ]
         .filter(Boolean)
@@ -984,12 +950,8 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         output.recommandations.length > 0
           ? `Recommandations: ${output.recommandations.map((r) => `[${r.effort}/${r.impact}] ${r.action}`).join("; ")}`
           : "",
-        output.effort_estimate
-          ? `Effort: ${output.effort_estimate.total}`
-          : "",
-        output.references.length > 0
-          ? `References: ${output.references.join(", ")}`
-          : "",
+        output.effort_estimate ? `Effort: ${output.effort_estimate.total}` : "",
+        output.references.length > 0 ? `References: ${output.references.join(", ")}` : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -1092,7 +1054,9 @@ export function formatExplorationPhaseOutput(output: ExplorationPhaseOutput): st
   }
 
   if (output.risks?.length) {
-    parts.push(`Risques: ${output.risks.map((r) => `[${r.severity}] ${r.description} -> ${r.mitigation || "?"}`).join("; ")}`);
+    parts.push(
+      `Risques: ${output.risks.map((r) => `[${r.severity}] ${r.description} -> ${r.mitigation || "?"}`).join("; ")}`,
+    );
   }
 
   if (output.effort_estimate) {

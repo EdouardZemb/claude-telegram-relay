@@ -7,10 +7,10 @@
  * --diff: Only re-index files changed since last index (uses git diff)
  */
 
-import { indexCodebase, saveGraph, loadGraph, getGraphStats } from "../src/code-graph.ts";
+import { getGraphStats, indexCodebase, saveGraph } from "../src/code-graph.ts";
 
 const args = process.argv.slice(2);
-const diffOnly = args.includes("--diff");
+const _diffOnly = args.includes("--diff");
 
 console.log("Indexing codebase...");
 const start = Date.now();

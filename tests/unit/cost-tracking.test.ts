@@ -5,17 +5,17 @@
  * persistence, aggregation, and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
   estimateCost,
-  parseTokenUsage,
-  logCost,
-  getSprintCostSummary,
-  getTotalCost,
   formatCostSummary,
   formatTokenCount,
+  getSprintCostSummary,
+  getTotalCost,
+  logCost,
+  parseTokenUsage,
 } from "../../src/cost-tracking";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── estimateCost ─────────────────────────────────────────────
 
@@ -148,10 +148,42 @@ describe("getSprintCostSummary", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       cost_tracking: [
-        { sprint_id: "S22", task_id: "t1", agent_role: "analyst", agent_name: "Chen", tokens_input: 3000, tokens_output: 1000, cost_usd: 0.024 },
-        { sprint_id: "S22", task_id: "t1", agent_role: "dev", agent_name: "Amelia", tokens_input: 8000, tokens_output: 5000, cost_usd: 0.099 },
-        { sprint_id: "S22", task_id: "t2", agent_role: "dev", agent_name: "Amelia", tokens_input: 6000, tokens_output: 3000, cost_usd: 0.063 },
-        { sprint_id: "S21", task_id: "t3", agent_role: "qa", agent_name: "Raj", tokens_input: 2000, tokens_output: 800, cost_usd: 0.018 },
+        {
+          sprint_id: "S22",
+          task_id: "t1",
+          agent_role: "analyst",
+          agent_name: "Chen",
+          tokens_input: 3000,
+          tokens_output: 1000,
+          cost_usd: 0.024,
+        },
+        {
+          sprint_id: "S22",
+          task_id: "t1",
+          agent_role: "dev",
+          agent_name: "Amelia",
+          tokens_input: 8000,
+          tokens_output: 5000,
+          cost_usd: 0.099,
+        },
+        {
+          sprint_id: "S22",
+          task_id: "t2",
+          agent_role: "dev",
+          agent_name: "Amelia",
+          tokens_input: 6000,
+          tokens_output: 3000,
+          cost_usd: 0.063,
+        },
+        {
+          sprint_id: "S21",
+          task_id: "t3",
+          agent_role: "qa",
+          agent_name: "Raj",
+          tokens_input: 2000,
+          tokens_output: 800,
+          cost_usd: 0.018,
+        },
       ],
     });
   });
@@ -169,10 +201,10 @@ describe("getSprintCostSummary", () => {
 
   it("groups costs by agent", async () => {
     const summary = await getSprintCostSummary(supabase, "S22");
-    expect(summary!.costByAgent["dev"]).toBeDefined();
-    expect(summary!.costByAgent["dev"].count).toBe(2);
-    expect(summary!.costByAgent["analyst"]).toBeDefined();
-    expect(summary!.costByAgent["analyst"].count).toBe(1);
+    expect(summary!.costByAgent.dev).toBeDefined();
+    expect(summary!.costByAgent.dev.count).toBe(2);
+    expect(summary!.costByAgent.analyst).toBeDefined();
+    expect(summary!.costByAgent.analyst.count).toBe(1);
   });
 
   it("groups costs by task", async () => {
@@ -238,9 +270,7 @@ describe("formatCostSummary", () => {
         dev: { tokens: 22000, cost: 0.162, count: 2 },
         analyst: { tokens: 4000, cost: 0.024, count: 1 },
       },
-      costByTask: [
-        { taskId: "abcd1234-5678-9abc-def0-123456789abc", tokens: 17000, cost: 0.123 },
-      ],
+      costByTask: [{ taskId: "abcd1234-5678-9abc-def0-123456789abc", tokens: 17000, cost: 0.123 }],
     });
 
     expect(result).toContain("S22");

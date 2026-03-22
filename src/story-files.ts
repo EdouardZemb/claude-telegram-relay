@@ -15,9 +15,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Task, Subtask } from "./tasks.ts";
-import { getAgent } from "./bmad-agents.ts";
+import { createLogger } from "./logger.ts";
+import type { Subtask, Task } from "./tasks.ts";
 
+const log = createLogger("story-files");
 // ── Types ────────────────────────────────────────────────────
 
 export interface StoryFile {
@@ -70,15 +71,10 @@ export interface TestStub {
  */
 export function buildStoryFile(task: Task): StoryFile {
   // Parse existing acceptance criteria into structured form
-  const acceptanceCriteria = parseAcceptanceCriteria(
-    task.acceptance_criteria || ""
-  );
+  const acceptanceCriteria = parseAcceptanceCriteria(task.acceptance_criteria || "");
 
   // Convert existing subtasks to implementation steps
-  const implementationSteps = buildImplementationSteps(
-    task.subtasks || [],
-    acceptanceCriteria
-  );
+  const implementationSteps = buildImplementationSteps(task.subtasks || [], acceptanceCriteria);
 
   // Generate test stubs from ACs
   const testStubs = generateTestStubs(acceptanceCriteria);
@@ -131,9 +127,7 @@ export function formatStoryForAgent(story: StoryFile): string {
     lines.push("ETAPES D'IMPLEMENTATION (a executer dans l'ordre):");
     for (const step of story.implementationSteps) {
       const checkbox = step.done ? "[x]" : "[ ]";
-      const acRef = step.acMapping.length > 0
-        ? ` (couvre: ${step.acMapping.join(", ")})`
-        : "";
+      const acRef = step.acMapping.length > 0 ? ` (couvre: ${step.acMapping.join(", ")})` : "";
       lines.push(`  ${checkbox} ${step.id}: ${step.title}${acRef}`);
       if (step.description) {
         lines.push(`       ${step.description}`);
@@ -186,7 +180,7 @@ export function formatStoryForAgent(story: StoryFile): string {
 export async function enrichTaskWithStory(
   supabase: SupabaseClient,
   taskId: string,
-  story: StoryFile
+  story: StoryFile,
 ): Promise<boolean> {
   const formattedStory = formatStoryForAgent(story);
   const subtasks: Subtask[] = story.implementationSteps.map((step) => ({
@@ -209,7 +203,7 @@ export async function enrichTaskWithStory(
     .eq("id", taskId);
 
   if (error) {
-    console.error("enrichTaskWithStory error:", error);
+    log.error("enrichTaskWithStory error", { error: String(error) });
     return false;
   }
   return true;
@@ -231,7 +225,8 @@ function parseAcceptanceCriteria(raw: string): AcceptanceCriterion[] {
   let index = 1;
 
   // Try to parse Given/When/Then format
-  const gwtPattern = /(?:Given|GIVEN)\s+([\s\S]+?)[\s,]*(?:When|WHEN)\s+([\s\S]+?)[\s,]*(?:Then|THEN)\s+([\s\S]+?)(?:\n\n|\n(?=(?:Given|GIVEN))|$)/gi;
+  const gwtPattern =
+    /(?:Given|GIVEN)\s+([\s\S]+?)[\s,]*(?:When|WHEN)\s+([\s\S]+?)[\s,]*(?:Then|THEN)\s+([\s\S]+?)(?:\n\n|\n(?=(?:Given|GIVEN))|$)/gi;
   let match: RegExpExecArray | null;
   while ((match = gwtPattern.exec(raw)) !== null) {
     criteria.push({
@@ -266,7 +261,7 @@ function parseAcceptanceCriteria(raw: string): AcceptanceCriterion[] {
 
 function buildImplementationSteps(
   subtasks: Subtask[],
-  acs: AcceptanceCriterion[]
+  acs: AcceptanceCriterion[],
 ): ImplementationStep[] {
   if (subtasks.length > 0) {
     return subtasks.map((st, i) => ({
@@ -276,8 +271,8 @@ function buildImplementationSteps(
       acMapping: st.ac_mapping
         ? st.ac_mapping.split(",").map((s) => s.trim())
         : acs.length > 0
-        ? [acs[Math.min(i, acs.length - 1)].id]
-        : [],
+          ? [acs[Math.min(i, acs.length - 1)].id]
+          : [],
       done: st.done || false,
     }));
   }
@@ -301,10 +296,7 @@ function generateTestStubs(acs: AcceptanceCriterion[]): TestStub[] {
   }));
 }
 
-function buildDoneCriteria(
-  acs: AcceptanceCriterion[],
-  tests: TestStub[]
-): string[] {
+function buildDoneCriteria(acs: AcceptanceCriterion[], tests: TestStub[]): string[] {
   const criteria: string[] = [];
   criteria.push("Tous les tests existants passent (bun test)");
   if (tests.length > 0) {

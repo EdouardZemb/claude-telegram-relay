@@ -13,11 +13,19 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AgentRole } from "./orchestrator.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("blackboard");
 // ── Types ────────────────────────────────────────────────────
 
-export type SectionName = "spec" | "plan" | "tasks" | "implementation" | "verification" | "working_memory" | "messages";
+export type SectionName =
+  | "spec"
+  | "plan"
+  | "tasks"
+  | "implementation"
+  | "verification"
+  | "working_memory"
+  | "messages";
 
 /** Working memory structure for transient pipeline discoveries (S36-07) */
 export interface WorkingMemory {
@@ -71,7 +79,7 @@ const ROLE_WRITE_MAP: Record<string, SectionName[]> = {
 function getAllowedSections(role: string): SectionName[] | undefined {
   if (ROLE_WRITE_MAP[role]) return ROLE_WRITE_MAP[role];
   // S25: dev-sub-N roles get same permissions as dev
-  if (/^dev-sub-\d+$/.test(role)) return ROLE_WRITE_MAP["dev"];
+  if (/^dev-sub-\d+$/.test(role)) return ROLE_WRITE_MAP.dev;
   return undefined;
 }
 
@@ -92,7 +100,7 @@ export async function createBlackboard(
   taskId: string | null,
   sessionId: string,
   pipelineType?: string,
-  projectId?: string
+  projectId?: string,
 ): Promise<BlackboardRow | null> {
   const emptySections: BlackboardSections = {
     spec: null,
@@ -120,7 +128,7 @@ export async function createBlackboard(
     .single();
 
   if (error) {
-    console.error("createBlackboard error:", error);
+    log.error("createBlackboard error", { error: String(error) });
     return null;
   }
 
@@ -134,7 +142,7 @@ export async function createBlackboard(
 export async function readSection(
   supabase: SupabaseClient,
   sessionId: string,
-  section: SectionName
+  section: SectionName,
 ): Promise<any | null> {
   const { data, error } = await supabase
     .from("blackboard")
@@ -143,7 +151,7 @@ export async function readSection(
     .single();
 
   if (error || !data) {
-    console.error("readSection error:", error);
+    log.error("readSection error", { error: String(error) });
     return null;
   }
 
@@ -165,7 +173,7 @@ export async function writeSection(
   section: SectionName,
   data: any,
   role: string,
-  expectedVersion: number
+  expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
   // Check role authorization (S25: supports dev-sub-N roles)
   const allowedSections = getAllowedSections(role);
@@ -182,8 +190,8 @@ export async function writeSection(
   let overflow: any = null;
   const serialized = JSON.stringify(data);
   if (serialized.length > MAX_SECTION_SIZE) {
-    console.warn(
-      `writeSection: data for ${section} exceeds ${MAX_SECTION_SIZE} bytes (${serialized.length}). Truncating.`
+    log.warn(
+      `writeSection: data for ${section} exceeds ${MAX_SECTION_SIZE} bytes (${serialized.length}). Truncating.`,
     );
     // Keep structured fields, move full data to overflow
     overflow = data;
@@ -194,7 +202,7 @@ export async function writeSection(
         ? Object.fromEntries(
             Object.entries(data)
               .filter(([_, v]) => typeof v !== "string" || (v as string).length < 2000)
-              .slice(0, 20)
+              .slice(0, 20),
           )
         : {}),
     };
@@ -204,8 +212,8 @@ export async function writeSection(
 
   // Version overflow check (EC-007)
   if (newVersion > MAX_VERSION) {
-    console.error(
-      `writeSection: version overflow for session ${sessionId} (version ${newVersion} > ${MAX_VERSION})`
+    log.error(
+      `writeSection: version overflow for session ${sessionId} (version ${newVersion} > ${MAX_VERSION})`,
     );
     return {
       success: false,
@@ -284,7 +292,7 @@ export async function writeSection(
  */
 export async function getFullBlackboard(
   supabase: SupabaseClient,
-  sessionId: string
+  sessionId: string,
 ): Promise<BlackboardRow | null> {
   const { data, error } = await supabase
     .from("blackboard")
@@ -293,7 +301,7 @@ export async function getFullBlackboard(
     .single();
 
   if (error || !data) {
-    console.error("getFullBlackboard error:", error);
+    log.error("getFullBlackboard error", { error: String(error) });
     return null;
   }
 
@@ -306,7 +314,7 @@ export async function getFullBlackboard(
 export async function updateBlackboardStatus(
   supabase: SupabaseClient,
   sessionId: string,
-  status: "completed" | "failed"
+  status: "completed" | "failed",
 ): Promise<boolean> {
   const { error } = await supabase
     .from("blackboard")
@@ -314,7 +322,7 @@ export async function updateBlackboardStatus(
     .eq("session_id", sessionId);
 
   if (error) {
-    console.error("updateBlackboardStatus error:", error);
+    log.error("updateBlackboardStatus error", { error: String(error) });
     return false;
   }
   return true;
@@ -343,9 +351,7 @@ export interface TraceabilityReport {
  * Pure mapping — no LLM calls. Crosses spec.requirements, tasks.items,
  * verification.tests, and implementation.files.
  */
-export function generateTraceabilityReport(
-  sections: BlackboardSections
-): TraceabilityReport {
+export function generateTraceabilityReport(sections: BlackboardSections): TraceabilityReport {
   // Extract FR identifiers from spec
   const frIds: string[] = [];
   const spec = sections.spec;
@@ -462,17 +468,15 @@ export function generateTraceabilityReport(
  * Format traceability report for Telegram display.
  */
 export function formatTraceabilityReport(report: TraceabilityReport): string {
-  const lines: string[] = [
-    "TRACEABILITY REPORT",
-    `Coverage: ${report.coverage_percentage}%`,
-    "",
-  ];
+  const lines: string[] = ["TRACEABILITY REPORT", `Coverage: ${report.coverage_percentage}%`, ""];
 
   if (report.covered_fr.length > 0) {
     lines.push(`Covered (${report.covered_fr.length}): ${report.covered_fr.join(", ")}`);
   }
   if (report.partially_covered_fr.length > 0) {
-    lines.push(`Partial (${report.partially_covered_fr.length}): ${report.partially_covered_fr.join(", ")}`);
+    lines.push(
+      `Partial (${report.partially_covered_fr.length}): ${report.partially_covered_fr.join(", ")}`,
+    );
   }
   if (report.missing_fr.length > 0) {
     lines.push(`Missing (${report.missing_fr.length}): ${report.missing_fr.join(", ")}`);
@@ -497,7 +501,15 @@ export class InMemoryBlackboard {
       task_id: taskId,
       session_id: sessionId,
       version: 1,
-      sections: { spec: null, plan: null, tasks: null, implementation: null, verification: null, working_memory: null, messages: null },
+      sections: {
+        spec: null,
+        plan: null,
+        tasks: null,
+        implementation: null,
+        verification: null,
+        working_memory: null,
+        messages: null,
+      },
       history: [],
       status: "active",
       pipeline_type: pipelineType || null,
@@ -518,14 +530,18 @@ export class InMemoryBlackboard {
     section: SectionName,
     data: any,
     role: string,
-    expectedVersion: number
+    expectedVersion: number,
   ): { success: boolean; newVersion: number; error?: string } {
     const row = this.sessions.get(sessionId);
     if (!row) return { success: false, newVersion: expectedVersion, error: "Session not found" };
 
     const allowedSections = getAllowedSections(role);
     if (!allowedSections || !allowedSections.includes(section)) {
-      return { success: false, newVersion: expectedVersion, error: `Role "${role}" not authorized` };
+      return {
+        success: false,
+        newVersion: expectedVersion,
+        error: `Role "${role}" not authorized`,
+      };
     }
 
     if (row.version !== expectedVersion) {
@@ -562,7 +578,7 @@ export async function writeSectionWithRetry(
   data: any,
   role: string,
   expectedVersion: number,
-  maxRetries: number = 3
+  maxRetries: number = 3,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
   let currentVersion = expectedVersion;
 
@@ -593,9 +609,9 @@ export async function mergeImplementationSection(
   supabase: SupabaseClient,
   sessionId: string,
   agentResults: Array<{ structured?: any; output?: string }>,
-  expectedVersion: number
+  expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
-  const existing = await readSection(supabase, sessionId, "implementation") || {};
+  const existing = (await readSection(supabase, sessionId, "implementation")) || {};
 
   const merged = {
     files_modified: [...(existing.files_modified || [])],
@@ -616,6 +632,6 @@ export async function mergeImplementationSection(
     "implementation",
     merged,
     "system",
-    expectedVersion
+    expectedVersion,
   );
 }

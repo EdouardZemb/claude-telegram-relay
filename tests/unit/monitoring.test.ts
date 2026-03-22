@@ -2,18 +2,18 @@
  * Unit Tests — Feature-level monitoring in src/alerts.ts (S29-T10)
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  recordResponseTime,
-  getResponseTimeStats,
-  recordSpawnResult,
-  getSpawnStats,
-  recordModuleError,
-  getModuleErrorCounts,
+  checkModuleErrors,
   checkResponseTime,
   checkSpawnFailures,
-  checkModuleErrors,
   formatMonitoringStats,
+  getModuleErrorCounts,
+  getResponseTimeStats,
+  getSpawnStats,
+  recordModuleError,
+  recordResponseTime,
+  recordSpawnResult,
 } from "../../src/alerts";
 
 describe("Response Time Monitoring", () => {
@@ -79,7 +79,7 @@ describe("Spawn Stats Monitoring", () => {
       recordSpawnResult("sm_test", false);
     }
     const alerts = checkSpawnFailures();
-    const smAlert = alerts.find(a => a.message.includes("sm_test"));
+    const smAlert = alerts.find((a) => a.message.includes("sm_test"));
     expect(smAlert).toBeDefined();
   });
 });
@@ -100,7 +100,7 @@ describe("Module Error Monitoring", () => {
       recordModuleError("test_module");
     }
     const alerts = checkModuleErrors();
-    const modAlert = alerts.find(a => a.message.includes("test_module"));
+    const modAlert = alerts.find((a) => a.message.includes("test_module"));
     expect(modAlert).toBeDefined();
   });
 });

@@ -14,30 +14,32 @@
  * Run: bun run src/relay.ts
  */
 
+import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import { Bot } from "grammy";
-import { mkdir } from "fs/promises";
 import { join } from "path";
-import { writeFile, readFile, unlink } from "fs/promises";
 import {
-  BOT_TOKEN,
   ALLOWED_USER_ID,
+  BOT_TOKEN,
+  type BotContext,
+  clearStaleState,
+  createBotContext,
   GROUP_ID,
+  isRateLimited,
+  PROJECT_DIR,
   RELAY_DIR,
+  supabase,
   TEMP_DIR,
   UPLOADS_DIR,
-  PROJECT_DIR,
-  isRateLimited,
-  clearStaleState,
-  supabase,
-  createBotContext,
-  type BotContext,
 } from "./bot-context.ts";
-import { loadComposers } from "./loader.ts";
-import { startQueue } from "./notification-queue.ts";
-import { initJobManager } from "./job-manager.ts";
 import { initSessions } from "./conversation-session.ts";
 import { loadFeedbackRules } from "./feedback-loop.ts";
+import { initJobManager } from "./job-manager.ts";
+import { loadComposers } from "./loader.ts";
+import { createLogger } from "./logger.ts";
 import { loadPrefs } from "./notification-prefs.ts";
+import { startQueue } from "./notification-queue.ts";
+
+const log = createLogger("relay");
 
 // ============================================================
 // LOCK FILE
@@ -47,7 +49,7 @@ const LOCK_FILE = join(RELAY_DIR, "bot.lock");
 
 async function writePidFile(): Promise<void> {
   await writeFile(LOCK_FILE, process.pid.toString());
-  console.log(`PID file written (${process.pid})`);
+  log.info(`PID file written (${process.pid})`);
 }
 
 async function removePidFile(): Promise<void> {
@@ -75,11 +77,11 @@ export async function createBot(token: string): Promise<Bot> {
     const chatId = ctx.chat?.id.toString();
 
     if (ctx.chat && ctx.chat.type !== "private") {
-      console.log(`Group message: chat_id=${chatId} from=${userId}`);
+      log.info(`Group message: chat_id=${chatId} from=${userId}`);
     }
 
     if (ALLOWED_USER_ID && userId !== ALLOWED_USER_ID) {
-      console.log(`Unauthorized: ${userId}`);
+      log.warn(`Unauthorized: ${userId}`);
       if (ctx.chat?.type === "private") {
         await ctx.reply("This bot is private.");
       }
@@ -87,7 +89,7 @@ export async function createBot(token: string): Promise<Bot> {
     }
 
     if (ctx.chat && ctx.chat.type !== "private" && GROUP_ID && chatId !== GROUP_ID) {
-      console.log(`Ignored group: ${chatId}`);
+      log.info(`Ignored group: ${chatId}`);
       return;
     }
 
@@ -105,11 +107,11 @@ export async function createBot(token: string): Promise<Bot> {
 
   // Global error handler
   bot.catch(async (err) => {
-    console.error("Bot error:", err);
+    log.error(`Bot error: ${err}`);
     if (ALLOWED_USER_ID) {
       try {
         const errorMsg = `Erreur critique du bot:\n${String(err.error || err).substring(0, 500)}`;
-        await bot.api.sendMessage(parseInt(ALLOWED_USER_ID), errorMsg);
+        await bot.api.sendMessage(parseInt(ALLOWED_USER_ID, 10), errorMsg);
       } catch {
         // Can't notify — just log
       }
@@ -125,11 +127,11 @@ export async function createBot(token: string): Promise<Bot> {
 
 if (import.meta.main) {
   if (!BOT_TOKEN) {
-    console.error("TELEGRAM_BOT_TOKEN not set!");
-    console.log("\nTo set up:");
-    console.log("1. Message @BotFather on Telegram");
-    console.log("2. Create a new bot with /newbot");
-    console.log("3. Copy the token to .env");
+    log.error("TELEGRAM_BOT_TOKEN not set!");
+    log.info("To set up:");
+    log.info("1. Message @BotFather on Telegram");
+    log.info("2. Create a new bot with /newbot");
+    log.info("3. Copy the token to .env");
     process.exit(1);
   }
 
@@ -152,8 +154,10 @@ if (import.meta.main) {
   async function gracefulShutdown(signal: string): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`${signal} received, shutting down gracefully...`);
-    try { mainBot?.stop(); } catch {}
+    log.info(`${signal} received, shutting down gracefully...`);
+    try {
+      mainBot?.stop();
+    } catch {}
     await removePidFile();
     process.exit(0);
   }
@@ -186,7 +190,7 @@ if (import.meta.main) {
         if (r.threadId) opts.message_thread_id = r.threadId;
         await mainBot.api.sendMessage(r.chatId, `Rappel: ${r.text}`, opts);
       } catch (error) {
-        console.error("Reminder send error:", error);
+        log.error(`Reminder send error: ${error}`);
       }
     }
 
@@ -199,11 +203,11 @@ if (import.meta.main) {
 
   // Catch uncaught exceptions and notify
   process.on("uncaughtException", async (error) => {
-    console.error("Uncaught exception:", error);
+    log.error(`Uncaught exception: ${error}`);
     if (ALLOWED_USER_ID) {
       try {
         await mainBot.api.sendMessage(
-          parseInt(ALLOWED_USER_ID),
+          parseInt(ALLOWED_USER_ID, 10),
           `Exception non geree dans le relay:\n${String(error).substring(0, 500)}\n\nLe bot va redemarrer via PM2.`,
         );
       } catch {}
@@ -212,11 +216,11 @@ if (import.meta.main) {
   });
 
   process.on("unhandledRejection", async (reason) => {
-    console.error("Unhandled rejection:", reason);
+    log.error(`Unhandled rejection: ${reason}`);
     if (ALLOWED_USER_ID) {
       try {
         await mainBot.api.sendMessage(
-          parseInt(ALLOWED_USER_ID),
+          parseInt(ALLOWED_USER_ID, 10),
           `Rejection non geree:\n${String(reason).substring(0, 500)}`,
         );
       } catch {}
@@ -224,14 +228,18 @@ if (import.meta.main) {
   });
 
   // Start
-  console.log("Starting Claude Telegram Relay...");
-  console.log(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
-  console.log(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
+  log.info("Starting Claude Telegram Relay...");
+  log.info(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
+  log.info(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
 
   if (supabase) {
-    loadFeedbackRules(supabase).then((rules) => {
-      console.log(`Loaded ${rules.length} feedback rules (${rules.filter(r => r.active).length} active)`);
-    }).catch((e) => console.error("Failed to load feedback rules:", e));
+    loadFeedbackRules(supabase)
+      .then((rules) => {
+        log.info(
+          `Loaded ${rules.length} feedback rules (${rules.filter((r) => r.active).length} active)`,
+        );
+      })
+      .catch((e) => log.error(`Failed to load feedback rules: ${e}`));
   }
 
   await mainBot.api.deleteWebhook({ drop_pending_updates: true });
@@ -239,7 +247,7 @@ if (import.meta.main) {
   mainBot.start({
     drop_pending_updates: true,
     onStart: () => {
-      console.log("Bot is running! (pending updates dropped)");
+      log.info("Bot is running! (pending updates dropped)");
     },
   });
 }

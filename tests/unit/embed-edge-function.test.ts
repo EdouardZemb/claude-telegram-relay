@@ -5,7 +5,7 @@
  * `extracted_text` fields for text extraction from webhook records.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 
 // The Edge Function runs in Deno, so we test the text extraction logic directly
 

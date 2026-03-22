@@ -6,7 +6,7 @@
  * AC-4 (no results above threshold, empty documentContext).
  */
 
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { formatDocumentContext } from "../../src/bot-context.ts";
 import type { DocumentSearchResult } from "../../src/documents.ts";
 
@@ -64,9 +64,7 @@ describe("auto_document_search feature flag gating", () => {
     );
     const isEnabled = true;
 
-    const result = await (isEnabled
-      ? searchDocuments()
-      : Promise.resolve([]));
+    const result = await (isEnabled ? searchDocuments() : Promise.resolve([]));
 
     expect(searchDocuments).toHaveBeenCalledTimes(1);
     expect(result).toHaveLength(1);
@@ -78,9 +76,7 @@ describe("auto_document_search feature flag gating", () => {
     );
     const isEnabled = false;
 
-    const result = await (isEnabled
-      ? searchDocuments()
-      : Promise.resolve([]));
+    const result = await (isEnabled ? searchDocuments() : Promise.resolve([]));
 
     expect(searchDocuments).not.toHaveBeenCalled();
     expect(result).toEqual([]);
@@ -121,9 +117,7 @@ describe("searchDocuments timeout pattern", () => {
   it("AC-3: timeout does not block other Promise.all entries", async () => {
     const fastCall = () => Promise.resolve("fast-result");
     const slowSearch = () =>
-      new Promise<string[]>((resolve) =>
-        setTimeout(() => resolve(["slow"]), 200),
-      );
+      new Promise<string[]>((resolve) => setTimeout(() => resolve(["slow"]), 200));
 
     const start = Date.now();
     const [fast, search] = await Promise.all([
@@ -213,27 +207,23 @@ describe("full Promise.all integration pattern", () => {
     const mockGetRecent = () => Promise.resolve("recent");
     const mockGetProfile = () => Promise.resolve("profile");
     const mockClassify = () => Promise.resolve({ is_memorable: false });
-    const mockSearch = () =>
-      Promise.resolve([{ id: "doc-1", title: "Found", similarity: 0.8 }]);
+    const mockSearch = () => Promise.resolve([{ id: "doc-1", title: "Found", similarity: 0.8 }]);
 
     const isEnabled = true;
 
-    const [relevant, memory, recent, profile, classification, docResults] =
-      await Promise.all([
-        mockGetRelevant(),
-        mockGetMemory(),
-        mockGetRecent(),
-        mockGetProfile(),
-        mockClassify(),
-        isEnabled
-          ? Promise.race([
-              mockSearch(),
-              new Promise<never[]>((resolve) =>
-                setTimeout(() => resolve([]), 5000),
-              ),
-            ])
-          : Promise.resolve([]),
-      ]);
+    const [relevant, memory, recent, profile, classification, docResults] = await Promise.all([
+      mockGetRelevant(),
+      mockGetMemory(),
+      mockGetRecent(),
+      mockGetProfile(),
+      mockClassify(),
+      isEnabled
+        ? Promise.race([
+            mockSearch(),
+            new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)),
+          ])
+        : Promise.resolve([]),
+    ]);
 
     expect(relevant).toBe("relevant");
     expect(memory).toBe("memory");

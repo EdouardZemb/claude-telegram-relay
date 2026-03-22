@@ -6,48 +6,44 @@
  * Each phase is tested independently + integration between phases.
  */
 
-import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
-import {
-  isPrdWorkflowEnabled,
-  triageDescription,
-  buildTriageResponse,
-  extractSessionConstraints,
-  generateAndSavePRD,
-  decomposePRDIntoTasks,
-  getRevisionCount,
-  canRevise,
-  buildRevisionKeyboard,
-  revisePRD,
-  buildLaunchConfirmation,
-  notifyGateResult,
-  buildPRCompletionKeyboard,
-  storePendingDescription,
-  getPendingDescription,
-  clearPendingDescription,
-  storePendingRevision,
-  getPendingRevision,
-  clearPendingRevision,
-  chatKey,
-  type TriageResult,
-} from "../../src/prd-workflow.ts";
-import type { PRD, PRDSessionConstraints } from "../../src/prd.ts";
-import { formatPRDDetail, formatPRDList } from "../../src/prd.ts";
-import { detectIntent, detectIntentWithLLM } from "../../src/intent-detection.ts";
-import {
-  getSession,
-  _resetSessions,
-  addMessage as addSessionMessage,
-  addIntent as addSessionIntent,
-  extractConstraints,
-  addConstraint,
-  formatSessionForIntent,
-  buildConversationContext,
-  type DetectedConstraint,
-  type ConversationSession,
-} from "../../src/conversation-session.ts";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { getAction } from "../../src/action-registry.ts";
 import { isPhotoDocument } from "../../src/commands/zz-messages.ts";
+import {
+  _resetSessions,
+  addConstraint,
+  addIntent as addSessionIntent,
+  addMessage as addSessionMessage,
+  buildConversationContext,
+  type DetectedConstraint,
+  extractConstraints,
+  formatSessionForIntent,
+  getSession,
+} from "../../src/conversation-session.ts";
+import { detectIntent, detectIntentWithLLM } from "../../src/intent-detection.ts";
 import { explainPipelineChoice } from "../../src/pipeline-selection.ts";
+import type { PRD } from "../../src/prd.ts";
+import { formatPRDDetail, formatPRDList } from "../../src/prd.ts";
+import {
+  buildLaunchConfirmation,
+  buildPRCompletionKeyboard,
+  buildRevisionKeyboard,
+  buildTriageResponse,
+  canRevise,
+  chatKey,
+  clearPendingDescription,
+  clearPendingRevision,
+  extractSessionConstraints,
+  getPendingDescription,
+  getPendingRevision,
+  getRevisionCount,
+  isPrdWorkflowEnabled,
+  notifyGateResult,
+  storePendingDescription,
+  storePendingRevision,
+  type TriageResult,
+  triageDescription,
+} from "../../src/prd-workflow.ts";
 
 // ── Test Helpers ─────────────────────────────────────────────
 
@@ -69,7 +65,9 @@ function makePRD(overrides?: Partial<PRD>): PRD {
   };
 }
 
-function makeConstraints(overrides?: Partial<Record<string, DetectedConstraint>>): DetectedConstraint[] {
+function _makeConstraints(
+  overrides?: Partial<Record<string, DetectedConstraint>>,
+): DetectedConstraint[] {
   const constraints: DetectedConstraint[] = [];
   if (overrides?.speed) constraints.push(overrides.speed);
   if (overrides?.quality) constraints.push(overrides.quality);
@@ -258,13 +256,28 @@ describe("PRD Workflow — F1: Triage", () => {
 
     it("label matches score range", async () => {
       // Test label mapping via buildTriageResponse
-      const lowTriage: TriageResult = { score: 0.2, pipeline: "SOLO", pipelineExplanation: "test", label: "faible" };
+      const lowTriage: TriageResult = {
+        score: 0.2,
+        pipeline: "SOLO",
+        pipelineExplanation: "test",
+        label: "faible",
+      };
       expect(lowTriage.label).toBe("faible");
 
-      const midTriage: TriageResult = { score: 0.5, pipeline: "LIGHT", pipelineExplanation: "test", label: "moyenne" };
+      const midTriage: TriageResult = {
+        score: 0.5,
+        pipeline: "LIGHT",
+        pipelineExplanation: "test",
+        label: "moyenne",
+      };
       expect(midTriage.label).toBe("moyenne");
 
-      const highTriage: TriageResult = { score: 0.8, pipeline: "DEFAULT", pipelineExplanation: "test", label: "haute" };
+      const highTriage: TriageResult = {
+        score: 0.8,
+        pipeline: "DEFAULT",
+        pipelineExplanation: "test",
+        label: "haute",
+      };
       expect(highTriage.label).toBe("haute");
     });
   });
@@ -274,10 +287,14 @@ describe("PRD Workflow — F1: Triage", () => {
       const triage: TriageResult = {
         score: 0.65,
         pipeline: "DEFAULT",
-        pipelineExplanation: "Pipeline : analyst -> pm -> architect -> dev -> qa (difficulte: 65%)\nComplexite elevee.",
+        pipelineExplanation:
+          "Pipeline : analyst -> pm -> architect -> dev -> qa (difficulte: 65%)\nComplexite elevee.",
         label: "haute",
       };
-      const { message, keyboard } = buildTriageResponse("Implementer un audit complet", triage);
+      const { message, keyboard: _keyboard } = buildTriageResponse(
+        "Implementer un audit complet",
+        triage,
+      );
 
       expect(message).toContain("haute");
       expect(message).toContain("65%");
@@ -285,7 +302,12 @@ describe("PRD Workflow — F1: Triage", () => {
     });
 
     it("includes all 3 action buttons", () => {
-      const triage: TriageResult = { score: 0.5, pipeline: "LIGHT", pipelineExplanation: "test", label: "moyenne" };
+      const triage: TriageResult = {
+        score: 0.5,
+        pipeline: "LIGHT",
+        pipelineExplanation: "test",
+        label: "moyenne",
+      };
       const { keyboard } = buildTriageResponse("test", triage);
       const raw = (keyboard as any).inline_keyboard;
       const allTexts = raw.flat().map((b: any) => b.text);
@@ -296,7 +318,12 @@ describe("PRD Workflow — F1: Triage", () => {
     });
 
     it("includes correct callback data in buttons", () => {
-      const triage: TriageResult = { score: 0.5, pipeline: "LIGHT", pipelineExplanation: "test", label: "moyenne" };
+      const triage: TriageResult = {
+        score: 0.5,
+        pipeline: "LIGHT",
+        pipelineExplanation: "test",
+        label: "moyenne",
+      };
       const { keyboard } = buildTriageResponse("test", triage);
       const raw = (keyboard as any).inline_keyboard;
       const allCallbackData = raw.flat().map((b: any) => b.callback_data);
@@ -308,7 +335,12 @@ describe("PRD Workflow — F1: Triage", () => {
 
     it("truncates long descriptions to 100 chars", () => {
       const longDesc = "a".repeat(200);
-      const triage: TriageResult = { score: 0.5, pipeline: "DEFAULT", pipelineExplanation: "test", label: "moyenne" };
+      const triage: TriageResult = {
+        score: 0.5,
+        pipeline: "DEFAULT",
+        pipelineExplanation: "test",
+        label: "moyenne",
+      };
       const { message } = buildTriageResponse(longDesc, triage);
       // Description should be truncated with "..."
       expect(message).toContain("...");
@@ -317,7 +349,12 @@ describe("PRD Workflow — F1: Triage", () => {
 
     it("does not truncate short descriptions", () => {
       const shortDesc = "fix a bug";
-      const triage: TriageResult = { score: 0.2, pipeline: "SOLO", pipelineExplanation: "test", label: "faible" };
+      const triage: TriageResult = {
+        score: 0.2,
+        pipeline: "SOLO",
+        pipelineExplanation: "test",
+        label: "faible",
+      };
       const { message } = buildTriageResponse(shortDesc, triage);
       expect(message).toContain("fix a bug");
       expect(message).not.toContain("...");
@@ -400,13 +437,13 @@ describe("PRD Workflow — Session Constraints", () => {
   describe("constraint extraction from natural language", () => {
     it("detects speed constraint from 'fais vite'", () => {
       const constraints = extractConstraints("fais ca vite s'il te plait");
-      const speed = constraints.find(c => c.type === "speed");
+      const speed = constraints.find((c) => c.type === "speed");
       expect(speed).toBeDefined();
     });
 
     it("detects quality constraint from 'qualite'", () => {
       const constraints = extractConstraints("haute qualite requise");
-      const quality = constraints.find(c => c.type === "quality");
+      const quality = constraints.find((c) => c.type === "quality");
       expect(quality).toBeDefined();
     });
   });
@@ -553,7 +590,10 @@ describe("PRD Workflow — F3: Bounded Revision", () => {
       const prd = makePRD({ id: "test-prd-abcd-1234" });
       const kb = buildRevisionKeyboard(prd);
       const raw = (kb as any).inline_keyboard;
-      const allData = raw.flat().map((b: any) => b.callback_data).filter(Boolean);
+      const allData = raw
+        .flat()
+        .map((b: any) => b.callback_data)
+        .filter(Boolean);
       expect(allData.some((d: string) => d.includes("test-prd-abcd-1234"))).toBe(true);
     });
   });
@@ -589,9 +629,17 @@ describe("PRD Workflow — F5: Launch Confirmation", () => {
     });
 
     it("launch button callback data contains PRD ID prefix (8 chars)", () => {
-      const { keyboard } = buildLaunchConfirmation("aaaa1111-bbbb-2222-cccc-3333dddd4444", "DEFAULT", "test", 1);
+      const { keyboard } = buildLaunchConfirmation(
+        "aaaa1111-bbbb-2222-cccc-3333dddd4444",
+        "DEFAULT",
+        "test",
+        1,
+      );
       const raw = (keyboard as any).inline_keyboard;
-      const allData = raw.flat().map((b: any) => b.callback_data).filter(Boolean);
+      const allData = raw
+        .flat()
+        .map((b: any) => b.callback_data)
+        .filter(Boolean);
       const launchData = allData.find((d: string) => d.startsWith("prdwf_launch:"));
       expect(launchData).toBe("prdwf_launch:aaaa1111");
     });
@@ -614,27 +662,21 @@ describe("PRD Workflow — F6: Gate Notifications", () => {
   describe("notifyGateResult", () => {
     it("formats auto-approved gate with trust score", async () => {
       // notifyGateResult calls enqueue() internally — we just verify it doesn't throw
-      await expect(
-        notifyGateResult("spec", true, 85, true, "pm", 82)
-      ).resolves.toBeUndefined();
+      await expect(notifyGateResult("spec", true, 85, true, "pm", 82)).resolves.toBeUndefined();
     });
 
     it("formats rework gate notification", async () => {
       await expect(
-        notifyGateResult("implementation", false, 45, false, "dev", undefined, 1)
+        notifyGateResult("implementation", false, 45, false, "dev", undefined, 1),
       ).resolves.toBeUndefined();
     });
 
     it("formats normal gate evaluation", async () => {
-      await expect(
-        notifyGateResult("implementation", true, 72, false)
-      ).resolves.toBeUndefined();
+      await expect(notifyGateResult("implementation", true, 72, false)).resolves.toBeUndefined();
     });
 
     it("formats failed gate evaluation", async () => {
-      await expect(
-        notifyGateResult("implementation", false, 35, false)
-      ).resolves.toBeUndefined();
+      await expect(notifyGateResult("implementation", false, 35, false)).resolves.toBeUndefined();
     });
   });
 });
@@ -644,7 +686,7 @@ describe("PRD Workflow — F6: Gate Notifications", () => {
 describe("PRD Workflow — F7: PR Completion", () => {
   describe("buildPRCompletionKeyboard", () => {
     it("includes PR URL button", () => {
-      const { message, keyboard } = buildPRCompletionKeyboard(
+      const { message: _message, keyboard } = buildPRCompletionKeyboard(
         "https://github.com/user/repo/pull/42",
         "3 gates OK, 1 rework",
       );
@@ -667,20 +709,14 @@ describe("PRD Workflow — F7: PR Completion", () => {
     });
 
     it("extracts PR number from various URL formats", () => {
-      const { keyboard } = buildPRCompletionKeyboard(
-        "https://github.com/org/repo/pull/123",
-        "",
-      );
+      const { keyboard } = buildPRCompletionKeyboard("https://github.com/org/repo/pull/123", "");
       const raw = (keyboard as any).inline_keyboard;
       const mergeBtn = raw.flat().find((b: any) => b.text === "Merger");
       expect(mergeBtn.callback_data).toBe("prdwf_merge:123");
     });
 
     it("handles invalid PR URL gracefully", () => {
-      const { keyboard } = buildPRCompletionKeyboard(
-        "https://invalid-url.com",
-        "",
-      );
+      const { keyboard } = buildPRCompletionKeyboard("https://invalid-url.com", "");
       const raw = (keyboard as any).inline_keyboard;
       const mergeBtn = raw.flat().find((b: any) => b.text === "Merger");
       expect(mergeBtn.callback_data).toBe("prdwf_merge:0");
@@ -903,9 +939,18 @@ describe("PRD Workflow — Proposal Detection (from bot responses)", () => {
 
   describe("proposal patterns", () => {
     const PROPOSAL_PATTERNS = [
-      { regex: /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i },
-      { regex: /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i },
-      { regex: /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i },
+      {
+        regex:
+          /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+      },
+      {
+        regex:
+          /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
+      },
+      {
+        regex:
+          /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i,
+      },
     ];
 
     it("matches 'tu veux que je lance le prd'", () => {
@@ -934,13 +979,9 @@ describe("PRD Workflow — Proposal Detection (from bot responses)", () => {
     });
 
     it("does NOT match non-proposal text", () => {
-      const texts = [
-        "bonjour comment vas-tu",
-        "le prd est approuve",
-        "j'ai termine le sprint",
-      ];
+      const texts = ["bonjour comment vas-tu", "le prd est approuve", "j'ai termine le sprint"];
       for (const text of texts) {
-        const matched = PROPOSAL_PATTERNS.some(p => p.regex.test(text));
+        const matched = PROPOSAL_PATTERNS.some((p) => p.regex.test(text));
         expect(matched).toBe(false);
       }
     });
@@ -952,19 +993,41 @@ describe("PRD Workflow — Proposal Detection (from bot responses)", () => {
 describe("PRD Workflow — User Confirmation Patterns", () => {
   // These patterns are used in zz-messages.ts to detect user confirmation of proposals
 
-  const confirmPatterns = /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/;
-  const rejectPatterns = /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/;
+  const confirmPatterns =
+    /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/;
+  const rejectPatterns =
+    /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/;
 
   function normalize(text: string): string {
-    return text.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return text
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
   }
 
   describe("confirm patterns", () => {
     const confirmTexts = [
-      "oui", "ok", "vas-y", "go", "lance", "d'accord", "dac",
-      "yes", "yep", "ouais", "parfait", "allez", "bien sur",
-      "evidemment", "confirme", "j'approuve", "c'est bon",
-      "envoie", "fais-le", "on y va",
+      "oui",
+      "ok",
+      "vas-y",
+      "go",
+      "lance",
+      "d'accord",
+      "dac",
+      "yes",
+      "yep",
+      "ouais",
+      "parfait",
+      "allez",
+      "bien sur",
+      "evidemment",
+      "confirme",
+      "j'approuve",
+      "c'est bon",
+      "envoie",
+      "fais-le",
+      "on y va",
     ];
 
     for (const text of confirmTexts) {
@@ -976,8 +1039,15 @@ describe("PRD Workflow — User Confirmation Patterns", () => {
 
   describe("reject patterns", () => {
     const rejectTexts = [
-      "non", "pas maintenant", "annule", "stop", "attends",
-      "arrete", "nan", "nope", "plus tard",
+      "non",
+      "pas maintenant",
+      "annule",
+      "stop",
+      "attends",
+      "arrete",
+      "nan",
+      "nope",
+      "plus tard",
     ];
 
     for (const text of rejectTexts) {
@@ -988,11 +1058,7 @@ describe("PRD Workflow — User Confirmation Patterns", () => {
   });
 
   describe("neutral messages match neither", () => {
-    const neutralTexts = [
-      "comment ca marche",
-      "explique-moi le concept",
-      "je reflechis",
-    ];
+    const neutralTexts = ["comment ca marche", "explique-moi le concept", "je reflechis"];
 
     for (const text of neutralTexts) {
       it(`neutral: "${text}"`, () => {
@@ -1017,7 +1083,10 @@ describe("PRD Workflow — Full Data Flow Integration", () => {
     const session = getSession(chatId, threadId);
 
     // User sends a message with constraints
-    addSessionMessage(session, "j'aimerais ajouter un audit qualite, fais ca vite et en haute qualite");
+    addSessionMessage(
+      session,
+      "j'aimerais ajouter un audit qualite, fais ca vite et en haute qualite",
+    );
     addSessionIntent(session, "suggest_prd", "prd_workflow", 0.9, true);
 
     // Constraints extracted
@@ -1029,7 +1098,7 @@ describe("PRD Workflow — Full Data Flow Integration", () => {
     const triage = await triageDescription(description);
 
     // Build triage response
-    const { message, keyboard } = buildTriageResponse(description, triage);
+    const { message, keyboard: _keyboard2 } = buildTriageResponse(description, triage);
     expect(message).toContain("Complexite estimee");
 
     // Store pending description
@@ -1160,7 +1229,12 @@ describe("PRD Workflow — Edge Cases", () => {
   });
 
   it("buildTriageResponse handles empty pipeline explanation", () => {
-    const triage: TriageResult = { score: 0, pipeline: "SOLO", pipelineExplanation: "", label: "faible" };
+    const triage: TriageResult = {
+      score: 0,
+      pipeline: "SOLO",
+      pipelineExplanation: "",
+      label: "faible",
+    };
     const { message } = buildTriageResponse("test", triage);
     expect(message).toContain("faible");
   });
@@ -1214,7 +1288,7 @@ describe("PRD Workflow — LLM Intent Detection", () => {
   it("detectIntentWithLLM handles timeout gracefully", async () => {
     const result = await detectIntentWithLLM("je veux un truc", {
       callLLM: async () => {
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200));
         return '{"intent": "suggest_prd", "command": "prd_workflow", "confidence": 0.85}';
       },
       timeoutMs: 50, // Very short timeout
@@ -1254,7 +1328,9 @@ describe("PRD Workflow — LLM Intent Detection", () => {
 
   it("detectIntentWithLLM handles LLM error gracefully", async () => {
     const result = await detectIntentWithLLM("test message", {
-      callLLM: async () => { throw new Error("LLM unavailable"); },
+      callLLM: async () => {
+        throw new Error("LLM unavailable");
+      },
       timeoutMs: 5000,
     });
     expect(result).toBeDefined();
@@ -1263,7 +1339,7 @@ describe("PRD Workflow — LLM Intent Detection", () => {
 
   it("detectIntentWithLLM receives session context when provided", async () => {
     let receivedPrompt = "";
-    const result = await detectIntentWithLLM("fais le prd", {
+    const _result = await detectIntentWithLLM("fais le prd", {
       callLLM: async (prompt) => {
         receivedPrompt = prompt;
         return JSON.stringify({ intent: "none", command: "", confidence: 0 });

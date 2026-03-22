@@ -6,17 +6,15 @@
  * graph complexity, similar task absence, and shouldExplore decision.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import {
-  computeKeywordScore,
-  computeGraphComplexityScore,
-  computeNoSimilarTasksScore,
-  computeExplorationScore,
-  shouldExplore,
-  type ExplorationScore,
-  type ExploreOptions,
-} from "../../src/exploration-scoring";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { CodeGraph } from "../../src/code-graph";
+import {
+  computeExplorationScore,
+  computeGraphComplexityScore,
+  computeKeywordScore,
+  computeNoSimilarTasksScore,
+  shouldExplore,
+} from "../../src/exploration-scoring";
 import type { Task } from "../../src/tasks";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -46,7 +44,10 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-function makeGraph(nodes: Array<{ id: string; lineCount: number; exports?: any[] }>, edges: Array<{ source: string; target: string }> = []): CodeGraph {
+function makeGraph(
+  nodes: Array<{ id: string; lineCount: number; exports?: any[] }>,
+  edges: Array<{ source: string; target: string }> = [],
+): CodeGraph {
   return {
     nodes: nodes.map((n) => ({
       id: n.id,
@@ -86,7 +87,7 @@ describe("computeKeywordScore", () => {
 
   it("caps at 1.0 for many keywords", () => {
     const score = computeKeywordScore(
-      "research compare evaluate benchmark study analyze investigate alternative approach"
+      "research compare evaluate benchmark study analyze investigate alternative approach",
     );
     expect(score).toBeLessThanOrEqual(1.0);
   });
@@ -121,7 +122,7 @@ describe("computeGraphComplexityScore", () => {
       [
         { source: "src/relay.ts", target: "src/orchestrator.ts" },
         { source: "src/orchestrator.ts", target: "src/relay.ts" },
-      ]
+      ],
     );
     const result = computeGraphComplexityScore(graph, "modifier orchestrator");
     expect(result.score).toBeGreaterThan(0.3);
@@ -135,7 +136,10 @@ describe("computeGraphComplexityScore", () => {
       { id: "src/llm-router.ts", lineCount: 150 },
     ]);
     const single = computeGraphComplexityScore(graph, "modifier orchestrator");
-    const multi = computeGraphComplexityScore(graph, "modifier orchestrator pipeline-selection llm-router");
+    const multi = computeGraphComplexityScore(
+      graph,
+      "modifier orchestrator pipeline-selection llm-router",
+    );
     expect(multi.score).toBeGreaterThanOrEqual(single.score);
   });
 });

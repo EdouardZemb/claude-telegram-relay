@@ -6,15 +6,15 @@
 import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import {
-  listProjects,
-  getProject,
-  createProject,
   archiveProject,
-  updateProject,
+  createProject,
+  formatProjectDetail,
+  formatProjectList,
+  getProject,
+  listProjects,
   resolveProjectContext,
   setActiveProjectSlug,
-  formatProjectList,
-  formatProjectDetail,
+  updateProject,
 } from "../projects.ts";
 
 export default function projectComposer(bctx: BotContext): Composer<Context> {
@@ -23,8 +23,14 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
   // /projects
   composer.command("projects", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "projects");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
-    if (!bctx.supabase) { await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
+    if (!bctx.supabase) {
+      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
+      return;
+    }
 
     const projects = await listProjects(bctx.supabase);
     await bctx.sendResponse(ctx, formatProjectList(projects));
@@ -33,8 +39,14 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
   // /project
   composer.command("project", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "project");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
-    if (!bctx.supabase) { await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
+    if (!bctx.supabase) {
+      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
+      return;
+    }
 
     const args = ctx.match?.trim() || "";
 
@@ -43,7 +55,10 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
       if (current) {
         await bctx.sendResponse(ctx, formatProjectDetail(current));
       } else {
-        await ctx.reply("Aucun projet actif. Utilise /projects pour voir la liste.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          "Aucun projet actif. Utilise /projects pour voir la liste.",
+          bctx.threadOpts(ctx),
+        );
       }
       return;
     }
@@ -58,14 +73,21 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
       }
       const slug = argument
         .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
       const project = await createProject(bctx.supabase, { name: argument, slug });
       if (project) {
-        await ctx.reply(`Projet cree: ${project.name} (${project.slug})\nID: ${project.id.substring(0, 8)}`, bctx.threadOpts(ctx));
+        await ctx.reply(
+          `Projet cree: ${project.name} (${project.slug})\nID: ${project.id.substring(0, 8)}`,
+          bctx.threadOpts(ctx),
+        );
       } else {
-        await ctx.reply("Erreur lors de la creation du projet. Le nom existe peut-etre deja.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          "Erreur lors de la creation du projet. Le nom existe peut-etre deja.",
+          bctx.threadOpts(ctx),
+        );
       }
     } else if (subcommand === "switch") {
       if (!argument) {
@@ -92,8 +114,8 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
         await ctx.reply(`Projet "${argument}" introuvable.`, bctx.threadOpts(ctx));
       }
     } else if (subcommand === "topic") {
-      const topicId = parseInt(argument);
-      if (isNaN(topicId)) {
+      const topicId = parseInt(argument, 10);
+      if (Number.isNaN(topicId)) {
         await ctx.reply("Usage: /project topic <topic_thread_id>", bctx.threadOpts(ctx));
         return;
       }
@@ -109,7 +131,10 @@ export default function projectComposer(bctx: BotContext): Composer<Context> {
       if (project) {
         await bctx.sendResponse(ctx, formatProjectDetail(project));
       } else {
-        await ctx.reply(`Projet "${subcommand}" introuvable. Commandes: create, switch, archive, topic`, bctx.threadOpts(ctx));
+        await ctx.reply(
+          `Projet "${subcommand}" introuvable. Commandes: create, switch, archive, topic`,
+          bctx.threadOpts(ctx),
+        );
       }
     }
   });

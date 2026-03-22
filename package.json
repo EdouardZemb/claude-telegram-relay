@@ -21,7 +21,9 @@
     "doc:freshness": "bun run scripts/doc-freshness.ts",
     "smoke": "bun run scripts/smoke-test.ts",
     "cost:estimate": "bun run scripts/cost-estimate.ts",
-    "graph:index": "bun run scripts/index-graph.ts"
+    "graph:index": "bun run scripts/index-graph.ts",
+    "migrate": "bun run scripts/migrate.ts",
+    "prepare": "lefthook install"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -32,8 +34,11 @@
     "yaml": "^2.8.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/bun": "^1.3.9",
+    "lefthook": "^2.1.4",
+    "postgres": "^3.4.5",
     "zod": "^3.25.76"
   }
 }

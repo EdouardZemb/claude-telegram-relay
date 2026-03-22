@@ -5,17 +5,14 @@
  * and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  updateTrustScore,
+  formatTrustScores,
   getCachedTrustScore,
   getCachedTrustScores,
-  shouldAutoApprove,
-  formatTrustScores,
   resetTrustScoreCache,
-  AUTO_APPROVE_SPEC_THRESHOLD,
-  AUTO_APPROVE_IMPL_THRESHOLD,
-  AUTO_APPROVE_MAX_PRIORITY,
+  shouldAutoApprove,
+  updateTrustScore,
 } from "../../src/trust-scores";
 
 beforeEach(() => {

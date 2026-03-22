@@ -14,11 +14,13 @@
  * S15-03: Dedicated system prompts per BMad agent
  */
 
-import { readFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, readFileSync } from "fs";
+import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
 import { buildFeedbackContext } from "./feedback-loop.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("bmad-prompts");
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const AGENTS_DIR = join(PROJECT_ROOT, "config", "bmad-templates", "agents");
 
@@ -79,7 +81,7 @@ export function loadAgentYaml(agentId: string): AgentYaml | null {
     agentCache.set(agentId, parsed);
     return parsed;
   } catch (e) {
-    console.error(`Failed to load agent YAML ${agentId}:`, e);
+    log.error(`Failed to load agent YAML ${agentId}:`, { error: String(e) });
     return null;
   }
 }
@@ -101,10 +103,7 @@ export function loadAllAgents(): Map<string, AgentYaml> {
  * Build the system prompt portion for an agent (identity, role, principles, instructions).
  * S28: Separated from task context for --append-system-prompt support.
  */
-export function buildAgentSystemPromptPart(
-  agentId: string,
-  context: AgentPromptContext
-): string {
+export function buildAgentSystemPromptPart(agentId: string, context: AgentPromptContext): string {
   const yaml = loadAgentYaml(agentId);
   if (!yaml) return "";
 
@@ -154,10 +153,7 @@ export function buildAgentSystemPromptPart(
  * Build the task prompt portion for an agent (task context, AC, subtasks, docs).
  * S28: Separated from system prompt for --append-system-prompt support.
  */
-export function buildAgentTaskPromptPart(
-  agentId: string,
-  context: AgentPromptContext
-): string {
+export function buildAgentTaskPromptPart(_agentId: string, context: AgentPromptContext): string {
   const parts: string[] = [];
 
   // Task context
@@ -222,10 +218,7 @@ export function buildAgentTaskPromptPart(
  * Enriched with Telegram-specific instructions and context.
  * S28: Now a wrapper that concatenates system + task portions for backward compat.
  */
-export function buildFullAgentPrompt(
-  agentId: string,
-  context: AgentPromptContext
-): string {
+export function buildFullAgentPrompt(agentId: string, context: AgentPromptContext): string {
   const systemPart = buildAgentSystemPromptPart(agentId, context);
   if (!systemPart) return "";
 
@@ -240,10 +233,7 @@ export function buildFullAgentPrompt(
 /**
  * Get command-specific instructions for each agent.
  */
-function getCommandInstructions(
-  agentId: string,
-  context: AgentPromptContext
-): string {
+function getCommandInstructions(agentId: string, context: AgentPromptContext): string {
   const { command } = context;
 
   switch (agentId) {
@@ -356,7 +346,7 @@ function getSmInstructions(command: string): string {
   return "";
 }
 
-function getArchitectInstructions(command: string): string {
+function getArchitectInstructions(_command: string): string {
   return [
     "INSTRUCTIONS ARCHITECTURE:",
     "- Decisions techniques documentees avec le contexte (ADR format)",
@@ -406,7 +396,7 @@ function getQaInstructions(command: string): string {
   ].join("\n");
 }
 
-function getPlannerInstructions(command: string): string {
+function getPlannerInstructions(_command: string): string {
   return [
     "INSTRUCTIONS PLANIFICATION:",
     "- Commence par une evaluation de faisabilite (risques, dependances, complexite)",
@@ -419,7 +409,7 @@ function getPlannerInstructions(command: string): string {
   ].join("\n");
 }
 
-function getExplorerInstructions(command: string): string {
+function getExplorerInstructions(_command: string): string {
   return [
     "INSTRUCTIONS EXPLORATION:",
     "- Explore le codebase en lisant les fichiers pertinents",
@@ -514,24 +504,23 @@ const AGENT_CAPABILITIES: Record<string, AgentCapability> = {
  * Get capabilities for an agent. Used to enforce isolation.
  */
 export function getAgentCapabilities(agentId: string): AgentCapability {
-  return AGENT_CAPABILITIES[agentId] || {
-    canModifyCode: false,
-    canModifyArchitecture: false,
-    canModifyPRD: false,
-    canCreateTasks: false,
-    canReviewCode: false,
-    canDeployToProduction: false,
-    allowedFilePatterns: [],
-  };
+  return (
+    AGENT_CAPABILITIES[agentId] || {
+      canModifyCode: false,
+      canModifyArchitecture: false,
+      canModifyPRD: false,
+      canCreateTasks: false,
+      canReviewCode: false,
+      canDeployToProduction: false,
+      allowedFilePatterns: [],
+    }
+  );
 }
 
 /**
  * Check if an agent is allowed to perform an action.
  */
-export function checkAgentPermission(
-  agentId: string,
-  action: keyof AgentCapability
-): boolean {
+export function checkAgentPermission(agentId: string, action: keyof AgentCapability): boolean {
   const caps = getAgentCapabilities(agentId);
   return caps[action] as boolean;
 }
@@ -545,7 +534,8 @@ export function buildIsolationInstructions(agentId: string): string {
   const lines: string[] = ["LIMITES DE TON ROLE:"];
 
   if (!caps.canModifyCode) lines.push("- Tu ne PEUX PAS modifier le code source");
-  if (!caps.canModifyArchitecture) lines.push("- Tu ne PEUX PAS modifier les decisions d'architecture");
+  if (!caps.canModifyArchitecture)
+    lines.push("- Tu ne PEUX PAS modifier les decisions d'architecture");
   if (!caps.canModifyPRD) lines.push("- Tu ne PEUX PAS modifier les PRDs");
   if (!caps.canCreateTasks) lines.push("- Tu ne PEUX PAS creer de taches");
   if (!caps.canReviewCode) lines.push("- Tu ne PEUX PAS faire de revue de code");

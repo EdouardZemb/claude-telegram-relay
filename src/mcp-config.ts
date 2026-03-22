@@ -32,23 +32,22 @@ const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   get_tasks: "Lister les taches (filtrable par status, projet, sprint)",
   get_sprint_summary: "Progression du sprint (total, done, in_progress, backlog)",
   get_project_context: "Contexte complet du projet (memoire + sprint + taches)",
-  read_blackboard: "Lire une section du blackboard (spec, plan, tasks, implementation, verification)",
+  read_blackboard:
+    "Lire une section du blackboard (spec, plan, tasks, implementation, verification)",
   write_blackboard: "Ecrire dans une section du blackboard (avec locking optimiste)",
 };
 
 // ── Tavily Tool Registry ──────────────────────────────────────
 
 /** Available Tavily MCP tools */
-export const TAVILY_TOOLS = [
-  "tavily_search",
-  "tavily_extract",
-] as const;
+export const TAVILY_TOOLS = ["tavily_search", "tavily_extract"] as const;
 
 export type TavilyToolName = (typeof TAVILY_TOOLS)[number];
 
 /** Descriptions for Tavily tools */
 const TAVILY_TOOL_DESCRIPTIONS: Record<TavilyToolName, string> = {
-  tavily_search: "Recherche web (APIs, librairies, best practices, alternatives, documentation externe)",
+  tavily_search:
+    "Recherche web (APIs, librairies, best practices, alternatives, documentation externe)",
   tavily_extract: "Extraire le contenu d'une URL specifique (documentation, articles, specs)",
 };
 
@@ -139,12 +138,7 @@ const ROLE_TOOLS: Record<AgentRole, McpToolName[]> = {
     "get_project_context",
     "read_blackboard",
   ],
-  sm: [
-    "search_thoughts",
-    "list_thoughts",
-    "thought_stats",
-    "capture_thought",
-  ],
+  sm: ["search_thoughts", "list_thoughts", "thought_stats", "capture_thought"],
   explorer: [
     "search_thoughts",
     "list_thoughts",
@@ -222,7 +216,9 @@ export function buildMcpToolInstructions(role: AgentRole | string): string {
       lines.push(`- ${tool}: ${TAVILY_TOOL_DESCRIPTIONS[tool]}`);
     }
     lines.push("");
-    lines.push("GUIDE TAVILY: Utilise tavily_search pour chercher des informations sur le web (APIs, librairies, best practices, alternatives). Utilise tavily_extract pour extraire le contenu d'une URL specifique. Combine les resultats web avec ton analyse du codebase.");
+    lines.push(
+      "GUIDE TAVILY: Utilise tavily_search pour chercher des informations sur le web (APIs, librairies, best practices, alternatives). Utilise tavily_extract pour extraire le contenu d'une URL specifique. Combine les resultats web avec ton analyse du codebase.",
+    );
   }
 
   return lines.join("\n");

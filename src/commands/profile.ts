@@ -6,19 +6,14 @@
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
+import { formatPrefs, getPrefs, type NotificationType, savePrefs } from "../notification-prefs.ts";
 import {
   analyzeProfile,
-  proposeProfileUpdates,
   applyProfileUpdates,
   formatProfileInsights,
   formatProfileUpdates,
+  proposeProfileUpdates,
 } from "../profile-evolution.ts";
-import {
-  getPrefs,
-  savePrefs,
-  formatPrefs,
-  type NotificationType,
-} from "../notification-prefs.ts";
 
 export default function profileComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -26,7 +21,10 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
   // /profile
   composer.command("profile", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "profile");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -45,7 +43,10 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
         .row()
         .text("Ignorer", `profile_skip`);
       await bctx.sendResponse(ctx, response);
-      await ctx.reply("Appliquer ces modifications au profil ?", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
+      await ctx.reply("Appliquer ces modifications au profil ?", {
+        ...bctx.threadOpts(ctx),
+        reply_markup: keyboard,
+      });
     } else {
       await bctx.sendResponse(ctx, response);
     }
@@ -71,10 +72,13 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
         return;
       }
       const prefs = getPrefs();
-      prefs.quietStart = parseInt(match[1]);
-      prefs.quietEnd = parseInt(match[2]);
+      prefs.quietStart = parseInt(match[1], 10);
+      prefs.quietEnd = parseInt(match[2], 10);
       await savePrefs(prefs);
-      await ctx.reply(`Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`, bctx.threadOpts(ctx));
+      await ctx.reply(
+        `Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -134,13 +138,19 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    await ctx.reply("Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]", bctx.threadOpts(ctx));
+    await ctx.reply(
+      "Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]",
+      bctx.threadOpts(ctx),
+    );
   });
 
   // Profile update callbacks
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("profile_")) { await next(); return; }
+    if (!data.startsWith("profile_")) {
+      await next();
+      return;
+    }
 
     if (data === "profile_apply") {
       if (!bctx.supabase) {

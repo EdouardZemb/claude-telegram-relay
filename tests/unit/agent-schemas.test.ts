@@ -1,25 +1,25 @@
 /**
  * Tests for Structured Agent Message Schemas — S22-01/02
  */
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  parseAgentOutput,
-  validateAgentOutput,
-  getSchemaForRole,
-  buildStructuredOutputInstructions,
-  buildStructuredChainContext,
-  validateExplorationPhaseOutput,
-  parseExplorationPhaseOutput,
-  formatExplorationPhaseOutput,
-  getJsonSchemaForRole,
   type AgentMessage,
   type AnalystOutput,
-  type PmOutput,
   type ArchitectOutput,
+  buildStructuredChainContext,
+  buildStructuredOutputInstructions,
   type DevOutput,
+  type ExplorationPhaseOutput,
+  formatExplorationPhaseOutput,
+  getJsonSchemaForRole,
+  getSchemaForRole,
+  type PmOutput,
+  parseAgentOutput,
+  parseExplorationPhaseOutput,
   type QaOutput,
   type SmOutput,
-  type ExplorationPhaseOutput,
+  validateAgentOutput,
+  validateExplorationPhaseOutput,
 } from "../../src/agent-schemas.ts";
 
 // ── Schema Descriptions ──────────────────────────────────────
@@ -73,8 +73,8 @@ describe("validateAgentOutput", () => {
           dependencies: [],
           feasibility: "high",
         },
-        "analyst"
-      )
+        "analyst",
+      ),
     ).toBe(true);
   });
 
@@ -91,8 +91,8 @@ describe("validateAgentOutput", () => {
           priorities: ["p1"],
           risks: [],
         },
-        "pm"
-      )
+        "pm",
+      ),
     ).toBe(true);
   });
 
@@ -111,15 +111,13 @@ describe("validateAgentOutput", () => {
           technical_risks: [],
           decisions: [],
         },
-        "architect"
-      )
+        "architect",
+      ),
     ).toBe(true);
   });
 
   it("rejects architect without design", () => {
-    expect(
-      validateAgentOutput({ files_impacted: ["a.ts"] }, "architect")
-    ).toBe(false);
+    expect(validateAgentOutput({ files_impacted: ["a.ts"] }, "architect")).toBe(false);
   });
 
   it("validates dev output", () => {
@@ -131,15 +129,13 @@ describe("validateAgentOutput", () => {
           summary: "done",
           issues_encountered: [],
         },
-        "dev"
-      )
+        "dev",
+      ),
     ).toBe(true);
   });
 
   it("rejects dev without summary", () => {
-    expect(
-      validateAgentOutput({ files_modified: [] }, "dev")
-    ).toBe(false);
+    expect(validateAgentOutput({ files_modified: [] }, "dev")).toBe(false);
   });
 
   it("validates qa output", () => {
@@ -147,24 +143,19 @@ describe("validateAgentOutput", () => {
       validateAgentOutput(
         {
           score: 85,
-          findings: [
-            { severity: "minor", description: "d", suggestion: "s" },
-          ],
+          findings: [{ severity: "minor", description: "d", suggestion: "s" }],
           summary: "all good",
           tests_missing: [],
         },
-        "qa"
-      )
+        "qa",
+      ),
     ).toBe(true);
   });
 
   it("rejects qa without score", () => {
-    expect(
-      validateAgentOutput(
-        { findings: [], summary: "ok", tests_missing: [] },
-        "qa"
-      )
-    ).toBe(false);
+    expect(validateAgentOutput({ findings: [], summary: "ok", tests_missing: [] }, "qa")).toBe(
+      false,
+    );
   });
 
   it("validates sm output", () => {
@@ -176,15 +167,13 @@ describe("validateAgentOutput", () => {
           next_steps: ["deploy"],
           follow_ups: [],
         },
-        "sm"
-      )
+        "sm",
+      ),
     ).toBe(true);
   });
 
   it("rejects sm without next_steps", () => {
-    expect(
-      validateAgentOutput({ summary: "ok" }, "sm")
-    ).toBe(false);
+    expect(validateAgentOutput({ summary: "ok" }, "sm")).toBe(false);
   });
 
   it("rejects null and non-objects", () => {
@@ -597,13 +586,21 @@ describe("validateExplorationPhaseOutput", () => {
   });
 
   it("rejects confidence out of range", () => {
-    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1.5 })).toBe(false);
-    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: -0.1 })).toBe(false);
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1.5 })).toBe(
+      false,
+    );
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: -0.1 })).toBe(
+      false,
+    );
   });
 
   it("accepts confidence at boundaries", () => {
-    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 0 })).toBe(true);
-    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1 })).toBe(true);
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 0 })).toBe(
+      true,
+    );
+    expect(validateExplorationPhaseOutput({ ...VALID_EXPLORATION_OUTPUT, confidence: 1 })).toBe(
+      true,
+    );
   });
 });
 

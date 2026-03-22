@@ -4,24 +4,22 @@
  * Tests for BMad gates (PRD validation, architecture readiness).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import {
+  checkAllGates,
   checkGate1_PRD,
   checkGate2_Architecture,
-  checkAllGates,
-  overrideGate,
-  isGateOverridden,
-  clearGateOverrides,
   checkGatesWithOverrides,
+  clearGateOverrides,
+  isGateOverridden,
+  overrideGate,
 } from "../../src/gates";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("Gate 1 — PRD", () => {
   it("passes when an approved PRD exists for the project", async () => {
     const supabase = createMockSupabase({
-      prds: [
-        { id: "prd-1", title: "Feature PRD", project: "my-app", status: "approved" },
-      ],
+      prds: [{ id: "prd-1", title: "Feature PRD", project: "my-app", status: "approved" }],
     });
 
     const result = await checkGate1_PRD(supabase, {
@@ -36,9 +34,7 @@ describe("Gate 1 — PRD", () => {
 
   it("fails when no approved PRD exists", async () => {
     const supabase = createMockSupabase({
-      prds: [
-        { id: "prd-1", title: "Draft PRD", project: "my-app", status: "draft" },
-      ],
+      prds: [{ id: "prd-1", title: "Draft PRD", project: "my-app", status: "draft" }],
     });
 
     const result = await checkGate1_PRD(supabase, {
@@ -68,9 +64,7 @@ describe("Gate 1 — PRD", () => {
 
   it("ignores approved PRDs from other projects", async () => {
     const supabase = createMockSupabase({
-      prds: [
-        { id: "prd-1", title: "Other PRD", project: "other-project", status: "approved" },
-      ],
+      prds: [{ id: "prd-1", title: "Other PRD", project: "other-project", status: "approved" }],
     });
 
     const result = await checkGate1_PRD(supabase, {
@@ -87,7 +81,11 @@ describe("Gate 2 — Architecture", () => {
   it("passes when task has acceptance_criteria", async () => {
     const supabase = createMockSupabase({
       tasks: [
-        { id: "t1", title: "Implement feature", acceptance_criteria: "Given a user\nWhen they login\nThen they see the dashboard" },
+        {
+          id: "t1",
+          title: "Implement feature",
+          acceptance_criteria: "Given a user\nWhen they login\nThen they see the dashboard",
+        },
       ],
     });
 
@@ -120,9 +118,7 @@ describe("Gate 2 — Architecture", () => {
 
   it("fails when task has no BMad artefacts", async () => {
     const supabase = createMockSupabase({
-      tasks: [
-        { id: "t1", title: "Do something" },
-      ],
+      tasks: [{ id: "t1", title: "Do something" }],
     });
 
     const result = await checkGate2_Architecture(supabase, {
@@ -139,7 +135,11 @@ describe("Gate 2 — Architecture", () => {
   it("fails when task only has description (no BMad artefacts)", async () => {
     const supabase = createMockSupabase({
       tasks: [
-        { id: "t1", title: "Task", description: "Some long description that would have passed before" },
+        {
+          id: "t1",
+          title: "Task",
+          description: "Some long description that would have passed before",
+        },
       ],
     });
 
@@ -155,7 +155,12 @@ describe("Gate 2 — Architecture", () => {
   it("includes subtask count in reason when present", async () => {
     const supabase = createMockSupabase({
       tasks: [
-        { id: "t1", title: "Task", acceptance_criteria: "Given/When/Then", subtasks: ["step1", "step2", "step3"] },
+        {
+          id: "t1",
+          title: "Task",
+          acceptance_criteria: "Given/When/Then",
+          subtasks: ["step1", "step2", "step3"],
+        },
       ],
     });
 

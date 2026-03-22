@@ -6,7 +6,7 @@
  * and error handling.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -33,7 +33,7 @@ describe("MCP audit_codebase tool", () => {
     // The full-result return block
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 3000
+      serverCode.indexOf('"audit_codebase"') + 3000,
     );
     expect(auditSection).toContain("score: row.global_score");
     expect(auditSection).toContain("axis_scores: row.axis_scores");
@@ -49,13 +49,15 @@ describe("MCP audit_codebase tool", () => {
   // ── AC-2: axis filtering ──────────────────────────────────────
 
   it("accepts optional axis parameter", () => {
-    expect(serverCode).toContain('axis: z.string().optional()');
+    expect(serverCode).toContain("axis: z");
+    expect(serverCode).toContain(".string()");
+    expect(serverCode).toContain(".optional()");
   });
 
   it("filters by axis when axis parameter is provided", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 3000
+      serverCode.indexOf('"audit_codebase"') + 3000,
     );
     expect(auditSection).toContain("if (axis)");
     expect(auditSection).toContain("row.axis_scores?.[axis]");
@@ -64,7 +66,7 @@ describe("MCP audit_codebase tool", () => {
   it("returns axis-specific score and globalScore when filtering", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 3000
+      serverCode.indexOf('"audit_codebase"') + 3000,
     );
     expect(auditSection).toContain("score: axisScore");
     expect(auditSection).toContain("globalScore: row.global_score");
@@ -73,7 +75,7 @@ describe("MCP audit_codebase tool", () => {
   it("filters findings by axis when axis parameter is provided", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 3000
+      serverCode.indexOf('"audit_codebase"') + 3000,
     );
     expect(auditSection).toContain("g.axis === axis");
   });
@@ -83,7 +85,7 @@ describe("MCP audit_codebase tool", () => {
   it("description includes Preconditions", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 500
+      serverCode.indexOf('"audit_codebase"') + 500,
     );
     expect(auditSection).toContain("Preconditions:");
   });
@@ -91,7 +93,7 @@ describe("MCP audit_codebase tool", () => {
   it("description includes Suggested next", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 500
+      serverCode.indexOf('"audit_codebase"') + 500,
     );
     expect(auditSection).toContain("Suggested next:");
   });
@@ -99,7 +101,7 @@ describe("MCP audit_codebase tool", () => {
   it("description suggests get_alerts and analyze_backlog as next", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
-      serverCode.indexOf('"audit_codebase"') + 500
+      serverCode.indexOf('"audit_codebase"') + 500,
     );
     expect(auditSection).toContain("get_alerts");
     expect(auditSection).toContain("analyze_backlog");
@@ -109,7 +111,7 @@ describe("MCP audit_codebase tool", () => {
 
   it("wraps handler in try/catch with error return", () => {
     const match = serverCode.match(
-      /server\.tool\(\s*"audit_codebase"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/
+      /server\.tool\(\s*"audit_codebase"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
     );
     expect(match).not.toBeNull();
   });

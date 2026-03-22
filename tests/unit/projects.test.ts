@@ -4,22 +4,22 @@
  * Tests for multi-project CRUD, context resolution, and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  archiveProject,
   createProject,
+  formatProjectDetail,
+  formatProjectList,
+  getActiveProjectSlug,
   getProject,
   listProjects,
-  updateProject,
-  archiveProject,
-  resolveProjectFromTopic,
-  resolveProjectContext,
-  formatProjectList,
-  formatProjectDetail,
-  getActiveProjectSlug,
-  setActiveProjectSlug,
   type Project,
+  resolveProjectContext,
+  resolveProjectFromTopic,
+  setActiveProjectSlug,
+  updateProject,
 } from "../../src/projects";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 const MOCK_PROJECT: Project = {
   id: "proj-001-uuid",

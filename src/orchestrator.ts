@@ -19,133 +19,130 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Task } from "./tasks.ts";
-import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { createLogger } from "./logger.ts";
+
+const log = createLogger("orchestrator");
+
+import { runAdversarialChallenge, runImpactAnalysis } from "./adversarial-challenge.ts";
 import {
+  checkConformance,
+  type DriftReport,
+  formatDriftReport,
+  persistDriftReport,
+  verifySpecVsImplementation,
+} from "./adversarial-verifier.ts";
+import { spawnClaude } from "./agent.ts";
+import { buildAgentContext } from "./agent-context.ts";
+import { captureAgentFailure, clearInMemoryEvents, emitAgentEvent } from "./agent-events.ts";
+import {
+  type AgentInterMessage,
+  buildInterAgentContext,
+  canRequestClarification,
+  checkPendingClarifications,
+  clearClarificationTracker,
+  detectConflicts,
+  getAgentMessages,
+  getMediatingAgent,
+  markClarificationUsed,
+  sendAgentMessage,
+} from "./agent-messaging.ts";
+import type { AdversarialResult, ImpactAnalysisResult, ProtoSpec } from "./agent-schemas.ts";
+import {
+  type AgentMessage,
+  buildStructuredChainContext,
+  buildStructuredOutputInstructions,
+  formatExplorationPhaseOutput,
+  formatStructuredOutput,
+  getJsonSchemaForRole,
+  parseAgentOutput,
+  parseExplorationPhaseOutput,
+  type StructuredAgentOutput,
+} from "./agent-schemas.ts";
+import {
+  createBlackboard,
+  formatTraceabilityReport,
+  generateTraceabilityReport,
+  getFullBlackboard,
+  InMemoryBlackboard,
+  readSection,
+  type SectionName,
+  updateBlackboardStatus,
+  type WorkingMemory,
+  writeSection,
+} from "./blackboard.ts";
+import { getAgent } from "./bmad-agents.ts";
+import {
+  type AgentPromptContext,
   buildFullAgentPrompt,
   buildIsolationInstructions,
   loadAgentYaml,
-  type AgentPromptContext,
 } from "./bmad-prompts.ts";
-import { getAgent, type BmadAgent } from "./bmad-agents.ts";
-import { spawnClaude } from "./agent.ts";
-import { WorkflowTracker } from "./workflow.ts";
+import { parseTokenUsage } from "./cost-tracking.ts";
+import { getDeliberationReviewer, runDeliberation, shouldDeliberate } from "./deliberation.ts";
 import { buildTaskContext } from "./document-sharding.ts";
-import {
-  type AgentMessage,
-  type StructuredAgentOutput,
-  parseAgentOutput,
-  buildStructuredOutputInstructions,
-  buildStructuredChainContext,
-  getJsonSchemaForRole,
-  formatStructuredOutput,
-  parseExplorationPhaseOutput,
-  formatExplorationPhaseOutput,
-} from "./agent-schemas.ts";
-import { parseTokenUsage, logCost, estimateCost } from "./cost-tracking.ts";
-import { logCostWithSpan, buildSpanId, recordPromptVersion, sha256 } from "./llm-ops.ts";
+import { type ExplorationScore, shouldExplore } from "./exploration-scoring.ts";
+import { isFeatureEnabled } from "./feature-flags.ts";
 import { getFeedbackRulesForAgent } from "./feedback-loop.ts";
+import { evaluateAndRework, type GateEvaluation, type GateName } from "./gate-evaluator.ts";
+import { buildSpanId, logCostWithSpan, recordPromptVersion, sha256 } from "./llm-ops.ts";
 import {
-  createBlackboard,
-  readSection,
-  writeSection,
-  getFullBlackboard,
-  updateBlackboardStatus,
-  generateTraceabilityReport,
-  formatTraceabilityReport,
-  InMemoryBlackboard,
-  type BlackboardRow,
-  type SectionName,
-  type WorkingMemory,
-} from "./blackboard.ts";
-import {
-  evaluateAndRework,
-  type GateName,
-  type GateEvaluation,
-} from "./gate-evaluator.ts";
-import {
-  verifySpecVsImplementation,
-  persistDriftReport,
-  formatDriftReport,
-  type DriftReport,
-} from "./adversarial-verifier.ts";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { writeSectionWithRetry } from "./blackboard.ts";
-import { buildAgentContext } from "./agent-context.ts";
-import {
-  createPipelineRun,
-  savePipelineStep,
-  updatePipelineStatus,
-  loadPipelineState,
-  buildResumeContext,
-  findLatestPipelineRun,
-  type StepSnapshot,
-} from "./pipeline-state.ts";
-import { emitAgentEvent, clearInMemoryEvents, captureAgentFailure } from "./agent-events.ts";
-import {
-  getAgentMessages,
-  checkPendingClarifications,
-  detectConflicts,
-  getMediatingAgent,
-  sendAgentMessage,
-  buildInterAgentContext,
-  clearClarificationTracker,
-  canRequestClarification,
-  markClarificationUsed,
-  type AgentInterMessage,
-} from "./agent-messaging.ts";
-import {
+  classifyAdaptivePipeline,
+  classifyPipeline,
   DEFAULT_PIPELINE,
+  LIGHT_PIPELINE,
+  type PipelineType,
   QUICK_PIPELINE,
+  RESEARCH_PIPELINE,
   REVIEW_PIPELINE,
   SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  RESEARCH_PIPELINE,
-  selectPipeline,
   selectAdaptivePipeline,
-  classifyPipeline,
-  classifyAdaptivePipeline,
-  type PipelineType,
+  selectPipeline,
 } from "./pipeline-selection.ts";
 import {
-  shouldDeliberate,
-  getDeliberationReviewer,
-  runDeliberation,
-} from "./deliberation.ts";
-import {
-  shouldExplore,
-  type ExplorationScore,
-} from "./exploration-scoring.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
+  buildResumeContext,
+  createPipelineRun,
+  loadPipelineState,
+  type StepSnapshot,
+  savePipelineStep,
+  updatePipelineStatus,
+} from "./pipeline-state.ts";
 import { generateProtoSpec } from "./spec-lite.ts";
-import { runAdversarialChallenge, runImpactAnalysis } from "./adversarial-challenge.ts";
-import { checkConformance } from "./adversarial-verifier.ts";
-import type { ProtoSpec, AdversarialResult, ImpactAnalysisResult } from "./agent-schemas.ts";
-
-// Re-export pipeline selection for backward compatibility
-export {
-  DEFAULT_PIPELINE,
-  QUICK_PIPELINE,
-  REVIEW_PIPELINE,
-  SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  RESEARCH_PIPELINE,
-  selectPipeline,
-  selectAdaptivePipeline,
-  classifyPipeline,
-  classifyAdaptivePipeline,
-  type PipelineType,
-};
+import { buildStoryFile, enrichTaskWithStory } from "./story-files.ts";
+import type { Task } from "./tasks.ts";
+import { WorkflowTracker } from "./workflow.ts";
 
 // Re-export deliberation protocol for backward compatibility
-export { runDeliberation, shouldDeliberate, getDeliberationReviewer } from "./deliberation.ts";
+export { getDeliberationReviewer, runDeliberation, shouldDeliberate } from "./deliberation.ts";
+// Re-export pipeline selection for backward compatibility
+export {
+  classifyAdaptivePipeline,
+  classifyPipeline,
+  DEFAULT_PIPELINE,
+  LIGHT_PIPELINE,
+  type PipelineType,
+  QUICK_PIPELINE,
+  RESEARCH_PIPELINE,
+  REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+  selectAdaptivePipeline,
+  selectPipeline,
+};
 
-const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
+const _PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 
 // ── Types ────────────────────────────────────────────────────
 
-export type AgentRole = "analyst" | "pm" | "architect" | "dev" | "qa" | "sm" | "explorer" | "planner";
+export type AgentRole =
+  | "analyst"
+  | "pm"
+  | "architect"
+  | "dev"
+  | "qa"
+  | "sm"
+  | "explorer"
+  | "planner";
 
 export interface AgentStepResult {
   agentId: AgentRole;
@@ -202,7 +199,7 @@ export async function runAgentStep(
   /** S34: Per-role model override from LLM router */
   modelOverride?: string,
   /** S34: Enable model cascade */
-  cascade?: boolean
+  cascade?: boolean,
 ): Promise<AgentStepResult> {
   const startTime = Date.now();
   const agent = getAgent(agentId);
@@ -220,10 +217,11 @@ export async function runAgentStep(
     architectureRef: task.architecture_ref || undefined,
     projectName: task.project,
     sprintId: task.sprint || undefined,
-    subtasks: task.subtasks?.map((st: any) => ({
-      title: st.title,
-      done: st.done,
-    })) || undefined,
+    subtasks:
+      task.subtasks?.map((st: any) => ({
+        title: st.title,
+        done: st.done,
+      })) || undefined,
     shardedContext: shardedContext || undefined,
   };
 
@@ -384,7 +382,7 @@ async function persistAgentArtifact(
   supabase: SupabaseClient,
   taskId: string,
   agentId: AgentRole,
-  output: string
+  output: string,
 ): Promise<void> {
   const updates: Record<string, any> = {};
 
@@ -418,11 +416,8 @@ async function persistAgentArtifact(
     delete updates.dev_notes_qa;
   }
 
-  const { error } = await supabase
-    .from("tasks")
-    .update(updates)
-    .eq("id", taskId);
-  if (error) console.error(`persistAgentArtifact(${agentId}) error:`, error);
+  const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
+  if (error) log.error(`persistAgentArtifact(${agentId}) error: ${error.message}`);
 }
 
 // ── Main Orchestrate Function ────────────────────────────────
@@ -455,7 +450,10 @@ export interface OrchestrateOptions {
   /** Skip adversarial challenge (P2+E1) even if feature flag is active. F-EC-4: skips both P2 and E1 together */
   skipChallenge?: boolean;
   /** Callback to pause/resume pipeline on adversarial PAUSE (F-DA-1) */
-  onAdversarialPause?: (result: AdversarialResult, impact: ImpactAnalysisResult | null) => Promise<boolean>;
+  onAdversarialPause?: (
+    result: AdversarialResult,
+    impact: ImpactAnalysisResult | null,
+  ) => Promise<boolean>;
 }
 
 /**
@@ -467,7 +465,7 @@ export interface OrchestrateOptions {
 export async function orchestrate(
   supabase: SupabaseClient | null,
   task: Task,
-  options: OrchestrateOptions = {}
+  options: OrchestrateOptions = {},
 ): Promise<OrchestratedResult> {
   // S33: Resume from previous pipeline run
   let resumeFromStep = 0;
@@ -482,7 +480,7 @@ export async function orchestrate(
       // Pre-fill messages from completed steps
       if (options.onProgress) {
         await options.onProgress(
-          `Resume pipeline depuis l'etape ${resumeFromStep} (${ctx.previousMessages.length} agents deja completes)`
+          `Resume pipeline depuis l'etape ${resumeFromStep} (${ctx.previousMessages.length} agents deja completes)`,
         );
       }
       // Messages will be loaded below after pipeline selection
@@ -492,30 +490,36 @@ export async function orchestrate(
   // Dynamic pipeline selection (S22-06)
   let pipeline = options.autoPipeline
     ? selectPipeline(task, options.pipeline)
-    : (options.pipeline || DEFAULT_PIPELINE);
+    : options.pipeline || DEFAULT_PIPELINE;
   const maxRetries = options.maxRetries ?? 0;
 
   // Exploration phase: check if task needs research before decomposition
-  let explorationScore: ExplorationScore | null = null;
+  let _explorationScore: ExplorationScore | null = null;
   if (!options.resumeSessionId) {
-    const pipelineType = pipeline === RESEARCH_PIPELINE ? "RESEARCH"
-      : pipeline === SOLO_PIPELINE ? "SOLO"
-      : pipeline === QUICK_PIPELINE ? "QUICK"
-      : pipeline === REVIEW_PIPELINE ? "REVIEW"
-      : pipeline === LIGHT_PIPELINE ? "LIGHT"
-      : "DEFAULT";
+    const pipelineType =
+      pipeline === RESEARCH_PIPELINE
+        ? "RESEARCH"
+        : pipeline === SOLO_PIPELINE
+          ? "SOLO"
+          : pipeline === QUICK_PIPELINE
+            ? "QUICK"
+            : pipeline === REVIEW_PIPELINE
+              ? "REVIEW"
+              : pipeline === LIGHT_PIPELINE
+                ? "LIGHT"
+                : "DEFAULT";
 
     const exploreResult = await shouldExplore(task, { pipeline: pipelineType }, supabase);
 
     if (exploreResult.explore) {
-      explorationScore = exploreResult.score;
+      _explorationScore = exploreResult.score;
 
       if (exploreResult.score?.forceResearch && !pipeline.includes("explorer")) {
         // Score >= 0.7: force RESEARCH pipeline
         pipeline = RESEARCH_PIPELINE;
         if (options.onProgress) {
           await options.onProgress(
-            `Exploration fortement recommandee (score ${exploreResult.score.score}) : pipeline RESEARCH active`
+            `Exploration fortement recommandee (score ${exploreResult.score.score}) : pipeline RESEARCH active`,
           );
         }
       } else if (!pipeline.includes("explorer")) {
@@ -523,7 +527,7 @@ export async function orchestrate(
         pipeline = ["explorer", ...pipeline] as AgentRole[];
         if (options.onProgress) {
           await options.onProgress(
-            `Phase exploration activee (score ${exploreResult.score?.score || "?"}) : explorer ajoute en tete du pipeline`
+            `Phase exploration activee (score ${exploreResult.score?.score || "?"}) : explorer ajoute en tete du pipeline`,
           );
         }
       }
@@ -549,7 +553,7 @@ export async function orchestrate(
         supabase,
         task.title,
         task.project_id,
-        4000 // token budget
+        4000, // token budget
       );
     } catch {
       // Sharding not available, proceed without
@@ -568,7 +572,7 @@ export async function orchestrate(
           conversationContext: options.conversationContext,
         });
         return [role, ctx] as [string, string];
-      })
+      }),
     );
     for (const [role, ctx] of ctxResults) {
       if (ctx) agentContextCache.set(role, ctx);
@@ -580,11 +584,7 @@ export async function orchestrate(
     const story = buildStoryFile(task);
     await enrichTaskWithStory(supabase, task.id, story);
     // Reload task with persisted story data
-    const { data: refreshed } = await supabase
-      .from("tasks")
-      .select("*")
-      .eq("id", task.id)
-      .single();
+    const { data: refreshed } = await supabase.from("tasks").select("*").eq("id", task.id).single();
     if (refreshed) {
       Object.assign(task, refreshed);
     }
@@ -599,7 +599,7 @@ export async function orchestrate(
       return a ? `${a.icon} ${a.name}` : id;
     });
     await options.onProgress(
-      `Orchestration demarree (${pipelineLabel}) : ${agentNames.join(" -> ")}`
+      `Orchestration demarree (${pipelineLabel}) : ${agentNames.join(" -> ")}`,
     );
   }
 
@@ -615,13 +615,7 @@ export async function orchestrate(
   // S33: Create pipeline run for checkpoint tracking (if not resuming)
   if (!pipelineSessionId) {
     pipelineSessionId = `pr-${task.id}-${Date.now()}`;
-    await createPipelineRun(
-      supabase,
-      task.id,
-      pipelineSessionId,
-      classifyPipeline(task),
-      pipeline
-    );
+    await createPipelineRun(supabase, task.id, pipelineSessionId, classifyPipeline(task), pipeline);
   }
 
   // S24: Blackboard initialization
@@ -640,11 +634,11 @@ export async function orchestrate(
         task.id,
         bbSessionId,
         classifyPipeline(task),
-        task.project_id || undefined
+        task.project_id || undefined,
       );
       if (!bb) {
         // EC-008: fallback to in-memory
-        console.warn("orchestrate: Supabase blackboard creation failed, using in-memory fallback");
+        log.warn("Supabase blackboard creation failed, using in-memory fallback");
         bbFallback = new InMemoryBlackboard();
         bbFallback.create(task.id, bbSessionId, classifyPipeline(task));
       }
@@ -658,15 +652,28 @@ export async function orchestrate(
     const specTemplatePath = join(
       process.env.PROJECT_DIR || process.cwd(),
       "config",
-      "spec-template.md"
+      "spec-template.md",
     );
     try {
       const template = readFileSync(specTemplatePath, "utf-8");
       if (supabase && !bbFallback) {
-        const res = await writeSection(supabase, bbSessionId, "spec", { template, task_title: task.title, task_description: task.description }, "system", bbVersion);
+        const res = await writeSection(
+          supabase,
+          bbSessionId,
+          "spec",
+          { template, task_title: task.title, task_description: task.description },
+          "system",
+          bbVersion,
+        );
         if (res.success) bbVersion = res.newVersion;
       } else if (bbFallback) {
-        const res = bbFallback.write(bbSessionId, "spec", { template, task_title: task.title, task_description: task.description }, "system", bbVersion);
+        const res = bbFallback.write(
+          bbSessionId,
+          "spec",
+          { template, task_title: task.title, task_description: task.description },
+          "system",
+          bbVersion,
+        );
         if (res.success) bbVersion = res.newVersion;
       }
     } catch {
@@ -674,7 +681,9 @@ export async function orchestrate(
     }
 
     if (options.onProgress) {
-      await options.onProgress("Blackboard initialise" + (bbFallback ? " (in-memory fallback)" : ""));
+      await options.onProgress(
+        "Blackboard initialise" + (bbFallback ? " (in-memory fallback)" : ""),
+      );
     }
   }
 
@@ -683,12 +692,18 @@ export async function orchestrate(
   // V7: Calls generateProtoSpec and writes to blackboard.spec.proto_spec.
   // V8: When flag is off, no call to generateProtoSpec.
   let protoSpec: ProtoSpec | null = null;
-  const pipelineTypeForFlags = pipeline === RESEARCH_PIPELINE ? "RESEARCH"
-    : pipeline === SOLO_PIPELINE ? "SOLO"
-    : pipeline === QUICK_PIPELINE ? "QUICK"
-    : pipeline === REVIEW_PIPELINE ? "REVIEW"
-    : pipeline === LIGHT_PIPELINE ? "LIGHT"
-    : "DEFAULT";
+  const pipelineTypeForFlags =
+    pipeline === RESEARCH_PIPELINE
+      ? "RESEARCH"
+      : pipeline === SOLO_PIPELINE
+        ? "SOLO"
+        : pipeline === QUICK_PIPELINE
+          ? "QUICK"
+          : pipeline === REVIEW_PIPELINE
+            ? "REVIEW"
+            : pipeline === LIGHT_PIPELINE
+              ? "LIGHT"
+              : "DEFAULT";
 
   if (
     isFeatureEnabled("spec_phase_lite") &&
@@ -703,13 +718,13 @@ export async function orchestrate(
     protoSpec = await generateProtoSpec(
       task,
       story,
-      agentContextCache.get("analyst") || agentContextCache.get("planner") || undefined
+      agentContextCache.get("analyst") || agentContextCache.get("planner") || undefined,
     );
 
     if (options.onProgress) {
       const vcCount = protoSpec.v_criteria.length;
       await options.onProgress(
-        `P1: Proto-spec generee — ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`
+        `P1: Proto-spec generee — ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`,
       );
     }
 
@@ -717,12 +732,23 @@ export async function orchestrate(
     if (options.useBlackboard && bbSessionId) {
       if (supabase && !bbFallback) {
         const existing = await readSection(supabase, bbSessionId, "spec");
-        const specData = existing ? { ...existing, proto_spec: protoSpec } : { proto_spec: protoSpec };
-        const res = await writeSection(supabase, bbSessionId, "spec", specData, "spec-lite", bbVersion);
+        const specData = existing
+          ? { ...existing, proto_spec: protoSpec }
+          : { proto_spec: protoSpec };
+        const res = await writeSection(
+          supabase,
+          bbSessionId,
+          "spec",
+          specData,
+          "spec-lite",
+          bbVersion,
+        );
         if (res.success) bbVersion = res.newVersion;
       } else if (bbFallback) {
         const existing = bbFallback.read(bbSessionId, "spec");
-        const specData = existing ? { ...existing, proto_spec: protoSpec } : { proto_spec: protoSpec };
+        const specData = existing
+          ? { ...existing, proto_spec: protoSpec }
+          : { proto_spec: protoSpec };
         const res = bbFallback.write(bbSessionId, "spec", specData, "spec-lite", bbVersion);
         if (res.success) bbVersion = res.newVersion;
       }
@@ -730,9 +756,10 @@ export async function orchestrate(
   } else if (options.resumeSessionId && options.useBlackboard && bbSessionId) {
     // On resume: check if proto_spec exists in blackboard
     try {
-      const specSection = supabase && !bbFallback
-        ? await readSection(supabase, bbSessionId, "spec")
-        : bbFallback?.read(bbSessionId, "spec");
+      const specSection =
+        supabase && !bbFallback
+          ? await readSection(supabase, bbSessionId, "spec")
+          : bbFallback?.read(bbSessionId, "spec");
       if (specSection?.proto_spec) {
         protoSpec = specSection.proto_spec;
       }
@@ -744,16 +771,17 @@ export async function orchestrate(
   // P1: Resolve overlap + blackboard incompatibility (R1c)
   let effectiveOverlap = options.overlap ?? false;
   if (effectiveOverlap && options.useBlackboard) {
-    console.warn("orchestrate: overlap is incompatible with useBlackboard, falling back to sequential");
+    log.warn("overlap is incompatible with useBlackboard, falling back to sequential");
     effectiveOverlap = false;
   }
 
   // ── Sequential execution (with optional overlap for last 2 agents) ──
   {
     // P1: Determine which agents run sequentially vs in parallel
-    const overlapThreshold = effectiveOverlap && pipeline.length >= 2
-      ? pipeline.length - 2 // index where overlap starts
-      : pipeline.length; // no overlap: all sequential
+    const overlapThreshold =
+      effectiveOverlap && pipeline.length >= 2
+        ? pipeline.length - 2 // index where overlap starts
+        : pipeline.length; // no overlap: all sequential
 
     let stepIndex = 0;
     for (const agentId of pipeline) {
@@ -770,9 +798,7 @@ export async function orchestrate(
       }
 
       const agent = getAgent(agentId);
-      const agentLabel = agent
-        ? `${agent.icon} ${agent.name} (${agent.title})`
-        : agentId;
+      const agentLabel = agent ? `${agent.icon} ${agent.name} (${agent.title})` : agentId;
 
       // P2: Refresh context mid-pipeline (R4, R5, R6)
       if (options.refreshContext && stepIndex > 1 && supabase) {
@@ -807,8 +833,9 @@ export async function orchestrate(
       // S38: Emit spawned event
       if (pipelineSessionId) {
         emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
-          model: agent?.model, effort: agent?.effort,
-        }).catch((err) => console.error("emitAgentEvent spawned error:", err));
+          model: agent?.model,
+          effort: agent?.effort,
+        }).catch((err) => log.error(`emitAgentEvent spawned error: ${err}`));
       }
 
       // S22-04: Retry loop with exponential backoff
@@ -817,7 +844,7 @@ export async function orchestrate(
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         // S38: Inject inter-agent messages into context
-        let augmentedMessages = messages;
+        const augmentedMessages = messages;
         if (options.useBlackboard && bbSessionId) {
           const interMessages = await getAgentMessages(supabase, bbSessionId, agentId);
           if (interMessages.length > 0) {
@@ -828,16 +855,24 @@ export async function orchestrate(
           }
         }
 
-        result = await runAgentStep(agentId, task, augmentedMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
+        result = await runAgentStep(
+          agentId,
+          task,
+          augmentedMessages,
+          shardedContext,
+          agentContextCache.get(agentId),
+          options.modelOverrides?.[agentId],
+          options.cascade,
+        );
 
         if (result.success) break;
 
         if (attempt < maxRetries) {
           retryCount = attempt + 1;
-          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+          const backoffMs = Math.min(1000 * 2 ** attempt, 30000);
           if (options.onProgress) {
             await options.onProgress(
-              `${agentLabel} echoue, retry ${retryCount}/${maxRetries} dans ${backoffMs / 1000}s...`
+              `${agentLabel} echoue, retry ${retryCount}/${maxRetries} dans ${backoffMs / 1000}s...`,
             );
           }
           await new Promise((resolve) => setTimeout(resolve, backoffMs));
@@ -853,7 +888,7 @@ export async function orchestrate(
           tokensInput: result.tokensInput || 0,
           tokensOutput: result.tokensOutput || 0,
           durationMs: result.durationMs || 0,
-        }).catch((err) => console.error("captureAgentFailure error:", err));
+        }).catch((err) => log.error(`captureAgentFailure error: ${err}`));
       }
 
       // result is never null here because maxRetries >= 0 guarantees at least one iteration
@@ -869,20 +904,25 @@ export async function orchestrate(
           tokens_output: result!.tokensOutput,
           cost_usd: result!.costUsd,
           ...(result!.error ? { error: result!.error } : {}),
-        }).catch((err) => console.error("emitAgentEvent completed/failed error:", err));
+        }).catch((err) => log.error(`emitAgentEvent completed/failed error: ${err}`));
       }
 
       // S38: Detect conflicts in working memory after agent completes
       if (options.useBlackboard && bbSessionId && result!.success) {
         try {
-          const wm = supabase && !bbFallback
-            ? await readSection(supabase, bbSessionId, "working_memory") as WorkingMemory | null
-            : bbFallback?.read(bbSessionId, "working_memory") as WorkingMemory | null;
+          const wm =
+            supabase && !bbFallback
+              ? ((await readSection(
+                  supabase,
+                  bbSessionId,
+                  "working_memory",
+                )) as WorkingMemory | null)
+              : (bbFallback?.read(bbSessionId, "working_memory") as WorkingMemory | null);
           const conflicts = detectConflicts(wm);
           for (const conflict of conflicts) {
             if (options.onProgress) {
               await options.onProgress(
-                `Conflit detecte: ${conflict.agent1} vs ${conflict.agent2} sur "${conflict.subject.substring(0, 50)}"`
+                `Conflit detecte: ${conflict.agent1} vs ${conflict.agent2} sur "${conflict.subject.substring(0, 50)}"`,
               );
             }
             // Write escalation message to blackboard
@@ -914,12 +954,13 @@ export async function orchestrate(
               markClarificationUsed(pipelineSessionId!, q.from, q.to as string);
               if (options.onProgress) {
                 await options.onProgress(
-                  `Clarification: ${q.from} demande a ${q.to}: ${q.content.substring(0, 60)}...`
+                  `Clarification: ${q.from} demande a ${q.to}: ${q.content.substring(0, 60)}...`,
                 );
               }
               emitAgentEvent(supabase, pipelineSessionId!, q.from, "clarification_requested", {
-                target_agent: q.to, question: q.content.substring(0, 200),
-              }).catch((err) => console.error("emitAgentEvent clarification error:", err));
+                target_agent: q.to,
+                question: q.content.substring(0, 200),
+              }).catch((err) => log.error(`emitAgentEvent clarification error: ${err}`));
             }
           }
         } catch {
@@ -1007,20 +1048,38 @@ export async function orchestrate(
               if (enrichedCtx) agentContextCache.set(remainingRole, enrichedCtx);
             } else {
               // No supabase: append exploration report directly
-              agentContextCache.set(remainingRole, existing + "\n\nRAPPORT EXPLORATION:\n" + formattedReport);
+              agentContextCache.set(
+                remainingRole,
+                existing + "\n\nRAPPORT EXPLORATION:\n" + formattedReport,
+              );
             }
           }
 
           // Write to blackboard if enabled
           if (bbSessionId) {
-            const explorationData = explorationReport || { raw: result!.output.substring(0, 10000) };
+            const explorationData = explorationReport || {
+              raw: result!.output.substring(0, 10000),
+            };
             if (supabase && !bbFallback) {
-              const currentSpec = await readSection(supabase, bbSessionId, "spec") || {};
-              const res = await writeSection(supabase, bbSessionId, "spec", { ...currentSpec, exploration: explorationData }, "explorer", bbVersion);
+              const currentSpec = (await readSection(supabase, bbSessionId, "spec")) || {};
+              const res = await writeSection(
+                supabase,
+                bbSessionId,
+                "spec",
+                { ...currentSpec, exploration: explorationData },
+                "explorer",
+                bbVersion,
+              );
               if (res.success) bbVersion = res.newVersion;
             } else if (bbFallback) {
               const currentSpec = bbFallback.read(bbSessionId, "spec") || {};
-              const res = bbFallback.write(bbSessionId, "spec", { ...currentSpec, exploration: explorationData }, "explorer", bbVersion);
+              const res = bbFallback.write(
+                bbSessionId,
+                "spec",
+                { ...currentSpec, exploration: explorationData },
+                "explorer",
+                bbVersion,
+              );
               if (res.success) bbVersion = res.newVersion;
             }
           }
@@ -1042,7 +1101,14 @@ export async function orchestrate(
         if (section) {
           const sectionData = result!.structured || { raw: result!.output.substring(0, 30000) };
           if (supabase && !bbFallback) {
-            const res = await writeSection(supabase, bbSessionId, section, sectionData, agentId, bbVersion);
+            const res = await writeSection(
+              supabase,
+              bbSessionId,
+              section,
+              sectionData,
+              agentId,
+              bbVersion,
+            );
             if (res.success) bbVersion = res.newVersion;
           } else if (bbFallback) {
             const res = bbFallback.write(bbSessionId, section, sectionData, agentId, bbVersion);
@@ -1070,20 +1136,40 @@ export async function orchestrate(
                 if (options.onProgress) {
                   await options.onProgress(`Rework ${agentId} avec feedback des gates...`);
                 }
-                const reworkMessages = [...messages, {
+                const reworkMessages = [
+                  ...messages,
+                  {
+                    agentId,
+                    agentName: result!.agentName,
+                    success: false,
+                    structured: null,
+                    rawOutput: feedback,
+                    durationMs: 0,
+                  },
+                ];
+                const reworkResult = await runAgentStep(
                   agentId,
-                  agentName: result!.agentName,
-                  success: false,
-                  structured: null,
-                  rawOutput: feedback,
-                  durationMs: 0,
-                }];
-                const reworkResult = await runAgentStep(agentId, task, reworkMessages, shardedContext, agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade);
+                  task,
+                  reworkMessages,
+                  shardedContext,
+                  agentContextCache.get(agentId),
+                  options.modelOverrides?.[agentId],
+                  options.cascade,
+                );
                 if (reworkResult.success) {
-                  const newData = reworkResult.structured || { raw: reworkResult.output.substring(0, 30000) };
+                  const newData = reworkResult.structured || {
+                    raw: reworkResult.output.substring(0, 30000),
+                  };
                   // Update blackboard with reworked output
                   if (supabase && !bbFallback) {
-                    const res = await writeSection(supabase, bbSessionId, section, newData, agentId, bbVersion);
+                    const res = await writeSection(
+                      supabase,
+                      bbSessionId,
+                      section,
+                      newData,
+                      agentId,
+                      bbVersion,
+                    );
                     if (res.success) bbVersion = res.newVersion;
                   } else if (bbFallback) {
                     const res = bbFallback.write(bbSessionId, section, newData, agentId, bbVersion);
@@ -1108,13 +1194,16 @@ export async function orchestrate(
                 taskId: task.id,
                 sprintId: task.sprint || undefined,
                 taskPriority: task.priority,
-              }
+              },
             );
             gateEvaluations.push(reworkResult.finalEvaluation);
             if (options.onProgress) {
               const status = reworkResult.finalEvaluation.pass ? "PASS" : "FAIL";
-              const reworkNote = reworkResult.iterations > 0 ? ` (${reworkResult.iterations} rework)` : "";
-              await options.onProgress(`Gate ${gate}: ${status} (${reworkResult.finalEvaluation.score}/100)${reworkNote}`);
+              const reworkNote =
+                reworkResult.iterations > 0 ? ` (${reworkResult.iterations} rework)` : "";
+              await options.onProgress(
+                `Gate ${gate}: ${status} (${reworkResult.finalEvaluation.score}/100)${reworkNote}`,
+              );
             }
           }
         }
@@ -1134,9 +1223,10 @@ export async function orchestrate(
       ) {
         // Check if the NEXT agent in the pipeline is "dev"
         const currentIndex = pipeline.indexOf(agentId);
-        const nextAgent = currentIndex >= 0 && currentIndex < pipeline.length - 1
-          ? pipeline[currentIndex + 1]
-          : null;
+        const nextAgent =
+          currentIndex >= 0 && currentIndex < pipeline.length - 1
+            ? pipeline[currentIndex + 1]
+            : null;
 
         if (nextAgent === "dev") {
           if (options.onProgress) {
@@ -1166,13 +1256,30 @@ export async function orchestrate(
             };
             if (supabase && !bbFallback) {
               const existing = await readSection(supabase, bbSessionId, "verification");
-              const merged = existing ? { ...existing, ...verificationSection } : verificationSection;
-              const res = await writeSection(supabase, bbSessionId, "verification", merged, "adversarial", bbVersion);
+              const merged = existing
+                ? { ...existing, ...verificationSection }
+                : verificationSection;
+              const res = await writeSection(
+                supabase,
+                bbSessionId,
+                "verification",
+                merged,
+                "adversarial",
+                bbVersion,
+              );
               if (res.success) bbVersion = res.newVersion;
             } else if (bbFallback) {
               const existing = bbFallback.read(bbSessionId, "verification");
-              const merged = existing ? { ...existing, ...verificationSection } : verificationSection;
-              const res = bbFallback.write(bbSessionId, "verification", merged, "adversarial", bbVersion);
+              const merged = existing
+                ? { ...existing, ...verificationSection }
+                : verificationSection;
+              const res = bbFallback.write(
+                bbSessionId,
+                "verification",
+                merged,
+                "adversarial",
+                bbVersion,
+              );
               if (res.success) bbVersion = res.newVersion;
             }
           }
@@ -1181,7 +1288,7 @@ export async function orchestrate(
           if (adversarialResult.verdict === "SKIPPED") {
             if (options.onProgress) {
               await options.onProgress(
-                "P2: Challenge adversarial — SKIPPED (echec agent, analyse non disponible)"
+                "P2: Challenge adversarial — SKIPPED (echec agent, analyse non disponible)",
               );
             }
           } else if (options.onProgress) {
@@ -1190,8 +1297,8 @@ export async function orchestrate(
               : "";
             await options.onProgress(
               `P2: ${adversarialResult.verdict} — ${adversarialResult.stats.bloquants} bloquant(s), ` +
-              `${adversarialResult.stats.majeurs} majeur(s), ${adversarialResult.stats.mineurs} mineur(s). ` +
-              `(${Math.round(adversarialResult.duration_ms / 1000)}s).${impactLabel}`
+                `${adversarialResult.stats.majeurs} majeur(s), ${adversarialResult.stats.mineurs} mineur(s). ` +
+                `(${Math.round(adversarialResult.duration_ms / 1000)}s).${impactLabel}`,
             );
           }
 
@@ -1215,14 +1322,22 @@ export async function orchestrate(
 
             // F-DA-1: Callback for resume/abort decision
             if (options.onAdversarialPause) {
-              const shouldContinue = await options.onAdversarialPause(adversarialResult, impactResult);
+              const shouldContinue = await options.onAdversarialPause(
+                adversarialResult,
+                impactResult,
+              );
               if (!shouldContinue) {
                 // Abort pipeline
                 if (options.onProgress) {
                   await options.onProgress("Pipeline abandonne suite au challenge adversarial.");
                 }
                 if (pipelineSessionId) {
-                  await updatePipelineStatus(supabase, pipelineSessionId, "failed", "Adversarial challenge: pipeline aborted by user");
+                  await updatePipelineStatus(
+                    supabase,
+                    pipelineSessionId,
+                    "failed",
+                    "Adversarial challenge: pipeline aborted by user",
+                  );
                 }
                 break; // Exit the agent loop
               }
@@ -1232,7 +1347,12 @@ export async function orchestrate(
             } else {
               // No callback — stop pipeline (default behavior, user must use callback)
               if (pipelineSessionId) {
-                await updatePipelineStatus(supabase, pipelineSessionId, "failed", "Adversarial challenge: PAUSE without resume callback");
+                await updatePipelineStatus(
+                  supabase,
+                  pipelineSessionId,
+                  "failed",
+                  "Adversarial challenge: PAUSE without resume callback",
+                );
               }
               break;
             }
@@ -1252,9 +1372,8 @@ export async function orchestrate(
       ) {
         // Check if next agent is qa (conformance before qa)
         const currentIdx = pipeline.indexOf(agentId);
-        const nextAg = currentIdx >= 0 && currentIdx < pipeline.length - 1
-          ? pipeline[currentIdx + 1]
-          : null;
+        const nextAg =
+          currentIdx >= 0 && currentIdx < pipeline.length - 1 ? pipeline[currentIdx + 1] : null;
 
         if (nextAg === "qa" || currentIdx === pipeline.length - 1) {
           if (options.onProgress) {
@@ -1265,7 +1384,7 @@ export async function orchestrate(
           const conformanceReport = await checkConformance(
             protoSpec,
             devOutput,
-            pipelineTypeForFlags
+            pipelineTypeForFlags,
           );
 
           if (conformanceReport) {
@@ -1273,20 +1392,37 @@ export async function orchestrate(
             if (options.useBlackboard && bbSessionId) {
               if (supabase && !bbFallback) {
                 const existing = await readSection(supabase, bbSessionId, "verification");
-                const merged = existing ? { ...existing, conformance: conformanceReport } : { conformance: conformanceReport };
-                const res = await writeSection(supabase, bbSessionId, "verification", merged, "conformance", bbVersion);
+                const merged = existing
+                  ? { ...existing, conformance: conformanceReport }
+                  : { conformance: conformanceReport };
+                const res = await writeSection(
+                  supabase,
+                  bbSessionId,
+                  "verification",
+                  merged,
+                  "conformance",
+                  bbVersion,
+                );
                 if (res.success) bbVersion = res.newVersion;
               } else if (bbFallback) {
                 const existing = bbFallback.read(bbSessionId, "verification");
-                const merged = existing ? { ...existing, conformance: conformanceReport } : { conformance: conformanceReport };
-                const res = bbFallback.write(bbSessionId, "verification", merged, "conformance", bbVersion);
+                const merged = existing
+                  ? { ...existing, conformance: conformanceReport }
+                  : { conformance: conformanceReport };
+                const res = bbFallback.write(
+                  bbSessionId,
+                  "verification",
+                  merged,
+                  "conformance",
+                  bbVersion,
+                );
                 if (res.success) bbVersion = res.newVersion;
               }
             }
 
             if (options.onProgress) {
               await options.onProgress(
-                `P3: Conformance — ${conformanceReport.coverage_score}% coverage, verdict: ${conformanceReport.overall_verdict.toUpperCase()}`
+                `P3: Conformance — ${conformanceReport.coverage_score}% coverage, verdict: ${conformanceReport.overall_verdict.toUpperCase()}`,
               );
             }
           }
@@ -1295,21 +1431,28 @@ export async function orchestrate(
 
       // Log cost with span attribution (S23-05, S28, LLM-Ops R4/R8)
       if (supabase && result!.tokensInput) {
-        const spanId = pipelineSessionId ? buildSpanId(pipelineSessionId, agentId, stepIndex - 1) : "";
-        logCostWithSpan(supabase, {
-          taskId: task.id,
-          sprintId: task.sprint || undefined,
-          agentRole: agentId,
-          agentName: result!.agentName,
-          tokensInput: result!.tokensInput || 0,
-          tokensOutput: result!.tokensOutput || 0,
-          costUsd: result!.costUsd || 0,
-          durationMs: result!.durationMs,
-          retryAttempt: retryCount,
-          context: "orchestration",
-          model: agent?.model,
-          metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
-        }, spanId, pipelineSessionId || "").catch((err) => console.error("logCost orchestration error:", err));
+        const spanId = pipelineSessionId
+          ? buildSpanId(pipelineSessionId, agentId, stepIndex - 1)
+          : "";
+        logCostWithSpan(
+          supabase,
+          {
+            taskId: task.id,
+            sprintId: task.sprint || undefined,
+            agentRole: agentId,
+            agentName: result!.agentName,
+            tokensInput: result!.tokensInput || 0,
+            tokensOutput: result!.tokensOutput || 0,
+            costUsd: result!.costUsd || 0,
+            durationMs: result!.durationMs,
+            retryAttempt: retryCount,
+            context: "orchestration",
+            model: agent?.model,
+            metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
+          },
+          spanId,
+          pipelineSessionId || "",
+        ).catch((err) => log.error(`logCost orchestration error: ${err}`));
       }
 
       // LLM-Ops: record prompt version (R3, R11 — fire-and-forget)
@@ -1319,17 +1462,16 @@ export async function orchestrate(
         const templateH = sha256(yamlContent);
         const feedbackRules = getFeedbackRulesForAgent(agentId as any);
         const feedbackH = sha256(JSON.stringify(feedbackRules));
-        recordPromptVersion(supabase, agentId, templateH, feedbackH)
-          .catch((err) => console.error("recordPromptVersion error:", err));
+        recordPromptVersion(supabase, agentId, templateH, feedbackH).catch((err) =>
+          log.error(`recordPromptVersion error: ${err}`),
+        );
       }
 
       if (options.onProgress) {
         const status = result!.success ? "OK" : "ECHEC";
         const duration = Math.round(result!.durationMs / 1000);
         const retryInfo = retryCount > 0 ? ` (${retryCount} retries)` : "";
-        await options.onProgress(
-          `${agentLabel} : ${status} (${duration}s)${retryInfo}`
-        );
+        await options.onProgress(`${agentLabel} : ${status} (${duration}s)${retryInfo}`);
       }
 
       // Log checkpoint (S22-05: include retry metrics)
@@ -1337,7 +1479,7 @@ export async function orchestrate(
         await tracker.logCheckpoint(
           result!.success ? "pass" : "fail",
           `Agent ${agentId}: ${result!.success ? "succes" : "echec"} en ${result!.durationMs}ms` +
-            (retryCount > 0 ? ` (${retryCount} retries)` : "")
+            (retryCount > 0 ? ` (${retryCount} retries)` : ""),
         );
       }
 
@@ -1350,7 +1492,7 @@ export async function orchestrate(
         if (options.onProgress) {
           await options.onProgress(
             `Pipeline arrete: ${agentLabel} a echoue.` +
-            (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : "")
+              (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : ""),
           );
         }
         break;
@@ -1360,16 +1502,15 @@ export async function orchestrate(
     // P1: Overlap execution — run last 2 agents in parallel (R1, R1b, R1d)
     if (effectiveOverlap && pipeline.length >= 2) {
       // Only run overlap if sequential part didn't fail with stopOnFailure
-      const lastFailed = steps.length > 0 && !steps[steps.length - 1].success && options.stopOnFailure;
+      const lastFailed =
+        steps.length > 0 && !steps[steps.length - 1].success && options.stopOnFailure;
       if (!lastFailed) {
         const overlapAgents = pipeline.slice(overlapThreshold);
         const previousMessagesSnapshot = [...messages]; // R1d: frozen snapshot
 
         const overlapPromises = overlapAgents.map(async (agentId) => {
           const agent = getAgent(agentId);
-          const agentLabel = agent
-            ? `${agent.icon} ${agent.name} (${agent.title})`
-            : agentId;
+          const agentLabel = agent ? `${agent.icon} ${agent.name} (${agent.title})` : agentId;
 
           // P2: Refresh context for overlap agents too
           if (options.refreshContext && supabase) {
@@ -1400,8 +1541,10 @@ export async function orchestrate(
 
           if (pipelineSessionId) {
             emitAgentEvent(supabase, pipelineSessionId, agentId, "spawned", {
-              model: agent?.model, effort: agent?.effort, overlap: true,
-            }).catch((err) => console.error("emitAgentEvent spawned error:", err));
+              model: agent?.model,
+              effort: agent?.effort,
+              overlap: true,
+            }).catch((err) => log.error(`emitAgentEvent spawned error: ${err}`));
           }
 
           // Retry loop for overlap agent
@@ -1410,13 +1553,18 @@ export async function orchestrate(
 
           for (let attempt = 0; attempt <= maxRetries; attempt++) {
             result = await runAgentStep(
-              agentId, task, previousMessagesSnapshot, shardedContext,
-              agentContextCache.get(agentId), options.modelOverrides?.[agentId], options.cascade
+              agentId,
+              task,
+              previousMessagesSnapshot,
+              shardedContext,
+              agentContextCache.get(agentId),
+              options.modelOverrides?.[agentId],
+              options.cascade,
             );
             if (result.success) break;
             if (attempt < maxRetries) {
               retryCount = attempt + 1;
-              const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+              const backoffMs = Math.min(1000 * 2 ** attempt, 30000);
               await new Promise((resolve) => setTimeout(resolve, backoffMs));
             }
           }
@@ -1430,7 +1578,7 @@ export async function orchestrate(
               tokensInput: result.tokensInput || 0,
               tokensOutput: result.tokensOutput || 0,
               durationMs: result.durationMs || 0,
-            }).catch((err) => console.error("captureAgentFailure error:", err));
+            }).catch((err) => log.error(`captureAgentFailure error: ${err}`));
           }
 
           result!.retryCount = retryCount;
@@ -1445,27 +1593,36 @@ export async function orchestrate(
               cost_usd: result!.costUsd,
               overlap: true,
               ...(result!.error ? { error: result!.error } : {}),
-            }).catch((err) => console.error("emitAgentEvent error:", err));
+            }).catch((err) => log.error(`emitAgentEvent error: ${err}`));
           }
 
           // Log cost with span attribution (LLM-Ops R4/R8)
           if (supabase && result!.tokensInput) {
             const overlapStepIdx = pipeline.indexOf(agentId);
-            const spanId = pipelineSessionId ? buildSpanId(pipelineSessionId, agentId, overlapStepIdx) : "";
-            logCostWithSpan(supabase, {
-              taskId: task.id,
-              sprintId: task.sprint || undefined,
-              agentRole: agentId,
-              agentName: result!.agentName,
-              tokensInput: result!.tokensInput || 0,
-              tokensOutput: result!.tokensOutput || 0,
-              costUsd: result!.costUsd || 0,
-              durationMs: result!.durationMs,
-              retryAttempt: retryCount,
-              context: "orchestration",
-              model: agent?.model,
-              metadata: pipelineSessionId ? { pipeline_session_id: pipelineSessionId } : undefined,
-            }, spanId, pipelineSessionId || "").catch((err) => console.error("logCost orchestration error:", err));
+            const spanId = pipelineSessionId
+              ? buildSpanId(pipelineSessionId, agentId, overlapStepIdx)
+              : "";
+            logCostWithSpan(
+              supabase,
+              {
+                taskId: task.id,
+                sprintId: task.sprint || undefined,
+                agentRole: agentId,
+                agentName: result!.agentName,
+                tokensInput: result!.tokensInput || 0,
+                tokensOutput: result!.tokensOutput || 0,
+                costUsd: result!.costUsd || 0,
+                durationMs: result!.durationMs,
+                retryAttempt: retryCount,
+                context: "orchestration",
+                model: agent?.model,
+                metadata: pipelineSessionId
+                  ? { pipeline_session_id: pipelineSessionId }
+                  : undefined,
+              },
+              spanId,
+              pipelineSessionId || "",
+            ).catch((err) => log.error(`logCost orchestration error: ${err}`));
           }
 
           // Checkpoint
@@ -1526,20 +1683,20 @@ export async function orchestrate(
             }
           } else {
             // Unexpected rejection — create a synthetic failure step
-            console.error("orchestrate overlap: unexpected rejection", outcome.reason);
+            log.error(`orchestrate overlap: unexpected rejection ${outcome.reason}`);
           }
         }
 
         // R1b: Check if any overlap agent failed with stopOnFailure
         if (options.stopOnFailure) {
-          const overlapFailed = steps.slice(-overlapAgents.length).some(s => !s.success);
+          const overlapFailed = steps.slice(-overlapAgents.length).some((s) => !s.success);
           if (overlapFailed && pipelineSessionId) {
-            const failedStep = steps.find(s => !s.success);
+            const failedStep = steps.find((s) => !s.success);
             await updatePipelineStatus(supabase, pipelineSessionId, "failed", failedStep?.error);
             if (options.onProgress) {
               await options.onProgress(
                 `Pipeline arrete: agent en overlap a echoue.` +
-                (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : "")
+                  (pipelineSessionId ? ` Reprendre avec --resume ${pipelineSessionId}` : ""),
               );
             }
           }
@@ -1585,7 +1742,7 @@ export async function orchestrate(
 
       if (options.onProgress && driftReport) {
         await options.onProgress(
-          `Adversarial verification: ${driftReport.coverage_score}% coverage — ${driftReport.overall_verdict.toUpperCase()}`
+          `Adversarial verification: ${driftReport.coverage_score}% coverage — ${driftReport.overall_verdict.toUpperCase()}`,
         );
       }
     }
@@ -1604,14 +1761,18 @@ export async function orchestrate(
       traceabilityReport = generateTraceabilityReport(sections);
       if (options.onProgress) {
         await options.onProgress(
-          `Traceability: ${traceabilityReport.coverage_percentage}% FR coverage`
+          `Traceability: ${traceabilityReport.coverage_percentage}% FR coverage`,
         );
       }
     }
 
     // Mark blackboard as completed
     if (supabase && !bbFallback) {
-      await updateBlackboardStatus(supabase, bbSessionId, steps.every(s => s.success) ? "completed" : "failed");
+      await updateBlackboardStatus(
+        supabase,
+        bbSessionId,
+        steps.every((s) => s.success) ? "completed" : "failed",
+      );
     }
   }
 
@@ -1651,10 +1812,7 @@ export async function orchestrate(
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function buildOrchestrationSummary(
-  steps: AgentStepResult[],
-  totalDurationMs: number
-): string {
+function buildOrchestrationSummary(steps: AgentStepResult[], totalDurationMs: number): string {
   const lines: string[] = [];
   lines.push("ORCHESTRATION TERMINEE");
   lines.push(`Duree totale: ${Math.round(totalDurationMs / 1000)}s`);
@@ -1672,7 +1830,10 @@ function buildOrchestrationSummary(
   }
 
   const totalCost = steps.reduce((sum, s) => sum + (s.costUsd || 0), 0);
-  const totalTokens = steps.reduce((sum, s) => sum + (s.tokensInput || 0) + (s.tokensOutput || 0), 0);
+  const totalTokens = steps.reduce(
+    (sum, s) => sum + (s.tokensInput || 0) + (s.tokensOutput || 0),
+    0,
+  );
   if (totalTokens > 0) {
     lines.push(`Tokens: ~${totalTokens} (~$${totalCost.toFixed(4)})`);
   }
@@ -1703,7 +1864,7 @@ async function logOrchestrationResult(
   taskId: string,
   steps: AgentStepResult[],
   totalDurationMs: number,
-  pipelineSelection?: string
+  pipelineSelection?: string,
 ): Promise<void> {
   const totalRetries = steps.reduce((sum, s) => sum + (s.retryCount || 0), 0);
   const { error } = await supabase.from("workflow_logs").insert({
@@ -1731,7 +1892,7 @@ async function logOrchestrationResult(
       allPassed: steps.every((s) => s.success),
     },
   });
-  if (error) console.error("logOrchestrationResult error:", error);
+  if (error) log.error(`logOrchestrationResult error: ${error.message}`);
 }
 
 // ── Format for Telegram ──────────────────────────────────────
@@ -1762,7 +1923,9 @@ export function formatOrchestrationResult(result: OrchestratedResult): string {
     const structuredTag = step.structured ? " [JSON]" : "";
     const retryTag = step.retryCount ? ` (${step.retryCount} retries)` : "";
     const costTag = step.costUsd ? ` ~$${step.costUsd.toFixed(4)}` : "";
-    lines.push(`${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}${costTag}`);
+    lines.push(
+      `${icon} ${step.agentName} : ${status} (${duration}s)${structuredTag}${retryTag}${costTag}`,
+    );
   }
 
   // S24: Blackboard results

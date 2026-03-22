@@ -5,23 +5,15 @@
  * cost tracking multi-model (T6), prompt split (T7).
  */
 
-import { describe, it, expect } from "bun:test";
-import { getAgents, getAgent } from "../../src/bmad-agents";
-import {
-  getJsonSchemaForRole,
-  parseAgentOutput,
-  validateAgentOutput,
-} from "../../src/agent-schemas";
-import {
-  estimateCost,
-  parseTokenUsage,
-  MODEL_PRICING,
-} from "../../src/cost-tracking";
+import { describe, expect, it } from "bun:test";
+import { getJsonSchemaForRole, parseAgentOutput } from "../../src/agent-schemas";
+import { getAgent, getAgents } from "../../src/bmad-agents";
 import {
   buildAgentSystemPromptPart,
   buildAgentTaskPromptPart,
   buildFullAgentPrompt,
 } from "../../src/bmad-prompts";
+import { estimateCost, MODEL_PRICING, parseTokenUsage } from "../../src/cost-tracking";
 
 // ── T3: BmadAgent CLI Flags ──────────────────────────────────
 
@@ -181,19 +173,19 @@ describe("MODEL_PRICING (T6)", () => {
 
   it("opus is more expensive than sonnet", () => {
     expect(MODEL_PRICING["claude-opus-4-6"].input).toBeGreaterThan(
-      MODEL_PRICING["claude-sonnet-4-6"].input
+      MODEL_PRICING["claude-sonnet-4-6"].input,
     );
     expect(MODEL_PRICING["claude-opus-4-6"].output).toBeGreaterThan(
-      MODEL_PRICING["claude-sonnet-4-6"].output
+      MODEL_PRICING["claude-sonnet-4-6"].output,
     );
   });
 
   it("haiku is cheaper than sonnet", () => {
     expect(MODEL_PRICING["claude-haiku-4-5"].input).toBeLessThan(
-      MODEL_PRICING["claude-sonnet-4-6"].input
+      MODEL_PRICING["claude-sonnet-4-6"].input,
     );
     expect(MODEL_PRICING["claude-haiku-4-5"].output).toBeLessThan(
-      MODEL_PRICING["claude-sonnet-4-6"].output
+      MODEL_PRICING["claude-sonnet-4-6"].output,
     );
   });
 });

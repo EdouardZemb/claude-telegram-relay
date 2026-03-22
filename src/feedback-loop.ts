@@ -15,8 +15,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 import type { AgentRole } from "./orchestrator.ts";
 
+const log = createLogger("feedback-loop");
 // ── Types ────────────────────────────────────────────────────
 
 export interface FeedbackRule {
@@ -54,9 +56,7 @@ export function getFeedbackRulesForAgent(agentId: AgentRole): FeedbackRule[] {
  * Load feedback rules from the database.
  * Called on startup and after retros.
  */
-export async function loadFeedbackRules(
-  supabase: SupabaseClient
-): Promise<FeedbackRule[]> {
+export async function loadFeedbackRules(supabase: SupabaseClient): Promise<FeedbackRule[]> {
   const { data, error } = await supabase
     .from("feedback_rules")
     .select("*")
@@ -64,7 +64,7 @@ export async function loadFeedbackRules(
     .order("occurrences", { ascending: false });
 
   if (error) {
-    console.error("loadFeedbackRules error:", error);
+    log.error("loadFeedbackRules error", { error: String(error) });
     return feedbackRules; // return cached
   }
 
@@ -93,42 +93,50 @@ const PATTERN_AGENT_MAP: Array<{
   {
     keywords: ["test", "tests", "coverage", "testing"],
     agentId: "dev",
-    defaultInstruction: "Porte une attention particuliere a la couverture de tests. Des patterns de tests manquants ont ete detectes dans les retros precedentes.",
+    defaultInstruction:
+      "Porte une attention particuliere a la couverture de tests. Des patterns de tests manquants ont ete detectes dans les retros precedentes.",
   },
   {
     keywords: ["test", "tests", "coverage", "testing", "regression"],
     agentId: "qa",
-    defaultInstruction: "Verifie systematiquement la couverture de tests. Historiquement, des lacunes ont ete detectees.",
+    defaultInstruction:
+      "Verifie systematiquement la couverture de tests. Historiquement, des lacunes ont ete detectees.",
   },
   {
     keywords: ["securite", "security", "injection", "xss", "rls"],
     agentId: "dev",
-    defaultInstruction: "Sois particulierement vigilant sur la securite. Des vulnerabilites ont ete detectees dans les retros precedentes.",
+    defaultInstruction:
+      "Sois particulierement vigilant sur la securite. Des vulnerabilites ont ete detectees dans les retros precedentes.",
   },
   {
     keywords: ["architecture", "design", "pattern", "structure"],
     agentId: "architect",
-    defaultInstruction: "Revise les decisions d'architecture avec attention. Des problemes de design ont ete identifies dans les retros precedentes.",
+    defaultInstruction:
+      "Revise les decisions d'architecture avec attention. Des problemes de design ont ete identifies dans les retros precedentes.",
   },
   {
     keywords: ["scope", "perimetre", "creep", "complexite"],
     agentId: "pm",
-    defaultInstruction: "Verifie le perimetre des taches. Des derives de scope ont ete observees dans les sprints precedents.",
+    defaultInstruction:
+      "Verifie le perimetre des taches. Des derives de scope ont ete observees dans les sprints precedents.",
   },
   {
     keywords: ["performance", "lenteur", "timeout", "memoire", "memory"],
     agentId: "dev",
-    defaultInstruction: "Fais attention aux performances. Des problemes de performance ont ete detectes dans les retros precedentes.",
+    defaultInstruction:
+      "Fais attention aux performances. Des problemes de performance ont ete detectes dans les retros precedentes.",
   },
   {
     keywords: ["documentation", "docs", "readme", "commentaire"],
     agentId: "dev",
-    defaultInstruction: "N'oublie pas la documentation. Un manque de documentation a ete identifie dans les retros precedentes.",
+    defaultInstruction:
+      "N'oublie pas la documentation. Un manque de documentation a ete identifie dans les retros precedentes.",
   },
   {
     keywords: ["bloquer", "blocage", "dependance", "bloque"],
     agentId: "sm",
-    defaultInstruction: "Surveille les blocages proactivement. Des taches bloquees ont ete un probleme recurrent.",
+    defaultInstruction:
+      "Surveille les blocages proactivement. Des taches bloquees ont ete un probleme recurrent.",
   },
 ];
 
@@ -136,21 +144,16 @@ const PATTERN_AGENT_MAP: Array<{
  * Extract feedback patterns from retro data.
  * Returns new/updated rules based on recurring patterns.
  */
-export function extractFeedbackFromRetro(
-  retro: {
-    sprint_id: string;
-    what_didnt: string[];
-    patterns_detected: string[];
-    actions_proposed?: Array<{ action: string; priority: string }>;
-  }
-): Array<{ agentId: AgentRole; pattern: string; instruction: string }> {
+export function extractFeedbackFromRetro(retro: {
+  sprint_id: string;
+  what_didnt: string[];
+  patterns_detected: string[];
+  actions_proposed?: Array<{ action: string; priority: string }>;
+}): Array<{ agentId: AgentRole; pattern: string; instruction: string }> {
   const results: Array<{ agentId: AgentRole; pattern: string; instruction: string }> = [];
 
   // Analyze what didn't work + patterns detected
-  const allPatterns = [
-    ...(retro.what_didnt || []),
-    ...(retro.patterns_detected || []),
-  ];
+  const allPatterns = [...(retro.what_didnt || []), ...(retro.patterns_detected || [])];
 
   for (const patternText of allPatterns) {
     const lower = patternText.toLowerCase();
@@ -197,7 +200,7 @@ export async function processRetroFeedback(
     what_didnt: string[];
     patterns_detected: string[];
     actions_proposed?: Array<{ action: string; priority: string }>;
-  }
+  },
 ): Promise<{ newRules: number; updatedRules: number }> {
   const extracted = extractFeedbackFromRetro(retro);
   let newRules = 0;
@@ -208,7 +211,7 @@ export async function processRetroFeedback(
     const existing = feedbackRules.find(
       (r) =>
         r.agentId === item.agentId &&
-        r.pattern.toLowerCase().includes(item.pattern.toLowerCase().substring(0, 20))
+        r.pattern.toLowerCase().includes(item.pattern.toLowerCase().substring(0, 20)),
     );
 
     if (existing) {
@@ -316,13 +319,18 @@ export function buildFeedbackContext(agentId: AgentRole): string {
  */
 export async function measureRuleEffectiveness(
   supabase: SupabaseClient,
-  agentRole: AgentRole
+  agentRole: AgentRole,
 ): Promise<Array<{ ruleId: string; pattern: string; trustDelta: number; effective: boolean }>> {
   const rules = getFeedbackRulesForAgent(agentRole);
   if (rules.length === 0) return [];
 
   // Get gate evaluations for this agent since each rule was created
-  const results: Array<{ ruleId: string; pattern: string; trustDelta: number; effective: boolean }> = [];
+  const results: Array<{
+    ruleId: string;
+    pattern: string;
+    trustDelta: number;
+    effective: boolean;
+  }> = [];
 
   for (const rule of rules) {
     const { data: evals } = await supabase
@@ -360,7 +368,7 @@ export async function measureRuleEffectiveness(
  * S42: Returns summary of actions taken.
  */
 export async function promoteOrArchiveRules(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
 ): Promise<{ promoted: string[]; archived: string[] }> {
   const promoted: string[] = [];
   const archived: string[] = [];
@@ -373,10 +381,7 @@ export async function promoteOrArchiveRules(
     for (const result of effectiveness) {
       if (result.effective && result.trustDelta >= 5) {
         // Promote: mark as promoted in DB
-        await supabase
-          .from("feedback_rules")
-          .update({ promoted: true })
-          .eq("id", result.ruleId);
+        await supabase.from("feedback_rules").update({ promoted: true }).eq("id", result.ruleId);
 
         const rule = feedbackRules.find((r) => r.id === result.ruleId);
         if (rule) rule.promoted = true;

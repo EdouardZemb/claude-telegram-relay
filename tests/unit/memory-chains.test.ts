@@ -5,17 +5,17 @@
  * formatClusters(), buildMemoryChains(), and findSimilarPastTasks().
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
-import {
-  classifyLinkContent,
-  getMemoryChain,
-  clusterMemories,
-  formatClusters,
-  buildMemoryChains,
-  findSimilarPastTasks,
-} from "../../src/memory";
+import { beforeEach, describe, expect, it } from "bun:test";
 import type { MemoryCluster } from "../../src/memory";
+import {
+  buildMemoryChains,
+  classifyLinkContent,
+  clusterMemories,
+  findSimilarPastTasks,
+  formatClusters,
+  getMemoryChain,
+} from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── classifyLinkContent (S41-02) ────────────────────────────
 
@@ -23,7 +23,7 @@ describe("classifyLinkContent", () => {
   it("returns 'contradicts' when one has negation and high overlap", () => {
     const result = classifyLinkContent(
       "Le pipeline utilise Opus pour l'architect",
-      "Le pipeline ne utilise pas Opus pour l'architect"
+      "Le pipeline ne utilise pas Opus pour l'architect",
     );
     expect(result).toBe("contradicts");
   });
@@ -31,7 +31,7 @@ describe("classifyLinkContent", () => {
   it("returns 'contradicts' for replacement patterns", () => {
     const result = classifyLinkContent(
       "Le deploiement utilise SSH",
-      "Le deploiement remplace SSH par GitHub Actions"
+      "Le deploiement remplace SSH par GitHub Actions",
     );
     expect(result).toBe("contradicts");
   });
@@ -39,7 +39,7 @@ describe("classifyLinkContent", () => {
   it("returns 'extends' when one is significantly longer with shared entities", () => {
     const result = classifyLinkContent(
       "Edouard est developpeur",
-      "Edouard est developpeur logiciel specialise en TypeScript, travaillant sur des projets d'IA"
+      "Edouard est developpeur logiciel specialise en TypeScript, travaillant sur des projets d'IA",
     );
     expect(result).toBe("extends");
   });
@@ -47,16 +47,13 @@ describe("classifyLinkContent", () => {
   it("returns 'supports' for similar length with shared entities", () => {
     const result = classifyLinkContent(
       "Le sprint actuel progresse bien avec 8 taches",
-      "Le sprint montre une bonne velocite avec 8 taches completees"
+      "Le sprint montre une bonne velocite avec 8 taches completees",
     );
     expect(result).toBe("supports");
   });
 
   it("returns 'related' for low entity overlap", () => {
-    const result = classifyLinkContent(
-      "Edouard est developpeur",
-      "Le temps est ensoleille"
-    );
+    const result = classifyLinkContent("Edouard est developpeur", "Le temps est ensoleille");
     expect(result).toBe("related");
   });
 
@@ -73,7 +70,7 @@ describe("classifyLinkContent", () => {
   it("detects English negation patterns", () => {
     const result = classifyLinkContent(
       "The pipeline uses parallel execution",
-      "The pipeline does not use parallel execution"
+      "The pipeline does not use parallel execution",
     );
     expect(result).toBe("contradicts");
   });
@@ -81,7 +78,7 @@ describe("classifyLinkContent", () => {
   it("detects 'instead' as contradiction", () => {
     const result = classifyLinkContent(
       "Using Supabase for data storage",
-      "Using PostgreSQL instead of Supabase for data storage"
+      "Using PostgreSQL instead of Supabase for data storage",
     );
     expect(result).toBe("contradicts");
   });
@@ -98,15 +95,27 @@ describe("getMemoryChain", () => {
 
   it("returns root node with links for depth 1", async () => {
     // Mock root fetch
-    supabase._store["memory"] = [
-      { id: "root", content: "Root fact", type: "fact" },
-    ];
+    supabase._store.memory = [{ id: "root", content: "Root fact", type: "fact" }];
 
     supabase._registerRpc("get_linked_memories", (params: any) => {
       if (params.p_memory_ids.includes("root")) {
         return [
-          { origin_id: "root", linked_id: "child1", linked_content: "Child 1", linked_type: "fact", similarity: 0.85, link_type: "extends" },
-          { origin_id: "root", linked_id: "child2", linked_content: "Child 2", linked_type: "goal", similarity: 0.72, link_type: "related" },
+          {
+            origin_id: "root",
+            linked_id: "child1",
+            linked_content: "Child 1",
+            linked_type: "fact",
+            similarity: 0.85,
+            link_type: "extends",
+          },
+          {
+            origin_id: "root",
+            linked_id: "child2",
+            linked_content: "Child 2",
+            linked_type: "goal",
+            similarity: 0.72,
+            link_type: "related",
+          },
         ];
       }
       return [];
@@ -132,16 +141,14 @@ describe("getMemoryChain", () => {
   });
 
   it("returns empty when root node not found", async () => {
-    supabase._store["memory"] = [];
+    supabase._store.memory = [];
 
     const result = await getMemoryChain(supabase, "nonexistent");
     expect(result).toEqual([]);
   });
 
   it("handles RPC error gracefully", async () => {
-    supabase._store["memory"] = [
-      { id: "root", content: "Root", type: "fact" },
-    ];
+    supabase._store.memory = [{ id: "root", content: "Root", type: "fact" }];
     supabase._registerRpc("get_linked_memories", () => {
       throw new Error("connection lost");
     });
@@ -152,9 +159,7 @@ describe("getMemoryChain", () => {
   });
 
   it("does not exceed maxDepth", async () => {
-    supabase._store["memory"] = [
-      { id: "root", content: "Root fact", type: "fact" },
-    ];
+    supabase._store.memory = [{ id: "root", content: "Root fact", type: "fact" }];
 
     let callCount = 0;
     supabase._registerRpc("get_linked_memories", (params: any) => {
@@ -166,7 +171,7 @@ describe("getMemoryChain", () => {
           linked_id: `child-${callCount}`,
           linked_content: `Child ${callCount}`,
           linked_type: "fact",
-          similarity: 0.80,
+          similarity: 0.8,
           link_type: "extends",
         },
       ];
@@ -180,9 +185,7 @@ describe("getMemoryChain", () => {
   });
 
   it("applies classifyLinkContent enrichment", async () => {
-    supabase._store["memory"] = [
-      { id: "root", content: "Le pipeline utilise SSH", type: "fact" },
-    ];
+    supabase._store.memory = [{ id: "root", content: "Le pipeline utilise SSH", type: "fact" }];
 
     supabase._registerRpc("get_linked_memories", () => [
       {
@@ -190,7 +193,7 @@ describe("getMemoryChain", () => {
         linked_id: "child1",
         linked_content: "Le pipeline ne utilise pas SSH mais GitHub Actions",
         linked_type: "fact",
-        similarity: 0.80,
+        similarity: 0.8,
         link_type: "related",
       },
     ]);
@@ -231,7 +234,14 @@ describe("clusterMemories", () => {
     ]);
 
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "f1", linked_id: "f2", linked_content: "Fact B", linked_type: "fact", similarity: 0.80, link_type: "extends" },
+      {
+        origin_id: "f1",
+        linked_id: "f2",
+        linked_content: "Fact B",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "extends",
+      },
     ]);
 
     const clusters = await clusterMemories(supabase);
@@ -243,9 +253,7 @@ describe("clusterMemories", () => {
   });
 
   it("excludes isolated nodes (clusters of size 1)", async () => {
-    supabase._registerRpc("get_facts", () => [
-      { id: "f1", content: "Isolated fact" },
-    ]);
+    supabase._registerRpc("get_facts", () => [{ id: "f1", content: "Isolated fact" }]);
 
     supabase._registerRpc("get_linked_memories", () => []);
 
@@ -264,10 +272,31 @@ describe("clusterMemories", () => {
 
     supabase._registerRpc("get_linked_memories", () => [
       // Cluster 1: f1-f2 (size 2)
-      { origin_id: "f1", linked_id: "f2", linked_content: "B", linked_type: "fact", similarity: 0.80, link_type: "extends" },
+      {
+        origin_id: "f1",
+        linked_id: "f2",
+        linked_content: "B",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "extends",
+      },
       // Cluster 2: f3-f4-f5 (size 3)
-      { origin_id: "f3", linked_id: "f4", linked_content: "D", linked_type: "fact", similarity: 0.75, link_type: "related" },
-      { origin_id: "f4", linked_id: "f5", linked_content: "E", linked_type: "fact", similarity: 0.72, link_type: "related" },
+      {
+        origin_id: "f3",
+        linked_id: "f4",
+        linked_content: "D",
+        linked_type: "fact",
+        similarity: 0.75,
+        link_type: "related",
+      },
+      {
+        origin_id: "f4",
+        linked_id: "f5",
+        linked_content: "E",
+        linked_type: "fact",
+        similarity: 0.72,
+        link_type: "related",
+      },
     ]);
 
     const clusters = await clusterMemories(supabase);
@@ -279,7 +308,7 @@ describe("clusterMemories", () => {
 
   it("limits to maxClusters", async () => {
     supabase._registerRpc("get_facts", () =>
-      Array.from({ length: 20 }, (_, i) => ({ id: `f${i}`, content: `Fact ${i}` }))
+      Array.from({ length: 20 }, (_, i) => ({ id: `f${i}`, content: `Fact ${i}` })),
     );
 
     // Create 15 separate clusters of size 2
@@ -289,9 +318,9 @@ describe("clusterMemories", () => {
         linked_id: `linked-${i}`,
         linked_content: `Linked ${i}`,
         linked_type: "fact",
-        similarity: 0.80,
+        similarity: 0.8,
         link_type: "related",
-      }))
+      })),
     );
 
     const clusters = await clusterMemories(supabase, 50, 5);
@@ -344,9 +373,7 @@ describe("formatClusters", () => {
       type: "fact",
     }));
 
-    const clusters: MemoryCluster[] = [
-      { id: 0, label: "Big cluster", size: 8, memories },
-    ];
+    const clusters: MemoryCluster[] = [{ id: 0, label: "Big cluster", size: 8, memories }];
 
     const result = formatClusters(clusters);
     expect(result).toContain("... et 3 autres");
@@ -389,9 +416,7 @@ describe("buildMemoryChains", () => {
   });
 
   it("returns flat facts for sm role", async () => {
-    supabase._registerRpc("get_facts", () => [
-      { id: "f1", content: "Fact A" },
-    ]);
+    supabase._registerRpc("get_facts", () => [{ id: "f1", content: "Fact A" }]);
     supabase._registerRpc("get_active_goals", () => []);
     supabase._registerRpc("get_linked_memories", () => []);
 
@@ -425,9 +450,7 @@ describe("buildMemoryChains", () => {
   });
 
   it("returns structured chains for analyst role", async () => {
-    supabase._registerRpc("get_facts", () => [
-      { id: "f1", content: "Sprint velocity is 10" },
-    ]);
+    supabase._registerRpc("get_facts", () => [{ id: "f1", content: "Sprint velocity is 10" }]);
     supabase._registerRpc("get_active_goals", () => [
       { id: "g1", content: "Improve velocity to 15", deadline: "2026-04-01" },
     ]);
@@ -464,7 +487,14 @@ describe("buildMemoryChains", () => {
     ]);
     supabase._registerRpc("get_active_goals", () => []);
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "f1", linked_id: "f2", linked_content: "Linked fact", linked_type: "fact", similarity: 0.80, link_type: "extends" },
+      {
+        origin_id: "f1",
+        linked_id: "f2",
+        linked_content: "Linked fact",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "extends",
+      },
     ]);
 
     const result = await buildMemoryChains(supabase, "pm");
@@ -501,7 +531,7 @@ describe("findSimilarPastTasks", () => {
   });
 
   it("finds similar done tasks by keyword matching", async () => {
-    supabase._store["tasks"] = [
+    supabase._store.tasks = [
       {
         id: "t1",
         title: "Memory chains implementation",
@@ -526,7 +556,7 @@ describe("findSimilarPastTasks", () => {
   });
 
   it("maps task fields correctly", async () => {
-    supabase._store["tasks"] = [
+    supabase._store.tasks = [
       {
         id: "t-abc",
         title: "Feature implementation",
@@ -563,7 +593,7 @@ describe("S41 integration", () => {
   it("classifyLinkContent handles special characters", () => {
     const result = classifyLinkContent(
       "l'architecture est modulaire",
-      "l'architecture n'est pas modulaire"
+      "l'architecture n'est pas modulaire",
     );
     expect(result).toBe("contradicts");
   });

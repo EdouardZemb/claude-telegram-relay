@@ -2,53 +2,53 @@
  * Unit Tests — src/cost-estimate.ts (S29-T7)
  */
 
-import { describe, it, expect } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { describe, expect, it } from "bun:test";
 import {
   estimatePipelineCost,
   estimateSprintCost,
   formatCostEstimate,
 } from "../../src/cost-estimate";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("estimatePipelineCost", () => {
   it("estimates DEFAULT pipeline cost", () => {
     const result = estimatePipelineCost("DEFAULT", 1);
     // DEFAULT = 6 agents * $0.50 fallback = $3.00 (no per-agent budgets)
-    expect(result.costPerTask).toBe(3.00);
-    expect(result.totalEstimate).toBe(3.00);
+    expect(result.costPerTask).toBe(3.0);
+    expect(result.totalEstimate).toBe(3.0);
     expect(result.agentBreakdown.length).toBe(6);
   });
 
   it("estimates QUICK pipeline cost", () => {
     const result = estimatePipelineCost("QUICK", 1);
     // QUICK = 2 agents * $0.50 = $1.00
-    expect(result.costPerTask).toBe(1.00);
+    expect(result.costPerTask).toBe(1.0);
     expect(result.agentBreakdown.length).toBe(2);
   });
 
   it("estimates REVIEW pipeline cost", () => {
     const result = estimatePipelineCost("REVIEW", 1);
     // REVIEW = 2 agents * $0.50 = $1.00
-    expect(result.costPerTask).toBe(1.00);
+    expect(result.costPerTask).toBe(1.0);
     expect(result.agentBreakdown.length).toBe(2);
   });
 
   it("multiplies by task count", () => {
     const result = estimatePipelineCost("DEFAULT", 8);
-    expect(result.totalEstimate).toBe(3.00 * 8);
+    expect(result.totalEstimate).toBe(3.0 * 8);
     expect(result.taskCount).toBe(8);
   });
 
   it("falls back to DEFAULT for unknown pipeline", () => {
     const result = estimatePipelineCost("UNKNOWN", 1);
-    expect(result.costPerTask).toBe(3.00);
+    expect(result.costPerTask).toBe(3.0);
   });
 });
 
 describe("estimateSprintCost", () => {
   it("returns estimate with no historical data", async () => {
     const result = await estimateSprintCost(null, 5, "DEFAULT");
-    expect(result.estimate.totalEstimate).toBe(3.00 * 5);
+    expect(result.estimate.totalEstimate).toBe(3.0 * 5);
     expect(result.historicalAvg).toBeNull();
     expect(result.ratio).toBeNull();
     expect(result.warning).toBe(false);

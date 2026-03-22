@@ -1,19 +1,18 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  getSession,
-  hasActiveSession,
-  addMessage,
-  addIntent,
+  _resetSessions,
   addConstraint,
   addDecision,
-  setActiveTask,
-  extractConstraints,
-  formatSessionForIntent,
+  addIntent,
+  addMessage,
   buildConversationContext,
   cleanupExpiredSessions,
+  extractConstraints,
+  formatSessionForIntent,
   getActiveSessionCount,
-  _resetSessions,
-  type ConversationSession,
+  getSession,
+  hasActiveSession,
+  setActiveTask,
 } from "../../src/conversation-session.ts";
 
 describe("conversation-session", () => {

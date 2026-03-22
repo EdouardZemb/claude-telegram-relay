@@ -4,19 +4,19 @@
  * Tests for task CRUD, backlog queries, and formatting.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
   addTask,
-  getBacklog,
-  updateTaskStatus,
   assignSprint,
-  getCurrentSprint,
-  formatTask,
   formatBacklog,
   formatSprintSummary,
+  formatTask,
+  getBacklog,
+  getCurrentSprint,
   type Task,
+  updateTaskStatus,
 } from "../../src/tasks";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("Task CRUD", () => {
   let supabase: ReturnType<typeof createMockSupabase>;
@@ -65,11 +65,51 @@ describe("Backlog Queries", () => {
   beforeEach(() => {
     supabase = createMockSupabase({
       tasks: [
-        { id: "1", title: "Task A", status: "backlog", priority: 1, sprint: "S11", project: "telegram-relay", created_at: "2026-02-01" },
-        { id: "2", title: "Task B", status: "in_progress", priority: 2, sprint: "S11", project: "telegram-relay", created_at: "2026-02-02" },
-        { id: "3", title: "Task C", status: "done", priority: 3, sprint: "S11", project: "telegram-relay", created_at: "2026-02-03" },
-        { id: "4", title: "Task D", status: "cancelled", priority: 4, sprint: "S11", project: "telegram-relay", created_at: "2026-02-04" },
-        { id: "5", title: "Task E", status: "backlog", priority: 2, sprint: "S12", project: "other", created_at: "2026-02-05" },
+        {
+          id: "1",
+          title: "Task A",
+          status: "backlog",
+          priority: 1,
+          sprint: "S11",
+          project: "telegram-relay",
+          created_at: "2026-02-01",
+        },
+        {
+          id: "2",
+          title: "Task B",
+          status: "in_progress",
+          priority: 2,
+          sprint: "S11",
+          project: "telegram-relay",
+          created_at: "2026-02-02",
+        },
+        {
+          id: "3",
+          title: "Task C",
+          status: "done",
+          priority: 3,
+          sprint: "S11",
+          project: "telegram-relay",
+          created_at: "2026-02-03",
+        },
+        {
+          id: "4",
+          title: "Task D",
+          status: "cancelled",
+          priority: 4,
+          sprint: "S11",
+          project: "telegram-relay",
+          created_at: "2026-02-04",
+        },
+        {
+          id: "5",
+          title: "Task E",
+          status: "backlog",
+          priority: 2,
+          sprint: "S12",
+          project: "other",
+          created_at: "2026-02-05",
+        },
       ],
     });
   });
@@ -105,9 +145,7 @@ describe("Task Updates", () => {
 
   beforeEach(() => {
     supabase = createMockSupabase({
-      tasks: [
-        { id: "t1", title: "Task 1", status: "backlog", priority: 2, sprint: "S11" },
-      ],
+      tasks: [{ id: "t1", title: "Task 1", status: "backlog", priority: 2, sprint: "S11" }],
     });
   });
 
@@ -144,9 +182,7 @@ describe("getCurrentSprint", () => {
 
   it("returns null when no active tasks", async () => {
     const supabase = createMockSupabase({
-      tasks: [
-        { id: "1", sprint: "S11", status: "done", created_at: "2026-02-01" },
-      ],
+      tasks: [{ id: "1", sprint: "S11", status: "done", created_at: "2026-02-01" }],
     });
 
     const sprint = await getCurrentSprint(supabase);

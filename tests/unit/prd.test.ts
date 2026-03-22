@@ -4,17 +4,17 @@
  * Tests for PRD management: CRUD operations, formatting, and generatePRD.
  */
 
-import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
-  savePRD,
+  formatPRDDetail,
+  formatPRDList,
   getPRD,
   getPRDs,
-  updatePRDStatus,
-  formatPRDList,
-  formatPRDDetail,
   type PRD,
+  savePRD,
+  updatePRDStatus,
 } from "../../src/prd";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── Fixtures ────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ describe("savePRD", () => {
     const result = await savePRD(
       supabase,
       { title: "Custom PRD", summary: "Summary", content: "Content" },
-      { project: "other-project", tags: ["urgent", "backend"], requested_by: "edouard" }
+      { project: "other-project", tags: ["urgent", "backend"], requested_by: "edouard" },
     );
 
     expect(result).not.toBeNull();

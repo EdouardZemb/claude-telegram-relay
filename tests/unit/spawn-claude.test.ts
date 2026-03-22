@@ -5,11 +5,11 @@
  * Does NOT actually spawn processes — tests the arg building logic.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 
 // We test the args construction logic by importing the interface
 // and verifying the SpawnClaudeOptions shape
-import type { SpawnClaudeOptions, SpawnClaudeResult } from "../../src/agent";
+import type { SpawnClaudeOptions } from "../../src/agent";
 
 /**
  * Simulate the arg-building logic from spawnClaude to verify correct flag construction.
@@ -147,7 +147,7 @@ describe("spawnClaude arg construction", () => {
   });
 
   it("maxBudgetUsd is serialized as string", () => {
-    const args = buildSpawnArgs({ prompt: "test", maxBudgetUsd: 0.50 });
+    const args = buildSpawnArgs({ prompt: "test", maxBudgetUsd: 0.5 });
     expect(args).toContain("--max-budget-usd");
     expect(args).toContain("0.5");
   });

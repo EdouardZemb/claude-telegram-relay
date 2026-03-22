@@ -8,14 +8,14 @@
 
 import {
   type CodeGraph,
-  findNode,
-  getModuleDependencies,
-  getDependents,
-  getImpactRadius,
-  getRelatedModules,
-  getGraphStats,
   estimateComplexity,
   findAffectedModules,
+  findNode,
+  getDependents,
+  getGraphStats,
+  getImpactRadius,
+  getModuleDependencies,
+  getRelatedModules,
 } from "./code-graph.ts";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -80,7 +80,10 @@ export function extractModuleName(query: string, graph: CodeGraph): string | nul
   // Direct module path match: "src/relay.ts" or "relay.ts"
   for (const node of graph.nodes) {
     if (lower.includes(node.id.toLowerCase())) return node.id;
-    const filename = node.id.replace(/^src\//, "").replace(/^commands\//, "").replace(/\.ts$/, "");
+    const filename = node.id
+      .replace(/^src\//, "")
+      .replace(/^commands\//, "")
+      .replace(/\.ts$/, "");
     if (lower.includes(filename.toLowerCase()) && filename.length >= 3) return node.id;
   }
 
@@ -100,11 +103,14 @@ export function extractModuleName(query: string, graph: CodeGraph): string | nul
  * Detect if a query can be answered from the code graph alone.
  * Returns the query type and extracted module, or null if LLM is needed.
  */
-export function detectGraphQuery(query: string, graph: CodeGraph): { type: GraphQueryType; moduleId: string | null } | null {
+export function detectGraphQuery(
+  query: string,
+  graph: CodeGraph,
+): { type: GraphQueryType; moduleId: string | null } | null {
   const lower = query.toLowerCase();
 
   // Stats/overview queries (no module needed)
-  if (STATS_PATTERNS.some(p => p.test(lower))) {
+  if (STATS_PATTERNS.some((p) => p.test(lower))) {
     return { type: "stats", moduleId: null };
   }
 
@@ -115,19 +121,19 @@ export function detectGraphQuery(query: string, graph: CodeGraph): { type: Graph
   if (!moduleId) return null;
 
   // Check specific query types (order matters — more specific first)
-  if (IMPACT_PATTERNS.some(p => p.test(lower))) {
+  if (IMPACT_PATTERNS.some((p) => p.test(lower))) {
     return { type: "impact", moduleId };
   }
-  if (DEPENDENT_PATTERNS.some(p => p.test(lower))) {
+  if (DEPENDENT_PATTERNS.some((p) => p.test(lower))) {
     return { type: "dependents", moduleId };
   }
-  if (DEPENDENCY_PATTERNS.some(p => p.test(lower))) {
+  if (DEPENDENCY_PATTERNS.some((p) => p.test(lower))) {
     return { type: "dependencies", moduleId };
   }
-  if (COMPLEXITY_PATTERNS.some(p => p.test(lower))) {
+  if (COMPLEXITY_PATTERNS.some((p) => p.test(lower))) {
     return { type: "complexity", moduleId };
   }
-  if (RELATED_PATTERNS.some(p => p.test(lower))) {
+  if (RELATED_PATTERNS.some((p) => p.test(lower))) {
     return { type: "related", moduleId };
   }
 
@@ -195,10 +201,7 @@ function formatDependencies(graph: CodeGraph, moduleId: string): string {
   const deps = getModuleDependencies(graph, node.id);
   if (deps.length === 0) return `${node.id} n'importe aucun module local.`;
 
-  const lines: string[] = [
-    `DEPENDANCES DE ${node.id} (${deps.length}):`,
-    "",
-  ];
+  const lines: string[] = [`DEPENDANCES DE ${node.id} (${deps.length}):`, ""];
   for (const d of deps) {
     const short = d.target.replace("src/", "");
     const symbols = d.imports.length > 0 ? ` -> {${d.imports.join(", ")}}` : "";
@@ -215,10 +218,7 @@ function formatDependents(graph: CodeGraph, moduleId: string): string {
   const dependents = getDependents(graph, node.id);
   if (dependents.length === 0) return `Aucun module n'importe ${node.id}.`;
 
-  const lines: string[] = [
-    `MODULES QUI UTILISENT ${node.id} (${dependents.length}):`,
-    "",
-  ];
+  const lines: string[] = [`MODULES QUI UTILISENT ${node.id} (${dependents.length}):`, ""];
   for (const d of dependents) {
     const symbols = d.imports.length > 0 ? ` -> {${d.imports.join(", ")}}` : "";
     lines.push(`  ${d.source.replace("src/", "")}${symbols}`);
@@ -231,7 +231,8 @@ function formatImpact(graph: CodeGraph, moduleId: string): string {
   if (!node) return `Module "${moduleId}" non trouve dans le graphe.`;
 
   const impact = getImpactRadius(graph, node.id, 3);
-  if (impact.length === 0) return `Modifier ${node.id} n'affecte aucun autre module (pas de dependants).`;
+  if (impact.length === 0)
+    return `Modifier ${node.id} n'affecte aucun autre module (pas de dependants).`;
 
   const lines: string[] = [
     `IMPACT DE MODIFICATION DE ${node.id}:`,
@@ -283,18 +284,18 @@ function formatRelated(graph: CodeGraph, moduleId: string): string {
   const related = getRelatedModules(graph, node.id);
   if (related.length === 0) return `${node.id} n'a aucun module lie.`;
 
-  const deps = new Set(getModuleDependencies(graph, node.id).map(d => d.target));
-  const depBy = new Set(getDependents(graph, node.id).map(d => d.source));
+  const deps = new Set(getModuleDependencies(graph, node.id).map((d) => d.target));
+  const depBy = new Set(getDependents(graph, node.id).map((d) => d.source));
 
-  const lines: string[] = [
-    `MODULES LIES A ${node.id} (${related.length}):`,
-    "",
-  ];
+  const lines: string[] = [`MODULES LIES A ${node.id} (${related.length}):`, ""];
   for (const r of related) {
     const short = r.replace("src/", "");
-    const direction = deps.has(r) && depBy.has(r) ? "(bidirectionnel)"
-      : deps.has(r) ? "(importe)"
-      : "(importe par)";
+    const direction =
+      deps.has(r) && depBy.has(r)
+        ? "(bidirectionnel)"
+        : deps.has(r)
+          ? "(importe)"
+          : "(importe par)";
     lines.push(`  ${short} ${direction}`);
   }
   return lines.join("\n");

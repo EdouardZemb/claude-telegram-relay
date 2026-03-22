@@ -13,13 +13,15 @@
  * S15-08: Gate integration pre-merge
  */
 
-import { spawnSync } from "bun";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildFullAgentPrompt } from "./bmad-prompts.ts";
+import { spawnSync } from "bun";
 import { spawnClaude } from "./agent.ts";
+import { buildFullAgentPrompt } from "./bmad-prompts.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("code-review");
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
-const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
+const _GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -50,22 +52,16 @@ export interface CodeReviewResult {
  * Gets the diff from git, sends it to Claude with a review agent persona.
  */
 export async function runCodeReview(
-  branchName: string,
+  _branchName: string,
   taskTitle: string,
   onProgress?: (msg: string) => Promise<void>,
-  prNumber?: number
+  prNumber?: number,
 ): Promise<CodeReviewResult> {
   // Get the diff between master and the branch
-  const diffResult = spawnSync(
-    ["git", "diff", "master...HEAD", "--stat"],
-    { cwd: PROJECT_DIR }
-  );
+  const diffResult = spawnSync(["git", "diff", "master...HEAD", "--stat"], { cwd: PROJECT_DIR });
   const diffStat = new TextDecoder().decode(diffResult.stdout).trim();
 
-  const fullDiffResult = spawnSync(
-    ["git", "diff", "master...HEAD"],
-    { cwd: PROJECT_DIR }
-  );
+  const fullDiffResult = spawnSync(["git", "diff", "master...HEAD"], { cwd: PROJECT_DIR });
   const fullDiff = new TextDecoder().decode(fullDiffResult.stdout).trim();
 
   if (!fullDiff) {
@@ -81,9 +77,10 @@ export async function runCodeReview(
 
   // Truncate diff if too large (keep most relevant parts)
   const maxDiffLength = 50000;
-  const truncatedDiff = fullDiff.length > maxDiffLength
-    ? fullDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
-    : fullDiff;
+  const truncatedDiff =
+    fullDiff.length > maxDiffLength
+      ? fullDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
+      : fullDiff;
 
   if (onProgress) {
     await onProgress("Code review en cours (agent adversarial)...");
@@ -112,20 +109,20 @@ export async function runCodeReview(
     "Tu dois trouver MINIMUM 3 findings. Meme si le code est bon, il y a toujours des ameliorations possibles.",
     "",
     "Reponds UNIQUEMENT au format JSON:",
-    '{',
+    "{",
     '  "findings": [',
-    '    {',
+    "    {",
     '      "severity": "critical|important|minor|suggestion",',
     '      "category": "security|performance|maintainability|testing|correctness|style",',
     '      "file": "path/to/file.ts",',
     '      "line": 42,',
     '      "description": "Ce que tu as trouve",',
     '      "suggestion": "Comment le corriger"',
-    '    }',
-    '  ],',
+    "    }",
+    "  ],",
     '  "summary": "Resume en 2-3 phrases",',
     '  "score": 75',
-    '}',
+    "}",
     "",
     "Score: 0-100 (100 = parfait, <50 = bloque le merge)",
     "JSON:",
@@ -185,7 +182,7 @@ export async function saveReviewResult(
   supabase: SupabaseClient,
   taskId: string,
   branchName: string,
-  result: CodeReviewResult
+  result: CodeReviewResult,
 ): Promise<void> {
   const { error } = await supabase.from("workflow_logs").insert({
     task_id: taskId,
@@ -201,7 +198,7 @@ export async function saveReviewResult(
       summary: result.summary,
     },
   });
-  if (error) console.error("saveReviewResult error:", error);
+  if (error) log.error("saveReviewResult error", { error: String(error) });
 }
 
 // ── Formatting ───────────────────────────────────────────────
@@ -224,7 +221,8 @@ export function formatReviewResult(result: CodeReviewResult): string {
   const lines: string[] = [];
 
   // Header with score
-  const scoreBar = "=".repeat(Math.round(result.score / 5)) + "-".repeat(20 - Math.round(result.score / 5));
+  const scoreBar =
+    "=".repeat(Math.round(result.score / 5)) + "-".repeat(20 - Math.round(result.score / 5));
   lines.push(`CODE REVIEW  [${scoreBar}] ${result.score}/100`);
   lines.push(result.passesGate ? "Gate: PASSE" : "Gate: BLOQUEE");
   lines.push("");
@@ -241,7 +239,7 @@ export function formatReviewResult(result: CodeReviewResult): string {
 
   // Sort by severity
   const sorted = [...result.findings].sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
+    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
   );
 
   lines.push(`${result.findings.length} findings:`);
@@ -249,9 +247,7 @@ export function formatReviewResult(result: CodeReviewResult): string {
 
   for (const finding of sorted) {
     const severity = SEVERITY_LABELS[finding.severity];
-    const location = finding.line
-      ? `${finding.file}:${finding.line}`
-      : finding.file;
+    const location = finding.line ? `${finding.file}:${finding.line}` : finding.file;
     lines.push(`[${severity}] ${finding.category} — ${location}`);
     lines.push(`  ${finding.description}`);
     lines.push(`  -> ${finding.suggestion}`);

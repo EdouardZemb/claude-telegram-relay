@@ -4,12 +4,12 @@
  * Tests for pipeline result formatting and batch pipeline logic.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   formatPipelineResult,
-  runAutoPipeline,
-  type PipelineResult,
   type PipelineOptions,
+  type PipelineResult,
+  runAutoPipeline,
 } from "../../src/auto-pipeline";
 
 function makeTask(overrides: Record<string, any> = {}) {
@@ -131,7 +131,15 @@ describe("formatPipelineResult", () => {
 
 describe("PipelinePhase types", () => {
   it("recognizes all valid phases", () => {
-    const phases = ["gate_check", "story_enrichment", "analysis", "execution", "review", "done", "blocked"];
+    const phases = [
+      "gate_check",
+      "story_enrichment",
+      "analysis",
+      "execution",
+      "review",
+      "done",
+      "blocked",
+    ];
     for (const phase of phases) {
       expect(typeof phase).toBe("string");
     }

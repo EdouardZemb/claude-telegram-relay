@@ -8,7 +8,7 @@
  * the real client when configured.
  */
 
-import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { E2EFramework } from "./framework";
 
 // ── Fetch mock for Telegram file downloads + Supabase ───────────
@@ -16,10 +16,7 @@ import { E2EFramework } from "./framework";
 const originalFetch = globalThis.fetch;
 
 function mockExternalFetch(): void {
-  globalThis.fetch = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
 
     // Telegram file download → fake image buffer
@@ -32,10 +29,10 @@ function mockExternalFetch(): void {
 
     // Supabase Storage upload → fake success (bucket may not exist)
     if (url.includes("/storage/v1/object/")) {
-      return new Response(
-        JSON.stringify({ Key: "documents/e2e/test.jpg" }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ Key: "documents/e2e/test.jpg" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     }
 
     // Supabase Edge Functions (search) → fake empty results
@@ -73,15 +70,16 @@ function mockClaudeCLI(): void {
     }
     claudeCallCount++;
     // Alternate: extraction (odd calls) → classification (even calls)
-    const output = claudeCallCount % 2 === 1
-      ? "Facture EDF montant 150 EUR date 18/03/2026"
-      : JSON.stringify({
-          category_name: "facture",
-          confidence: 0.9,
-          description: "Facture electricite EDF",
-          document_date: "2026-03-18",
-          suggested_title: "Facture EDF Mars 2026",
-        });
+    const output =
+      claudeCallCount % 2 === 1
+        ? "Facture EDF montant 150 EUR date 18/03/2026"
+        : JSON.stringify({
+            category_name: "facture",
+            confidence: 0.9,
+            description: "Facture electricite EDF",
+            document_date: "2026-03-18",
+            suggested_title: "Facture EDF Mars 2026",
+          });
     return {
       stdout: new Response(output).body,
       stderr: new Response("").body,
@@ -99,9 +97,7 @@ function restoreSpawn(): void {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-const hasSupabase = !!(
-  process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
-);
+const hasSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
 
 // Valid UUID for Supabase queries (non-existent document)
 const FAKE_DOC_UUID = "00000000-0000-4000-a000-000000000001";
@@ -143,8 +139,7 @@ describe("E2E Document Flow", () => {
       expect(reply.length).toBeGreaterThan(0);
       if (hasSupabase) {
         const hasContent =
-          reply.toLowerCase().includes("document") ||
-          reply.toLowerCase().includes("aucun");
+          reply.toLowerCase().includes("document") || reply.toLowerCase().includes("aucun");
         expect(hasContent).toBe(true);
       } else {
         fw.assertContains(reply, "supabase");
@@ -166,8 +161,7 @@ describe("E2E Document Flow", () => {
       expect(reply.length).toBeGreaterThan(0);
       if (hasSupabase) {
         const hasContent =
-          reply.toLowerCase().includes("facture") ||
-          reply.toLowerCase().includes("aucun");
+          reply.toLowerCase().includes("facture") || reply.toLowerCase().includes("aucun");
         expect(hasContent).toBe(true);
       } else {
         fw.assertContains(reply, "supabase");
@@ -179,8 +173,7 @@ describe("E2E Document Flow", () => {
       expect(reply.length).toBeGreaterThan(0);
       if (hasSupabase) {
         const hasContent =
-          reply.toLowerCase().includes("statistiques") ||
-          reply.toLowerCase().includes("aucun");
+          reply.toLowerCase().includes("statistiques") || reply.toLowerCase().includes("aucun");
         expect(hasContent).toBe(true);
       } else {
         fw.assertContains(reply, "supabase");
@@ -192,8 +185,7 @@ describe("E2E Document Flow", () => {
       expect(reply.length).toBeGreaterThan(0);
       if (hasSupabase) {
         const hasContent =
-          reply.toLowerCase().includes("categories") ||
-          reply.toLowerCase().includes("aucune");
+          reply.toLowerCase().includes("categories") || reply.toLowerCase().includes("aucune");
         expect(hasContent).toBe(true);
       } else {
         fw.assertContains(reply, "supabase");
@@ -226,16 +218,13 @@ describe("E2E Document Flow", () => {
       },
     );
 
-    test.skipIf(!hasSupabase)(
-      "photo with 'contrat' caption triggers handler",
-      async () => {
-        const reply = await fw.sendPhoto({
-          caption: "contrat de bail",
-          fileSize: 80000,
-        });
-        expect(reply.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("photo with 'contrat' caption triggers handler", async () => {
+      const reply = await fw.sendPhoto({
+        caption: "contrat de bail",
+        fileSize: 80000,
+      });
+      expect(reply.length).toBeGreaterThan(0);
+    });
 
     test.skipIf(!hasSupabase)(
       "large photo without caption triggers handler (size heuristic)",
@@ -249,29 +238,23 @@ describe("E2E Document Flow", () => {
   // ── Document handler routing ──────────────────────────────────
 
   describe("Document handler routing", () => {
-    test.skipIf(!hasSupabase)(
-      "PDF document triggers handler and responds",
-      async () => {
-        const reply = await fw.sendDocument({
-          fileName: "facture-edf.pdf",
-          mimeType: "application/pdf",
-          fileSize: 50000,
-        });
-        expect(reply.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("PDF document triggers handler and responds", async () => {
+      const reply = await fw.sendDocument({
+        fileName: "facture-edf.pdf",
+        mimeType: "application/pdf",
+        fileSize: 50000,
+      });
+      expect(reply.length).toBeGreaterThan(0);
+    });
 
-    test.skipIf(!hasSupabase)(
-      "JPEG image document triggers handler",
-      async () => {
-        const reply = await fw.sendDocument({
-          fileName: "scan-ordonnance.jpg",
-          mimeType: "image/jpeg",
-          fileSize: 60000,
-        });
-        expect(reply.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("JPEG image document triggers handler", async () => {
+      const reply = await fw.sendDocument({
+        fileName: "scan-ordonnance.jpg",
+        mimeType: "image/jpeg",
+        fileSize: 60000,
+      });
+      expect(reply.length).toBeGreaterThan(0);
+    });
 
     test.skipIf(!hasSupabase)(
       "unsupported MIME type falls through to analysis",
@@ -295,82 +278,52 @@ describe("E2E Document Flow", () => {
   // ── Callback query handling ───────────────────────────────────
 
   describe("Callback query handling", () => {
-    test.skipIf(!hasSupabase)(
-      "doc_confirm callback answers with confirmation",
-      async () => {
-        await fw.sendCallbackQuery(
-          `doc_confirm:${FAKE_DOC_UUID}`,
-          "Document en attente",
-        );
-        const answers = fw.getLastCallbackAnswers();
-        expect(answers.length).toBeGreaterThan(0);
-        expect(answers[0]).toContain("Classification confirmee");
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_confirm callback answers with confirmation", async () => {
+      await fw.sendCallbackQuery(`doc_confirm:${FAKE_DOC_UUID}`, "Document en attente");
+      const answers = fw.getLastCallbackAnswers();
+      expect(answers.length).toBeGreaterThan(0);
+      expect(answers[0]).toContain("Classification confirmee");
+    });
 
-    test.skipIf(!hasSupabase)(
-      "doc_cancel callback processes cancellation",
-      async () => {
-        await fw.sendCallbackQuery(
-          `doc_cancel:${FAKE_DOC_UUID}`,
-          "Document en attente",
-        );
-        const answers = fw.getLastCallbackAnswers();
-        expect(answers.length).toBeGreaterThan(0);
-        // Non-existent doc → deleteDocument returns false → error answer
-        // OR doc exists → "Document annule."
-        expect(answers[0]).toBeTruthy();
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_cancel callback processes cancellation", async () => {
+      await fw.sendCallbackQuery(`doc_cancel:${FAKE_DOC_UUID}`, "Document en attente");
+      const answers = fw.getLastCallbackAnswers();
+      expect(answers.length).toBeGreaterThan(0);
+      // Non-existent doc → deleteDocument returns false → error answer
+      // OR doc exists → "Document annule."
+      expect(answers[0]).toBeTruthy();
+    });
 
-    test.skipIf(!hasSupabase)(
-      "doc_change callback responds",
-      async () => {
-        await fw.sendCallbackQuery(
-          `doc_change:${FAKE_DOC_UUID}`,
-          "Document en attente",
-        );
-        const answers = fw.getLastCallbackAnswers();
-        const edited = fw.getLastEditedMessages();
-        // Either shows category picker or "Aucune categorie"
-        expect(answers.length + edited.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_change callback responds", async () => {
+      await fw.sendCallbackQuery(`doc_change:${FAKE_DOC_UUID}`, "Document en attente");
+      const answers = fw.getLastCallbackAnswers();
+      const edited = fw.getLastEditedMessages();
+      // Either shows category picker or "Aucune categorie"
+      expect(answers.length + edited.length).toBeGreaterThan(0);
+    });
 
-    test.skipIf(!hasSupabase)(
-      "doc_delete_confirm processes deletion",
-      async () => {
-        await fw.sendCallbackQuery(
-          `doc_delete_confirm:${FAKE_DOC_UUID}`,
-          "Confirmer suppression?",
-        );
-        const answers = fw.getLastCallbackAnswers();
-        expect(answers.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_delete_confirm processes deletion", async () => {
+      await fw.sendCallbackQuery(`doc_delete_confirm:${FAKE_DOC_UUID}`, "Confirmer suppression?");
+      const answers = fw.getLastCallbackAnswers();
+      expect(answers.length).toBeGreaterThan(0);
+    });
 
-    test.skipIf(!hasSupabase)(
-      "doc_delete_cancel cancels deletion",
-      async () => {
-        const reply = await fw.sendCallbackQuery(
-          `doc_delete_cancel:${FAKE_DOC_UUID}`,
-          "Confirmer suppression?",
-        );
-        const answers = fw.getLastCallbackAnswers();
-        expect(answers.length).toBeGreaterThan(0);
-        expect(answers[0]).toContain("annulee");
-        fw.assertContains(reply, "suppression annulee");
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_delete_cancel cancels deletion", async () => {
+      const reply = await fw.sendCallbackQuery(
+        `doc_delete_cancel:${FAKE_DOC_UUID}`,
+        "Confirmer suppression?",
+      );
+      const answers = fw.getLastCallbackAnswers();
+      expect(answers.length).toBeGreaterThan(0);
+      expect(answers[0]).toContain("annulee");
+      fw.assertContains(reply, "suppression annulee");
+    });
 
-    test.skipIf(!hasSupabase)(
-      "doc_confirm with empty ID returns error",
-      async () => {
-        await fw.sendCallbackQuery("doc_confirm:", "Document en attente");
-        const answers = fw.getLastCallbackAnswers();
-        expect(answers.length).toBeGreaterThan(0);
-      },
-    );
+    test.skipIf(!hasSupabase)("doc_confirm with empty ID returns error", async () => {
+      await fw.sendCallbackQuery("doc_confirm:", "Document en attente");
+      const answers = fw.getLastCallbackAnswers();
+      expect(answers.length).toBeGreaterThan(0);
+    });
 
     test("non-doc callback does not crash", async () => {
       // Callback with non-doc_ prefix should not be handled by doc handler

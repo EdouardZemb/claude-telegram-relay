@@ -5,8 +5,10 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { GateEvaluation, RubricDimension, DeterministicCheckResult } from "./gate-evaluator.ts";
+import type { DeterministicCheckResult, RubricDimension } from "./gate-evaluator.ts";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("gate-persistence");
 // ── Types ────────────────────────────────────────────────────
 
 export interface GateEvaluationRecord {
@@ -45,29 +47,27 @@ const DOUBLE_LOOP_TRIGGER_COUNT = 3;
  */
 export async function persistGateEvaluation(
   supabase: SupabaseClient | null,
-  record: GateEvaluationRecord
+  record: GateEvaluationRecord,
 ): Promise<void> {
   if (!supabase) return;
 
-  const { error } = await supabase
-    .from("gate_evaluations")
-    .insert({
-      session_id: record.sessionId,
-      task_id: record.taskId || null,
-      sprint_id: record.sprintId || null,
-      agent_role: record.agentRole,
-      gate_name: record.gateName,
-      score: record.score,
-      passed: record.passed,
-      rubric_dimensions: record.rubricDimensions || null,
-      deterministic_checks: record.deterministicChecks || null,
-      rework_iteration: record.reworkIteration,
-      rework_triggered: record.reworkTriggered,
-      auto_approved: record.autoApproved,
-    });
+  const { error } = await supabase.from("gate_evaluations").insert({
+    session_id: record.sessionId,
+    task_id: record.taskId || null,
+    sprint_id: record.sprintId || null,
+    agent_role: record.agentRole,
+    gate_name: record.gateName,
+    score: record.score,
+    passed: record.passed,
+    rubric_dimensions: record.rubricDimensions || null,
+    deterministic_checks: record.deterministicChecks || null,
+    rework_iteration: record.reworkIteration,
+    rework_triggered: record.reworkTriggered,
+    auto_approved: record.autoApproved,
+  });
 
   if (error) {
-    console.error("persistGateEvaluation error:", error);
+    log.error("persistGateEvaluation error", { error: String(error) });
   }
 }
 
@@ -79,7 +79,7 @@ export async function persistGateEvaluation(
  */
 export async function detectWeakDimensions(
   supabase: SupabaseClient,
-  agentRole: string
+  agentRole: string,
 ): Promise<DimensionWeakness[]> {
   // Query all gate evaluations for this role with rubric data
   const { data, error } = await supabase
@@ -115,9 +115,9 @@ export async function detectWeakDimensions(
  * Returns a specific instruction based on the dimension name.
  */
 export function generateDoubleLoopInstruction(
-  agentRole: string,
+  _agentRole: string,
   dimensionName: string,
-  weaknessCount: number
+  weaknessCount: number,
 ): string {
   const instructions: Record<string, string> = {
     // Code rubric dimensions
@@ -132,8 +132,10 @@ export function generateDoubleLoopInstruction(
     feasibility: `ALERTE QUALITE: La faisabilite est souvent mal evaluee (${weaknessCount} evaluations). Verifie les contraintes techniques, les dependances, et les risques avant de valider un plan.`,
   };
 
-  return instructions[dimensionName] ||
-    `ALERTE QUALITE: La dimension "${dimensionName}" est systematiquement faible (${weaknessCount} evaluations). Porte une attention particuliere a cet aspect.`;
+  return (
+    instructions[dimensionName] ||
+    `ALERTE QUALITE: La dimension "${dimensionName}" est systematiquement faible (${weaknessCount} evaluations). Porte une attention particuliere a cet aspect.`
+  );
 }
 
 /**
@@ -142,7 +144,7 @@ export function generateDoubleLoopInstruction(
  */
 export async function runDoubleLoopAnalysis(
   supabase: SupabaseClient | null,
-  agentRole: string
+  agentRole: string,
 ): Promise<{ rulesCreated: number; rulesUpdated: number }> {
   if (!supabase) return { rulesCreated: 0, rulesUpdated: 0 };
 
@@ -154,7 +156,7 @@ export async function runDoubleLoopAnalysis(
     const instruction = generateDoubleLoopInstruction(
       agentRole,
       weakness.dimensionName,
-      weakness.count
+      weakness.count,
     );
 
     // Check if a double-loop rule already exists for this (role, dimension)
@@ -179,17 +181,15 @@ export async function runDoubleLoopAnalysis(
       rulesUpdated++;
     } else {
       // Create new rule
-      const { error } = await supabase
-        .from("feedback_rules")
-        .insert({
-          agent_id: agentRole,
-          pattern: `double_loop:${weakness.dimensionName}`,
-          instruction,
-          occurrences: weakness.count,
-          sprints: [],
-          active: true,
-          source: "double_loop",
-        });
+      const { error } = await supabase.from("feedback_rules").insert({
+        agent_id: agentRole,
+        pattern: `double_loop:${weakness.dimensionName}`,
+        instruction,
+        occurrences: weakness.count,
+        sprints: [],
+        active: true,
+        source: "double_loop",
+      });
 
       if (!error) rulesCreated++;
     }
@@ -201,9 +201,7 @@ export async function runDoubleLoopAnalysis(
 /**
  * Format double-loop rules for display.
  */
-export async function formatDoubleLoopRules(
-  supabase: SupabaseClient | null
-): Promise<string> {
+export async function formatDoubleLoopRules(supabase: SupabaseClient | null): Promise<string> {
   if (!supabase) return "Pas de connexion Supabase";
 
   const { data, error } = await supabase

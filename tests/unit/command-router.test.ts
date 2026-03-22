@@ -1,11 +1,11 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { getAction } from "../../src/action-registry.ts";
 import {
-  routeIntent,
   checkPendingClarification,
   handleConfirmationCallback,
+  routeIntent,
 } from "../../src/command-router.ts";
 import type { DetectedIntent } from "../../src/intent-detection.ts";
-import { getAction } from "../../src/action-registry.ts";
 
 // ── Mock Grammy Context ──────────────────────────────────────
 
@@ -274,9 +274,15 @@ describe("command-router", () => {
               select: () => ({
                 in: () => ({
                   order: () => ({
-                    limit: () => Promise.resolve({
-                      data: [{ task_id: "abcd1234-5678-9abc-def0-1234567890ab", session_id: "sess-123" }],
-                    }),
+                    limit: () =>
+                      Promise.resolve({
+                        data: [
+                          {
+                            task_id: "abcd1234-5678-9abc-def0-1234567890ab",
+                            session_id: "sess-123",
+                          },
+                        ],
+                      }),
                   }),
                 }),
               }),

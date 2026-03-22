@@ -2,14 +2,14 @@
  * Tests for agent-events.ts — S38 FR-001: Agent Event Log
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
+  type AgentEvent,
+  clearInMemoryEvents,
   emitAgentEvent,
+  formatAgentTimeline,
   getAgentEvents,
   getInMemoryEventsForSession,
-  clearInMemoryEvents,
-  formatAgentTimeline,
-  type AgentEvent,
 } from "../../src/agent-events.ts";
 import { createMockSupabase } from "../fixtures/mock-supabase.ts";
 
@@ -39,7 +39,9 @@ describe("agent-events", () => {
     it("emits completed event after spawned", async () => {
       await emitAgentEvent(supabase, "session-1", "dev", "spawned", {});
       await emitAgentEvent(supabase, "session-1", "dev", "completed", {
-        duration_ms: 5000, tokens_input: 100, cost_usd: 0.01,
+        duration_ms: 5000,
+        tokens_input: 100,
+        cost_usd: 0.01,
       });
 
       const rows = supabase._getTable("agent_events");
@@ -51,7 +53,8 @@ describe("agent-events", () => {
     it("emits failed event on agent failure", async () => {
       await emitAgentEvent(supabase, "session-1", "qa", "spawned", {});
       await emitAgentEvent(supabase, "session-1", "qa", "failed", {
-        error: "timeout", exit_code: 1,
+        error: "timeout",
+        exit_code: 1,
       });
 
       const rows = supabase._getTable("agent_events");
@@ -89,7 +92,8 @@ describe("agent-events", () => {
 
     it("records message_sent event type", async () => {
       await emitAgentEvent(supabase, "session-1", "dev", "message_sent", {
-        to: "architect", message_type: "question",
+        to: "architect",
+        message_type: "question",
       });
 
       const rows = supabase._getTable("agent_events");
@@ -99,10 +103,12 @@ describe("agent-events", () => {
 
     it("records clarification events", async () => {
       await emitAgentEvent(supabase, "session-1", "dev", "clarification_requested", {
-        target_agent: "architect", question: "How to handle X?",
+        target_agent: "architect",
+        question: "How to handle X?",
       });
       await emitAgentEvent(supabase, "session-1", "architect", "clarification_resolved", {
-        source_agent: "dev", answer: "Use pattern Y",
+        source_agent: "dev",
+        answer: "Use pattern Y",
       });
 
       const rows = supabase._getTable("agent_events");
@@ -207,13 +213,15 @@ describe("agent-events", () => {
     });
 
     it("shows duration when present", () => {
-      const events: AgentEvent[] = [{
-        session_id: "s1",
-        agent_role: "qa",
-        event_type: "completed",
-        payload: { duration_ms: 12345 },
-        created_at: "2026-03-17T04:00:00.000Z",
-      }];
+      const events: AgentEvent[] = [
+        {
+          session_id: "s1",
+          agent_role: "qa",
+          event_type: "completed",
+          payload: { duration_ms: 12345 },
+          created_at: "2026-03-17T04:00:00.000Z",
+        },
+      ];
 
       const result = formatAgentTimeline(events);
       expect(result).toContain("(12s)");

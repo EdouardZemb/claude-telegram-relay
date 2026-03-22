@@ -3,7 +3,7 @@
  * Uses handleUpdate injection — no external Telegram API calls.
  */
 
-import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { E2EFramework } from "./framework";
 
 describe("E2E Telegram Commands", () => {

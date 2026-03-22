@@ -4,7 +4,7 @@
  * Validates architecture docs, Mermaid syntax, and feature coverage (AC-1, AC-2, AC-3).
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
@@ -32,12 +32,39 @@ describe("README AC-1: architecture, commands, workflow, deploy", () => {
   test("documents all 33 Telegram commands", async () => {
     await readmePromise;
     const commands = [
-      "/prd", "/plan", "/planify", "/exec", "/orchestrate", "/autopipeline",
-      "/workflow", "/agents", "/task", "/backlog", "/sprint", "/start", "/done",
-      "/metrics", "/retro", "/patterns", "/alerts", "/cost", "/estimate",
-      "/monitor", "/brain", "/ideas", "/remind", "/profile", "/notify",
-      "/projects", "/project", "/help", "/status", "/speak", "/export",
-      "/feature", "/rollback",
+      "/prd",
+      "/plan",
+      "/planify",
+      "/exec",
+      "/orchestrate",
+      "/autopipeline",
+      "/workflow",
+      "/agents",
+      "/task",
+      "/backlog",
+      "/sprint",
+      "/start",
+      "/done",
+      "/metrics",
+      "/retro",
+      "/patterns",
+      "/alerts",
+      "/cost",
+      "/estimate",
+      "/monitor",
+      "/brain",
+      "/ideas",
+      "/remind",
+      "/profile",
+      "/notify",
+      "/projects",
+      "/project",
+      "/help",
+      "/status",
+      "/speak",
+      "/export",
+      "/feature",
+      "/rollback",
     ];
     for (const cmd of commands) {
       expect(readme).toContain(`\`${cmd}`);
@@ -97,8 +124,14 @@ describe("README AC-2: Mermaid diagrams are valid", () => {
     expect(mermaidBlocks.length).toBeGreaterThanOrEqual(7);
 
     const validTypes = [
-      "flowchart", "graph", "sequenceDiagram", "stateDiagram-v2",
-      "classDiagram", "erDiagram", "gantt", "pie",
+      "flowchart",
+      "graph",
+      "sequenceDiagram",
+      "stateDiagram-v2",
+      "classDiagram",
+      "erDiagram",
+      "gantt",
+      "pie",
     ];
 
     for (const block of mermaidBlocks) {
@@ -164,9 +197,16 @@ describe("README AC-3: reflects all features up to S31", () => {
     await readmePromise;
     await claudeMdPromise;
     const composerFiles = [
-      "help.ts", "tasks.ts", "execution.ts", "planning.ts",
-      "memory-cmds.ts", "quality.ts", "profile.ts", "project.ts",
-      "utilities.ts", "zz-messages.ts",
+      "help.ts",
+      "tasks.ts",
+      "execution.ts",
+      "planning.ts",
+      "memory-cmds.ts",
+      "quality.ts",
+      "profile.ts",
+      "project.ts",
+      "utilities.ts",
+      "zz-messages.ts",
     ];
     for (const file of composerFiles) {
       expect(readme).toContain(file);
@@ -178,8 +218,11 @@ describe("README AC-3: reflects all features up to S31", () => {
     // Core features that must be in README per CLAUDE.md
     const features = [
       "blackboard",
-      "gate-evaluator", "adversarial", "notification-queue",
-      "cost-tracking", "MCP",
+      "gate-evaluator",
+      "adversarial",
+      "notification-queue",
+      "cost-tracking",
+      "MCP",
     ];
     for (const feature of features) {
       expect(readme.toLowerCase()).toContain(feature.toLowerCase());

@@ -4,15 +4,15 @@
  * Tests for BMad agent definitions, command mapping, and prompt enrichment.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  getAgents,
+  buildAgentSystemPrompt,
+  buildBmadExecPrompt,
+  enrichPromptWithAgent,
+  formatAgentList,
   getAgent,
   getAgentForCommand,
-  buildAgentSystemPrompt,
-  enrichPromptWithAgent,
-  buildBmadExecPrompt,
-  formatAgentList,
+  getAgents,
 } from "../../src/bmad-agents";
 
 describe("Agent Registry", () => {
@@ -134,7 +134,8 @@ describe("BMad Exec Prompt", () => {
   it("includes acceptance criteria when present", () => {
     const prompt = buildBmadExecPrompt({
       title: "Add button",
-      acceptance_criteria: "Given a user on the homepage\nWhen they click the button\nThen a modal appears",
+      acceptance_criteria:
+        "Given a user on the homepage\nWhen they click the button\nThen a modal appears",
     });
 
     expect(prompt).toContain("CRITERES D'ACCEPTATION");

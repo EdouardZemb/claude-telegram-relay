@@ -6,9 +6,11 @@
  * S43 + bugfix: sessions now persist to disk so PRD workflow data survives restarts.
  */
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import { join } from "path";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("conversation-session");
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const SESSIONS_FILE = join(RELAY_DIR, "sessions.json");
 
@@ -69,7 +71,14 @@ export interface ConversationSession {
   /** PRD ID when in a PRD-to-deploy workflow */
   activePrdId?: string;
   /** Current PRD workflow step */
-  prdWorkflowStep?: "triage" | "generation" | "revision" | "decomposition" | "spec_preflight" | "implementation" | "done";
+  prdWorkflowStep?:
+    | "triage"
+    | "generation"
+    | "revision"
+    | "decomposition"
+    | "spec_preflight"
+    | "implementation"
+    | "done";
   /** Pending action proposal from the bot, awaiting user confirmation */
   pendingProposal?: PendingProposal;
 }
@@ -116,7 +125,7 @@ async function saveSessions(): Promise<void> {
     await writeFile(tmp, JSON.stringify(entries, null, 2));
     await rename(tmp, SESSIONS_FILE);
   } catch (error) {
-    console.error("Session persistence error:", error);
+    log.error("Session persistence error", { error: String(error) });
   }
 }
 
@@ -323,7 +332,10 @@ const CONSTRAINT_PATTERNS: Array<{
  */
 export function extractConstraints(text: string): DetectedConstraint[] {
   const found: DetectedConstraint[] = [];
-  const normalized = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
   for (const { type, patterns, extractor } of CONSTRAINT_PATTERNS) {
     for (const pattern of patterns) {
@@ -363,9 +375,7 @@ export function formatSessionForIntent(session: ConversationSession): string {
 
   // Constraints
   if (session.constraints.length > 0) {
-    const constraintStr = session.constraints
-      .map((c) => `${c.type}=${c.value}`)
-      .join(", ");
+    const constraintStr = session.constraints.map((c) => `${c.type}=${c.value}`).join(", ");
     parts.push(`Contraintes: ${constraintStr}`);
   }
 

@@ -14,9 +14,9 @@
  */
 
 import {
+  type AgentPromptContext,
   buildFullAgentPrompt,
   buildIsolationInstructions,
-  type AgentPromptContext,
 } from "./bmad-prompts.ts";
 import { buildStoryFile, formatStoryForAgent } from "./story-files.ts";
 
@@ -40,8 +40,8 @@ export interface BmadAgent {
   // maxBudgetUsd removed — agents run unconstrained
   /** S42: Per-role trust thresholds for progressive autonomy */
   trustThresholds?: {
-    specAutoApprove: number;   // Trust score to auto-approve spec/plan/tasks gates
-    implAutoApprove: number;   // Trust score to auto-approve implementation gates
+    specAutoApprove: number; // Trust score to auto-approve spec/plan/tasks gates
+    implAutoApprove: number; // Trust score to auto-approve implementation gates
   };
 }
 
@@ -98,7 +98,10 @@ const AGENTS: BmadAgent[] = [
       { trigger: "EP", description: "Edit PRD: modifier un PRD existant" },
       { trigger: "CE", description: "Create Epics and Stories: specs qui guideront le dev" },
       { trigger: "IR", description: "Implementation Readiness: alignement PRD/UX/Archi/Stories" },
-      { trigger: "CC", description: "Course Correction: gerer un changement majeur en cours d'implementation" },
+      {
+        trigger: "CC",
+        description: "Course Correction: gerer un changement majeur en cours d'implementation",
+      },
     ],
     effort: "medium",
     model: "claude-sonnet-4-6",
@@ -120,7 +123,10 @@ const AGENTS: BmadAgent[] = [
     criticalActions: [],
     commands: [
       { trigger: "CA", description: "Create Architecture: documenter les decisions techniques" },
-      { trigger: "IR", description: "Implementation Readiness: alignement complet avant implementation" },
+      {
+        trigger: "IR",
+        description: "Implementation Readiness: alignement complet avant implementation",
+      },
     ],
     effort: "high",
     model: "claude-opus-4-6",
@@ -224,9 +230,7 @@ const AGENTS: BmadAgent[] = [
       "Include acceptance criteria for every subtask",
       "Order subtasks by dependency",
     ],
-    commands: [
-      { trigger: "PL", description: "Plan: analyse + decomposition en une seule passe" },
-    ],
+    commands: [{ trigger: "PL", description: "Plan: analyse + decomposition en une seule passe" }],
     effort: "medium",
     model: "claude-sonnet-4-6",
     fallbackModel: "claude-haiku-4-5",
@@ -250,7 +254,10 @@ const AGENTS: BmadAgent[] = [
       "Provide effort estimates for each recommendation",
     ],
     commands: [
-      { trigger: "EX", description: "Explore: investiguer un sujet et produire un rapport structure" },
+      {
+        trigger: "EX",
+        description: "Explore: investiguer un sujet et produire un rapport structure",
+      },
     ],
     effort: "low",
     model: "claude-haiku-4-5",
@@ -334,7 +341,7 @@ export function buildAgentSystemPrompt(agent: BmadAgent): string {
  */
 export function enrichPromptWithAgent(
   command: string,
-  prompt: string
+  prompt: string,
 ): { enrichedPrompt: string; agent: BmadAgent | undefined } {
   const agent = getAgentForCommand(command);
   if (!agent) return { enrichedPrompt: prompt, agent: undefined };
@@ -369,15 +376,14 @@ export function buildBmadExecPrompt(task: {
     taskDescription: task.description || undefined,
     priority: task.priority,
     acceptanceCriteria: task.acceptance_criteria || undefined,
-    devNotes: task.dev_notes
-      ? `${task.dev_notes}\n\n--- STORY FILE ---\n${storyText}`
-      : storyText,
+    devNotes: task.dev_notes ? `${task.dev_notes}\n\n--- STORY FILE ---\n${storyText}` : storyText,
     architectureRef: task.architecture_ref || undefined,
     projectName: task.project,
-    subtasks: task.subtasks?.map((st) => ({
-      title: `${st.title}${st.ac_mapping ? ` (AC: ${st.ac_mapping})` : ""}`,
-      done: st.done,
-    })) || undefined,
+    subtasks:
+      task.subtasks?.map((st) => ({
+        title: `${st.title}${st.ac_mapping ? ` (AC: ${st.ac_mapping})` : ""}`,
+        done: st.done,
+      })) || undefined,
   };
 
   // Build full prompt from YAML + context-specific instructions
@@ -395,7 +401,7 @@ export function buildBmadExecPrompt(task: {
  */
 export function buildAgentPromptForCommand(
   command: string,
-  context: Partial<AgentPromptContext>
+  context: Partial<AgentPromptContext>,
 ): { prompt: string; agentId: string | undefined } {
   const agentId = COMMAND_AGENT_MAP[command];
   if (!agentId) return { prompt: "", agentId: undefined };

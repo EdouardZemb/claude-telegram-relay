@@ -11,7 +11,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("tasks");
 export interface Subtask {
   title: string;
   ac_mapping?: string;
@@ -58,7 +60,7 @@ export async function addTask(
     dev_notes?: string;
     architecture_ref?: string;
     subtasks?: Subtask[];
-  }
+  },
 ): Promise<Task | null> {
   const { data, error } = await supabase
     .from("tasks")
@@ -79,7 +81,7 @@ export async function addTask(
     .single();
 
   if (error) {
-    console.error("addTask error:", error);
+    log.error("addTask error", { error: String(error) });
     return null;
   }
   return data as Task;
@@ -87,7 +89,7 @@ export async function addTask(
 
 export async function getBacklog(
   supabase: SupabaseClient,
-  opts?: { project?: string; project_id?: string; sprint?: string; status?: string }
+  opts?: { project?: string; project_id?: string; sprint?: string; status?: string },
 ): Promise<Task[]> {
   let query = supabase
     .from("tasks")
@@ -103,7 +105,7 @@ export async function getBacklog(
 
   const { data, error } = await query;
   if (error) {
-    console.error("getBacklog error:", error);
+    log.error("getBacklog error", { error: String(error) });
     return [];
   }
   return (data ?? []) as Task[];
@@ -112,7 +114,7 @@ export async function getBacklog(
 export async function updateTaskStatus(
   supabase: SupabaseClient,
   taskId: string,
-  status: Task["status"]
+  status: Task["status"],
 ): Promise<Task | null> {
   const update: Record<string, unknown> = { status };
   if (status === "done") update.completed_at = new Date().toISOString();
@@ -125,7 +127,7 @@ export async function updateTaskStatus(
     .single();
 
   if (error) {
-    console.error("updateTaskStatus error:", error);
+    log.error("updateTaskStatus error", { error: String(error) });
     return null;
   }
   return data as Task;
@@ -134,7 +136,7 @@ export async function updateTaskStatus(
 export async function assignSprint(
   supabase: SupabaseClient,
   taskId: string,
-  sprint: string
+  sprint: string,
 ): Promise<Task | null> {
   const { data, error } = await supabase
     .from("tasks")
@@ -144,7 +146,7 @@ export async function assignSprint(
     .single();
 
   if (error) {
-    console.error("assignSprint error:", error);
+    log.error("assignSprint error", { error: String(error) });
     return null;
   }
   return data as Task;
@@ -152,11 +154,11 @@ export async function assignSprint(
 
 export async function getSprintSummary(
   supabase: SupabaseClient,
-  sprint: string
+  sprint: string,
 ): Promise<{ total: number; backlog: number; in_progress: number; review: number; done: number }> {
   const { data, error } = await supabase.rpc("get_sprint_summary", { p_sprint: sprint });
   if (error || !data) {
-    console.error("getSprintSummary error:", error);
+    log.error("getSprintSummary error", { error: String(error) });
     return { total: 0, backlog: 0, in_progress: 0, review: 0, done: 0 };
   }
   return data;
@@ -240,7 +242,10 @@ export function formatBacklog(tasks: Task[], title?: string): string {
   return sections.join("\n").trim();
 }
 
-export function formatSprintSummary(sprint: string, summary: { total: number; backlog: number; in_progress: number; review: number; done: number }): string {
+export function formatSprintSummary(
+  sprint: string,
+  summary: { total: number; backlog: number; in_progress: number; review: number; done: number },
+): string {
   const progress = summary.total > 0 ? Math.round((summary.done / summary.total) * 100) : 0;
   return [
     `Sprint ${sprint}`,

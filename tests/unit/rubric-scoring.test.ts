@@ -4,15 +4,14 @@
  * Tests rubric dimension parsing, scoring, and critical weakness detection.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
+  CODE_RUBRIC_DIMENSIONS,
+  formatEvaluationFeedback,
+  type GateEvaluation,
   parseEvaluationOutput,
   parseRubricFromOutput,
-  formatEvaluationFeedback,
-  CODE_RUBRIC_DIMENSIONS,
   SPEC_RUBRIC_DIMENSIONS,
-  type GateEvaluation,
-  type RubricDimension,
 } from "../../src/gate-evaluator";
 
 // ── Rubric Dimensions ────────────────────────────────────────
@@ -111,7 +110,7 @@ describe("parseRubricFromOutput", () => {
 
     const rubric = parseRubricFromOutput(obj, "implementation");
     expect(rubric![0].score).toBe(25); // clamped
-    expect(rubric![1].score).toBe(0);  // clamped
+    expect(rubric![1].score).toBe(0); // clamped
     expect(rubric![2].score).toBe(25);
     expect(rubric![3].score).toBe(0);
   });
@@ -183,8 +182,9 @@ describe("parseEvaluationOutput with rubric", () => {
     });
 
     const result = parseEvaluationOutput(output, "implementation");
-    const criticalIssue = result.issues.find((i) =>
-      i.description.includes("Critical weakness") && i.description.includes("error_handling")
+    const criticalIssue = result.issues.find(
+      (i) =>
+        i.description.includes("Critical weakness") && i.description.includes("error_handling"),
     );
     expect(criticalIssue).toBeDefined();
     expect(criticalIssue?.severity).toBe("critical");
@@ -230,7 +230,9 @@ describe("formatEvaluationFeedback with rubric", () => {
     const evaluation: GateEvaluation = {
       pass: false,
       score: 58,
-      issues: [{ severity: "major", description: "Error handling gaps", suggestion: "Add try/catch" }],
+      issues: [
+        { severity: "major", description: "Error handling gaps", suggestion: "Add try/catch" },
+      ],
       gate_name: "implementation",
       rubric: [
         { name: "error_handling", score: 8, feedback: "Missing try/catch", critical: true },

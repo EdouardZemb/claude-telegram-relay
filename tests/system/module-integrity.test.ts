@@ -8,7 +8,7 @@
  * S18-11: Anti-regression for the S18 cleanup sprint.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 
 // ── Source Module Imports ────────────────────────────────────
 

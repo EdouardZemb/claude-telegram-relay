@@ -13,7 +13,7 @@
  */
 
 import { readFile, writeFile } from "fs/promises";
-import { join, dirname } from "path";
+import { dirname, join } from "path";
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const PREFS_FILE = join(PROJECT_ROOT, "config", "notification-prefs.json");
@@ -27,7 +27,7 @@ export interface TypePrefs {
 
 export interface NotificationPrefs {
   quietStart: number; // hour 0-23
-  quietEnd: number;   // hour 0-23
+  quietEnd: number; // hour 0-23
   batchIntervalMs: number;
   batchThreshold: number;
   types: Record<NotificationType, TypePrefs>;
@@ -52,7 +52,11 @@ export async function loadPrefs(): Promise<NotificationPrefs> {
   try {
     const content = await readFile(PREFS_FILE, "utf-8");
     const parsed = JSON.parse(content);
-    cachedPrefs = { ...DEFAULT_PREFS, ...parsed, types: { ...DEFAULT_PREFS.types, ...parsed.types } };
+    cachedPrefs = {
+      ...DEFAULT_PREFS,
+      ...parsed,
+      types: { ...DEFAULT_PREFS.types, ...parsed.types },
+    };
     return cachedPrefs;
   } catch {
     cachedPrefs = getDefaultPrefs();
@@ -82,7 +86,8 @@ export function isQuietHours(timezone?: string): boolean {
   const tz = timezone || process.env.USER_TIMEZONE || "Europe/Paris";
   const now = new Date();
   const currentHour = parseInt(
-    now.toLocaleTimeString("en-US", { hour: "2-digit", hour12: false, timeZone: tz })
+    now.toLocaleTimeString("en-US", { hour: "2-digit", hour12: false, timeZone: tz }),
+    10,
   );
 
   const { quietStart, quietEnd } = prefs;

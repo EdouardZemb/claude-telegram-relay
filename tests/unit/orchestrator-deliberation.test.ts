@@ -1,5 +1,5 @@
-import { describe, it, expect } from "bun:test";
-import { shouldDeliberate, getDeliberationReviewer } from "../../src/deliberation.ts";
+import { describe, expect, it } from "bun:test";
+import { getDeliberationReviewer, shouldDeliberate } from "../../src/deliberation.ts";
 
 describe("orchestrator-deliberation", () => {
   describe("shouldDeliberate", () => {

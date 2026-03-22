@@ -56,7 +56,7 @@ server.tool(
   async ({ query, limit, threshold }) => {
     const results = await callEdgeFunction("search_thoughts", { query, limit, threshold });
     return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -69,7 +69,7 @@ server.tool(
   async ({ type, limit }) => {
     const results = await callEdgeFunction("list_thoughts", { type, limit });
     return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -79,7 +79,7 @@ server.tool(
   async () => {
     const results = await callEdgeFunction("thought_stats");
     return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -87,13 +87,19 @@ server.tool(
   "Store a new memory entry. Use for important facts, decisions, goals, or user preferences discovered during a session.",
   {
     content: z.string().describe("The memory content to store"),
-    type: z.string().optional().describe("Memory type: fact, goal, preference, decision, context (default: fact)"),
-    metadata: z.record(z.unknown()).optional().describe("Additional metadata (topics, source, etc.)"),
+    type: z
+      .string()
+      .optional()
+      .describe("Memory type: fact, goal, preference, decision, context (default: fact)"),
+    metadata: z
+      .record(z.unknown())
+      .optional()
+      .describe("Additional metadata (topics, source, etc.)"),
   },
   async ({ content, type, metadata }) => {
     const result = await callEdgeFunction("capture_thought", { content, type, metadata });
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-  }
+  },
 );
 
 // ── S32: Supabase REST helpers ────────────────────────────────
@@ -147,17 +153,18 @@ server.tool(
     limit: z.number().optional().describe("Max results (default 20)"),
   },
   async ({ status, project, sprint, limit }) => {
-    let url = "tasks?select=id,title,status,priority,sprint,project,description"
-      + "&order=priority.asc,created_at.asc"
-      + `&limit=${limit || 20}`
-      + "&status=neq.cancelled";
+    let url =
+      "tasks?select=id,title,status,priority,sprint,project,description" +
+      "&order=priority.asc,created_at.asc" +
+      `&limit=${limit || 20}` +
+      "&status=neq.cancelled";
     if (status) url += `&status=eq.${status}`;
     if (project) url += `&project=eq.${project}`;
     if (sprint) url += `&sprint=eq.${sprint}`;
 
     const data = await callSupabaseRest(url);
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -169,7 +176,7 @@ server.tool(
   async ({ sprint }) => {
     const data = await callRpc("get_sprint_summary", { p_sprint: sprint });
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -185,35 +192,52 @@ server.tool(
 
     promises.push(
       callEdgeFunction("list_thoughts", { type: "fact", limit: 10 })
-        .then((data: unknown) => { results.facts = data; })
-        .catch(() => { results.facts = []; })
+        .then((data: unknown) => {
+          results.facts = data;
+        })
+        .catch(() => {
+          results.facts = [];
+        }),
     );
 
     promises.push(
       callEdgeFunction("list_thoughts", { type: "goal", limit: 5 })
-        .then((data: unknown) => { results.goals = data; })
-        .catch(() => { results.goals = []; })
+        .then((data: unknown) => {
+          results.goals = data;
+        })
+        .catch(() => {
+          results.goals = [];
+        }),
     );
 
     if (sprint) {
       promises.push(
         callRpc("get_sprint_summary", { p_sprint: sprint })
-          .then((data: unknown) => { results.sprint_summary = data; })
-          .catch(() => { results.sprint_summary = null; })
+          .then((data: unknown) => {
+            results.sprint_summary = data;
+          })
+          .catch(() => {
+            results.sprint_summary = null;
+          }),
       );
     }
 
-    let taskUrl = "tasks?select=id,title,status,priority,sprint&order=updated_at.desc&limit=10&status=neq.cancelled";
+    let taskUrl =
+      "tasks?select=id,title,status,priority,sprint&order=updated_at.desc&limit=10&status=neq.cancelled";
     if (project) taskUrl += `&project=eq.${project}`;
     promises.push(
       callSupabaseRest(taskUrl)
-        .then((data: unknown) => { results.recent_tasks = data; })
-        .catch(() => { results.recent_tasks = []; })
+        .then((data: unknown) => {
+          results.recent_tasks = data;
+        })
+        .catch(() => {
+          results.recent_tasks = [];
+        }),
     );
 
     await Promise.all(promises);
     return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
-  }
+  },
 );
 
 // ── S32: Blackboard Tools ────────────────────────────────────
@@ -227,10 +251,14 @@ server.tool(
   },
   async ({ session_id, section }) => {
     const url = `blackboard?session_id=eq.${session_id}&select=sections,version,status,pipeline_type`;
-    const data = await callSupabaseRest(url) as any[];
+    const data = (await callSupabaseRest(url)) as any[];
 
     if (!data?.length) {
-      return { content: [{ type: "text" as const, text: `Blackboard not found for session: ${session_id}` }] };
+      return {
+        content: [
+          { type: "text" as const, text: `Blackboard not found for session: ${session_id}` },
+        ],
+      };
     }
 
     const bb = data[0];
@@ -238,7 +266,7 @@ server.tool(
       ? { [section]: bb.sections?.[section] ?? null, version: bb.version }
       : bb;
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -246,12 +274,16 @@ server.tool(
   "Write data to a blackboard section. Uses optimistic locking (version check).",
   {
     session_id: z.string().describe("Blackboard session ID"),
-    section: z.enum(["spec", "plan", "tasks", "implementation", "verification"]).describe("Section to write"),
+    section: z
+      .enum(["spec", "plan", "tasks", "implementation", "verification"])
+      .describe("Section to write"),
     data: z.record(z.unknown()).describe("Data to write to the section"),
     role: z.string().describe("Agent role performing the write"),
   },
   async ({ session_id, section, data, role }) => {
-    const current = await callSupabaseRest(`blackboard?session_id=eq.${session_id}&select=sections,version`) as any[];
+    const current = (await callSupabaseRest(
+      `blackboard?session_id=eq.${session_id}&select=sections,version`,
+    )) as any[];
     if (!current?.length) {
       return { content: [{ type: "text" as const, text: "Blackboard not found" }] };
     }
@@ -275,31 +307,35 @@ server.tool(
           version: newVersion,
           updated_at: new Date().toISOString(),
         }),
-      }
+      },
     );
 
     if (!response.ok) {
       const text = await response.text();
-      return { content: [{ type: "text" as const, text: `Write failed (version conflict?): ${text}` }] };
+      return {
+        content: [{ type: "text" as const, text: `Write failed (version conflict?): ${text}` }],
+      };
     }
 
-    return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, version: newVersion }) }] };
-  }
+    return {
+      content: [
+        { type: "text" as const, text: JSON.stringify({ success: true, version: newVersion }) },
+      ],
+    };
+  },
 );
 
 // ── S39: Code Graph Tools ────────────────────────────────────
 
 import {
-  loadGraph,
-  indexCodebase,
-  saveGraph,
-  getModuleDependencies,
-  getDependents,
-  getImpactRadius,
-  getGraphStats,
-  findNode,
-  formatGraphContext,
   estimateComplexity,
+  findNode,
+  getDependents,
+  getGraphStats,
+  getImpactRadius,
+  getModuleDependencies,
+  indexCodebase,
+  loadGraph,
 } from "../src/code-graph.ts";
 
 server.tool(
@@ -326,7 +362,7 @@ server.tool(
       })),
     };
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -350,7 +386,7 @@ server.tool(
       })),
     };
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-  }
+  },
 );
 
 server.tool(
@@ -375,45 +411,39 @@ server.tool(
       stats: getGraphStats(graph),
     };
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-  }
+  },
 );
 
 // ── S44: Business Logic Server (Task Tools) ─────────────────
 
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "crypto";
+import { rename as fsRename, mkdir, readFile, writeFile } from "fs/promises";
+import { join } from "path";
+import { decomposeTask } from "../src/agent.ts";
+import { runAllChecks } from "../src/alerts.ts";
+import { estimateSprintCost } from "../src/cost-estimate.ts";
+import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
+import { listFeatures, setFeature } from "../src/feature-flags.ts";
+import { formatOrchestrationResult, orchestrate } from "../src/orchestrator.ts";
+import {
+  DEFAULT_PIPELINE,
+  LIGHT_PIPELINE,
+  QUICK_PIPELINE,
+  RESEARCH_PIPELINE,
+  REVIEW_PIPELINE,
+  SOLO_PIPELINE,
+} from "../src/pipeline-selection.ts";
+import { generatePRD, getPRD, getPRDs, savePRD, updatePRDStatus } from "../src/prd.ts";
+import { analyzeBacklog } from "../src/proactive-planner.ts";
+import { buildStoryFile, enrichTaskWithStory } from "../src/story-files.ts";
 import {
   addTask,
-  updateTaskStatus,
   getBacklog,
   getCurrentSprint,
   getSprintSummary,
+  updateTaskStatus,
 } from "../src/tasks.ts";
-import {
-  generatePRD,
-  savePRD,
-  getPRD,
-  getPRDs,
-  updatePRDStatus,
-} from "../src/prd.ts";
-import { readFile, writeFile, mkdir, rename as fsRename } from "fs/promises";
-import { join } from "path";
-import { randomUUID } from "crypto";
-import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
-import { estimateSprintCost } from "../src/cost-estimate.ts";
-import { runAllChecks } from "../src/alerts.ts";
-import { listFeatures, setFeature } from "../src/feature-flags.ts";
-import { analyzeBacklog, formatPlannerResult } from "../src/proactive-planner.ts";
-import { orchestrate, formatOrchestrationResult } from "../src/orchestrator.ts";
-import { decomposeTask } from "../src/agent.ts";
-import { buildStoryFile, enrichTaskWithStory } from "../src/story-files.ts";
-import {
-  DEFAULT_PIPELINE,
-  QUICK_PIPELINE,
-  REVIEW_PIPELINE,
-  SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  RESEARCH_PIPELINE,
-} from "../src/pipeline-selection.ts";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -453,7 +483,7 @@ async function enqueueMcpNotification(notif: Omit<McpNotification, "createdAt">)
 
 function launchMcpBackgroundJob(
   type: string,
-  description: string,
+  _description: string,
   fn: () => Promise<string>,
 ): string {
   const jobId = randomUUID().slice(0, 8);
@@ -503,7 +533,9 @@ server.tool(
       });
 
       if (!task) {
-        return { content: [{ type: "text" as const, text: "Error: failed to create task in Supabase" }] };
+        return {
+          content: [{ type: "text" as const, text: "Error: failed to create task in Supabase" }],
+        };
       }
 
       await enqueueMcpNotification({
@@ -515,9 +547,16 @@ server.tool(
 
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -525,7 +564,9 @@ server.tool(
   "Update a task's status. Same effect as /start or /done on Telegram. Sends a notification to Telegram.",
   {
     task_id: z.string().describe("Task ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
-    status: z.enum(["backlog", "in_progress", "review", "done", "cancelled"]).describe("New status"),
+    status: z
+      .enum(["backlog", "in_progress", "review", "done", "cancelled"])
+      .describe("New status"),
   },
   async ({ task_id, status }) => {
     try {
@@ -533,16 +574,22 @@ server.tool(
       let resolvedId = task_id;
       if (task_id.length < 36) {
         const tasks = await getBacklog(supabase);
-        const match = tasks.find(t => t.id.startsWith(task_id));
+        const match = tasks.find((t) => t.id.startsWith(task_id));
         if (!match) {
-          return { content: [{ type: "text" as const, text: `Error: no task found with ID prefix '${task_id}'` }] };
+          return {
+            content: [
+              { type: "text" as const, text: `Error: no task found with ID prefix '${task_id}'` },
+            ],
+          };
         }
         resolvedId = match.id;
       }
 
       const task = await updateTaskStatus(supabase, resolvedId, status);
       if (!task) {
-        return { content: [{ type: "text" as const, text: `Error: failed to update task '${task_id}'` }] };
+        return {
+          content: [{ type: "text" as const, text: `Error: failed to update task '${task_id}'` }],
+        };
       }
 
       const statusLabels: Record<string, string> = {
@@ -562,9 +609,16 @@ server.tool(
 
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 // ── S44: Business Logic Server (PRD Tools) ──────────────────
@@ -582,25 +636,43 @@ server.tool(
     try {
       const projectName = project ?? "telegram-relay";
 
-      const jobId = launchMcpBackgroundJob("prd_create", description.substring(0, 100), async () => {
-        const generated = await generatePRD(description, projectName);
-        if (!generated) throw new Error("PRD generation failed (Claude CLI may be unavailable)");
+      const jobId = launchMcpBackgroundJob(
+        "prd_create",
+        description.substring(0, 100),
+        async () => {
+          const generated = await generatePRD(description, projectName);
+          if (!generated) throw new Error("PRD generation failed (Claude CLI may be unavailable)");
 
-        const prd = await savePRD(supabase, generated, {
-          project: projectName,
-          tags,
-          requested_by,
-        });
-        if (!prd) throw new Error("Failed to save PRD in Supabase");
+          const prd = await savePRD(supabase, generated, {
+            project: projectName,
+            tags,
+            requested_by,
+          });
+          if (!prd) throw new Error("Failed to save PRD in Supabase");
 
-        return `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`;
-      });
+          return `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`;
+        },
+      );
 
-      return { content: [{ type: "text" as const, text: `Job lance (id: ${jobId}). PRD en cours de generation, tu recevras une notification Telegram quand ce sera fini.` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Job lance (id: ${jobId}). PRD en cours de generation, tu recevras une notification Telegram quand ce sera fini.`,
+          },
+        ],
+      };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -608,16 +680,26 @@ server.tool(
   "List PRDs, optionally filtered by project and/or status. Same as /prd list on Telegram.",
   {
     project: z.string().optional().describe("Filter by project name"),
-    status: z.string().optional().describe("Filter by status: draft, approved, rejected, superseded"),
+    status: z
+      .string()
+      .optional()
+      .describe("Filter by status: draft, approved, rejected, superseded"),
   },
   async ({ project, status }) => {
     try {
       const prds = await getPRDs(supabase, { project, status });
       return { content: [{ type: "text" as const, text: JSON.stringify(prds, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -630,13 +712,24 @@ server.tool(
     try {
       const prd = await getPRD(supabase, prd_id);
       if (!prd) {
-        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+        return {
+          content: [
+            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
+          ],
+        };
       }
       return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -644,18 +737,27 @@ server.tool(
   "Approve a PRD (change status to approved) and auto-decompose into tasks as a background job. Same as /prd approve on Telegram. Sends a notification to Telegram.",
   {
     prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
-    auto_decompose: z.boolean().optional().describe("Auto-decompose PRD into tasks after approval (default: true)"),
+    auto_decompose: z
+      .boolean()
+      .optional()
+      .describe("Auto-decompose PRD into tasks after approval (default: true)"),
   },
   async ({ prd_id, auto_decompose }) => {
     try {
       const existing = await getPRD(supabase, prd_id);
       if (!existing) {
-        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+        return {
+          content: [
+            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
+          ],
+        };
       }
 
       const prd = await updatePRDStatus(supabase, existing.id, "approved");
       if (!prd) {
-        return { content: [{ type: "text" as const, text: `Error: failed to approve PRD '${prd_id}'` }] };
+        return {
+          content: [{ type: "text" as const, text: `Error: failed to approve PRD '${prd_id}'` }],
+        };
       }
 
       await enqueueMcpNotification({
@@ -671,35 +773,42 @@ server.tool(
 
       if (shouldDecompose) {
         const projectSlug = prd.project || "telegram-relay";
-        decomposeJobId = launchMcpBackgroundJob("prd-decompose", prd.title.substring(0, 80), async () => {
-          const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
-          const subtasks = await decomposeTask(prdDescription);
+        decomposeJobId = launchMcpBackgroundJob(
+          "prd-decompose",
+          prd.title.substring(0, 80),
+          async () => {
+            const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
+            const subtasks = await decomposeTask(prdDescription);
 
-          if (subtasks.length === 0) {
-            throw new Error("Aucune sous-tache generee depuis le PRD.");
-          }
-
-          const added = [];
-          for (const st of subtasks) {
-            const task = await addTask(supabase, st.title, {
-              description: st.description,
-              priority: st.priority,
-              project: projectSlug,
-            });
-            if (task) {
-              if (st.acceptance_criteria) {
-                await supabase.from("tasks").update({
-                  acceptance_criteria: st.acceptance_criteria,
-                }).eq("id", task.id);
-              }
-              const story = buildStoryFile(task);
-              await enrichTaskWithStory(supabase, task.id, story);
-              added.push(task);
+            if (subtasks.length === 0) {
+              throw new Error("Aucune sous-tache generee depuis le PRD.");
             }
-          }
 
-          return `${added.length} taches creees depuis le PRD "${prd.title}"`;
-        });
+            const added = [];
+            for (const st of subtasks) {
+              const task = await addTask(supabase, st.title, {
+                description: st.description,
+                priority: st.priority,
+                project: projectSlug,
+              });
+              if (task) {
+                if (st.acceptance_criteria) {
+                  await supabase
+                    .from("tasks")
+                    .update({
+                      acceptance_criteria: st.acceptance_criteria,
+                    })
+                    .eq("id", task.id);
+                }
+                const story = buildStoryFile(task);
+                await enrichTaskWithStory(supabase, task.id, story);
+                added.push(task);
+              }
+            }
+
+            return `${added.length} taches creees depuis le PRD "${prd.title}"`;
+          },
+        );
       }
 
       const result: Record<string, unknown> = { ...prd };
@@ -710,9 +819,16 @@ server.tool(
 
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -725,12 +841,18 @@ server.tool(
     try {
       const existing = await getPRD(supabase, prd_id);
       if (!existing) {
-        return { content: [{ type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` }] };
+        return {
+          content: [
+            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
+          ],
+        };
       }
 
       const prd = await updatePRDStatus(supabase, existing.id, "rejected");
       if (!prd) {
-        return { content: [{ type: "text" as const, text: `Error: failed to reject PRD '${prd_id}'` }] };
+        return {
+          content: [{ type: "text" as const, text: `Error: failed to reject PRD '${prd_id}'` }],
+        };
       }
 
       await enqueueMcpNotification({
@@ -742,9 +864,16 @@ server.tool(
 
       return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 // ── MCP Business Tools: Sprint, Metrics, Cost, Alerts, Features, Estimate, Planner ──
@@ -759,32 +888,44 @@ server.tool(
   },
   async ({ sprint }) => {
     try {
-      const sprintId = sprint || await getCurrentSprint(supabase) || "unknown";
+      const sprintId = sprint || (await getCurrentSprint(supabase)) || "unknown";
       const [summary, tasks] = await Promise.all([
         getSprintSummary(supabase, sprintId),
         callSupabaseRest(
           `tasks?sprint=eq.${sprintId}&status=neq.cancelled` +
             `&select=id,title,status,priority,description,estimated_hours,actual_hours,tags` +
-            `&order=priority.asc,status.asc`
+            `&order=priority.asc,status.asc`,
         ) as Promise<any[]>,
       ]);
-      const completionRate = summary.total > 0
-        ? Math.round((summary.done / summary.total) * 100)
-        : 0;
+      const completionRate =
+        summary.total > 0 ? Math.round((summary.done / summary.total) * 100) : 0;
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            sprint: sprintId,
-            summary: { ...summary, completionRate: `${completionRate}%` },
-            tasks,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                sprint: sprintId,
+                summary: { ...summary, completionRate: `${completionRate}%` },
+                tasks,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -797,33 +938,47 @@ server.tool(
   },
   async ({ sprint }) => {
     try {
-      const sprintId = sprint || await getCurrentSprint(supabase) || "unknown";
+      const sprintId = sprint || (await getCurrentSprint(supabase)) || "unknown";
       const metricsUrl = `sprint_metrics?sprint_id=eq.${sprintId}&select=*&limit=1`;
-      const metricsData = await callSupabaseRest(metricsUrl) as any[];
+      const metricsData = (await callSupabaseRest(metricsUrl)) as any[];
 
       // Also fetch task stats for the sprint
       const summary = await getSprintSummary(supabase, sprintId);
 
       // Fetch last 3 sprints for comparison
-      const recentUrl = `sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours,total_tasks,completed_tasks`
-        + `&order=created_at.desc&limit=3`;
-      const recent = await callSupabaseRest(recentUrl) as any[];
+      const recentUrl =
+        `sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours,total_tasks,completed_tasks` +
+        `&order=created_at.desc&limit=3`;
+      const recent = (await callSupabaseRest(recentUrl)) as any[];
 
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            sprint: sprintId,
-            metrics: metricsData?.[0] ?? null,
-            taskSummary: summary,
-            recentSprints: recent,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                sprint: sprintId,
+                metrics: metricsData?.[0] ?? null,
+                taskSummary: summary,
+                recentSprints: recent,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -832,31 +987,45 @@ server.tool(
     "Preconditions: none (root query, but more useful after get_sprint_detail to know sprint scope). " +
     "Suggested next: get_estimate (pre-execution budgeting), analyze_backlog (cost-aware planning).",
   {
-    sprint: z.string().optional().describe("Sprint ID for sprint-scoped costs. Omit for total across all sprints."),
+    sprint: z
+      .string()
+      .optional()
+      .describe("Sprint ID for sprint-scoped costs. Omit for total across all sprints."),
   },
   async ({ sprint }) => {
     try {
       if (sprint) {
         const summary = await getSprintCostSummary(supabase, sprint);
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ sprint, ...summary }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ sprint, ...summary }, null, 2),
+            },
+          ],
         };
       } else {
         const total = await getTotalCost(supabase);
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(total, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(total, null, 2),
+            },
+          ],
         };
       }
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -865,31 +1034,47 @@ server.tool(
     "Preconditions: none (root query). " +
     "Suggested next: get_tasks (inspect flagged tasks), get_sprint_detail (sprint context), analyze_backlog (fix suggestions).",
   {
-    sprint: z.string().optional().describe("Sprint ID for sprint-scoped checks. Omit for general checks."),
+    sprint: z
+      .string()
+      .optional()
+      .describe("Sprint ID for sprint-scoped checks. Omit for general checks."),
   },
   async ({ sprint }) => {
     try {
-      const sprintId = sprint || await getCurrentSprint(supabase) || undefined;
+      const sprintId = sprint || (await getCurrentSprint(supabase)) || undefined;
       const alerts = await runAllChecks(supabase, sprintId);
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            sprintChecked: sprintId ?? "none",
-            alertCount: alerts.length,
-            alerts: alerts.map(a => ({
-              type: a.type,
-              severity: a.severity,
-              message: a.message,
-              data: a.data,
-            })),
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                sprintChecked: sprintId ?? "none",
+                alertCount: alerts.length,
+                alerts: alerts.map((a) => ({
+                  type: a.type,
+                  severity: a.severity,
+                  message: a.message,
+                  data: a.data,
+                })),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -898,23 +1083,34 @@ server.tool(
     "Preconditions: none (independent). " +
     "Suggested next: none (standalone action).",
   {
-    action: z.enum(["list", "enable", "disable"]).describe("Action: list all flags, enable a flag, or disable a flag"),
-    flag: z.string().optional().describe("Flag name (required for enable/disable, e.g., 'intent_detection')"),
+    action: z
+      .enum(["list", "enable", "disable"])
+      .describe("Action: list all flags, enable a flag, or disable a flag"),
+    flag: z
+      .string()
+      .optional()
+      .describe("Flag name (required for enable/disable, e.g., 'intent_detection')"),
   },
   async ({ action, flag }) => {
     try {
       if (action === "list") {
         const features = listFeatures();
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ features }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ features }, null, 2),
+            },
+          ],
         };
       }
 
       if (!flag) {
-        return { content: [{ type: "text" as const, text: "Error: flag name required for enable/disable" }] };
+        return {
+          content: [
+            { type: "text" as const, text: "Error: flag name required for enable/disable" },
+          ],
+        };
       }
 
       const enabled = action === "enable";
@@ -927,15 +1123,24 @@ server.tool(
       });
 
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({ flag, enabled, status: "updated" }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ flag, enabled, status: "updated" }, null, 2),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -945,21 +1150,33 @@ server.tool(
     "Suggested next: task_create (plan tasks), get_cost_summary (compare with actuals).",
   {
     task_count: z.number().min(1).describe("Number of tasks to estimate for"),
-    pipeline: z.string().optional().describe("Pipeline type: DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH (default: DEFAULT)"),
+    pipeline: z
+      .string()
+      .optional()
+      .describe("Pipeline type: DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH (default: DEFAULT)"),
   },
   async ({ task_count, pipeline }) => {
     try {
       const result = await estimateSprintCost(supabase, task_count, pipeline || "DEFAULT");
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(result, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 server.tool(
@@ -974,29 +1191,42 @@ server.tool(
     try {
       const result = await analyzeBacklog(supabase, sprint);
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            sprintHealth: result.sprintHealth,
-            summary: result.summary,
-            recommendationCount: result.recommendations.length,
-            recommendations: result.recommendations.map(r => ({
-              type: r.type,
-              title: r.title,
-              description: r.description,
-              confidence: r.confidence,
-              taskIds: r.taskIds,
-              suggestedPipeline: r.suggestedPipeline,
-              estimatedCost: r.estimatedCost,
-              complexityScore: r.complexityScore,
-            })),
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                sprintHealth: result.sprintHealth,
+                summary: result.summary,
+                recommendationCount: result.recommendations.length,
+                recommendations: result.recommendations.map((r) => ({
+                  type: r.type,
+                  title: r.title,
+                  description: r.description,
+                  confidence: r.confidence,
+                  taskIds: r.taskIds,
+                  suggestedPipeline: r.suggestedPipeline,
+                  estimatedCost: r.estimatedCost,
+                  complexityScore: r.complexityScore,
+                })),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 // ── Audit Tool ───────────────────────────────────────────────
@@ -1009,27 +1239,37 @@ server.tool(
     "Preconditions: none (read-only query; audit must have been run at least once for data to exist). " +
     "Suggested next: get_alerts (anomalies), analyze_backlog (improvement suggestions).",
   {
-    axis: z.string().optional().describe(
-      "Filter by audit axis (e.g., 'security', 'structure', 'tests'). Omit for all axes."
-    ),
+    axis: z
+      .string()
+      .optional()
+      .describe(
+        "Filter by audit axis (e.g., 'security', 'structure', 'tests'). Omit for all axes.",
+      ),
   },
   async ({ axis }) => {
     try {
-      const url = "audit_results?select=id,global_score,axis_scores,findings,created_at"
-        + "&order=created_at.desc&limit=1";
-      const data = await callSupabaseRest(url) as any[];
+      const url =
+        "audit_results?select=id,global_score,axis_scores,findings,created_at" +
+        "&order=created_at.desc&limit=1";
+      const data = (await callSupabaseRest(url)) as any[];
 
       if (!data?.length) {
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              message: "No audit results found. The audit engine has not run yet.",
-              score: null,
-              axis_scores: {},
-              findings: [],
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  message: "No audit results found. The audit engine has not run yet.",
+                  score: null,
+                  axis_scores: {},
+                  findings: [],
+                },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       }
 
@@ -1038,38 +1278,59 @@ server.tool(
       if (axis) {
         const axisScore = row.axis_scores?.[axis] ?? null;
         const axisFindings = Array.isArray(row.findings)
-          ? row.findings.filter((g: any) => g.axis === axis || g.type?.toLowerCase().includes(axis.toLowerCase()))
+          ? row.findings.filter(
+              (g: any) => g.axis === axis || g.type?.toLowerCase().includes(axis.toLowerCase()),
+            )
           : [];
 
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              axis,
-              score: axisScore,
-              globalScore: row.global_score,
-              findings: axisFindings,
-              created_at: row.created_at,
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  axis,
+                  score: axisScore,
+                  globalScore: row.global_score,
+                  findings: axisFindings,
+                  created_at: row.created_at,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       }
 
       return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            score: row.global_score,
-            axis_scores: row.axis_scores,
-            findings: row.findings,
-            created_at: row.created_at,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                score: row.global_score,
+                axis_scores: row.axis_scores,
+                findings: row.findings,
+                created_at: row.created_at,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
     }
-  }
+  },
 );
 
 // ── Orchestrate Tool ─────────────────────────────────────────
@@ -1091,11 +1352,28 @@ server.tool(
     "Suggested next: get_tasks (check result), get_cost_summary (see cost).",
   {
     task_id: z.string().describe("Task ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
-    pipeline: z.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"]).optional()
-      .describe("Pipeline type. DEFAULT=full (analyst->pm->architect->dev->qa), QUICK=dev->qa, REVIEW=qa->architect, SOLO=dev, LIGHT=planner->dev->qa, RESEARCH=explorer->planner->dev->qa. Omit for auto-selection."),
-    use_blackboard: z.boolean().optional().describe("Enable blackboard for structured context passing and gate evaluation (default: false)"),
-    auto_pipeline: z.boolean().optional().describe("Let the system choose the pipeline based on task analysis (default: true when pipeline is omitted)"),
-    resume_session_id: z.string().optional().describe("Resume a failed pipeline from its last successful step"),
+    pipeline: z
+      .enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])
+      .optional()
+      .describe(
+        "Pipeline type. DEFAULT=full (analyst->pm->architect->dev->qa), QUICK=dev->qa, REVIEW=qa->architect, SOLO=dev, LIGHT=planner->dev->qa, RESEARCH=explorer->planner->dev->qa. Omit for auto-selection.",
+      ),
+    use_blackboard: z
+      .boolean()
+      .optional()
+      .describe(
+        "Enable blackboard for structured context passing and gate evaluation (default: false)",
+      ),
+    auto_pipeline: z
+      .boolean()
+      .optional()
+      .describe(
+        "Let the system choose the pipeline based on task analysis (default: true when pipeline is omitted)",
+      ),
+    resume_session_id: z
+      .string()
+      .optional()
+      .describe("Resume a failed pipeline from its last successful step"),
   },
   async ({ task_id, pipeline, use_blackboard, auto_pipeline, resume_session_id }) => {
     try {
@@ -1103,55 +1381,66 @@ server.tool(
       let resolvedTask: any = null;
       if (task_id.length < 36) {
         const tasks = await getBacklog(supabase);
-        resolvedTask = tasks.find(t => t.id.startsWith(task_id));
+        resolvedTask = tasks.find((t) => t.id.startsWith(task_id));
       } else {
-        const result = await callSupabaseRest(
-          `tasks?id=eq.${task_id}&select=*&limit=1`
-        ) as any[];
+        const result = (await callSupabaseRest(`tasks?id=eq.${task_id}&select=*&limit=1`)) as any[];
         resolvedTask = result?.[0];
       }
 
       if (!resolvedTask) {
-        return { content: [{ type: "text" as const, text: `Error: no task found with ID '${task_id}'` }] };
+        return {
+          content: [{ type: "text" as const, text: `Error: no task found with ID '${task_id}'` }],
+        };
       }
 
       const selectedPipeline = pipeline ? PIPELINE_MAP[pipeline] : undefined;
-      const useAuto = auto_pipeline ?? (!pipeline);
+      const useAuto = auto_pipeline ?? !pipeline;
 
-      const jobId = launchMcpBackgroundJob("orchestrate", resolvedTask.title.substring(0, 80), async () => {
-        await enqueueMcpNotification({
-          type: "task",
-          severity: "normal",
-          message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
-          data: { taskId: resolvedTask.id },
-        });
+      const jobId = launchMcpBackgroundJob(
+        "orchestrate",
+        resolvedTask.title.substring(0, 80),
+        async () => {
+          await enqueueMcpNotification({
+            type: "task",
+            severity: "normal",
+            message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
+            data: { taskId: resolvedTask.id },
+          });
 
-        const result = await orchestrate(supabase, resolvedTask, {
-          pipeline: selectedPipeline,
-          autoPipeline: useAuto,
-          stopOnFailure: true,
-          useBlackboard: use_blackboard ?? false,
-          resumeSessionId: resume_session_id,
-          onProgress: async (msg) => {
-            await enqueueMcpNotification({
-              type: "task",
-              severity: "normal",
-              message: msg,
-              data: { taskId: resolvedTask.id },
-            });
+          const result = await orchestrate(supabase, resolvedTask, {
+            pipeline: selectedPipeline,
+            autoPipeline: useAuto,
+            stopOnFailure: true,
+            useBlackboard: use_blackboard ?? false,
+            resumeSessionId: resume_session_id,
+            onProgress: async (msg) => {
+              await enqueueMcpNotification({
+                type: "task",
+                severity: "normal",
+                message: msg,
+                data: { taskId: resolvedTask.id },
+              });
+            },
+          });
+
+          const formatted = formatOrchestrationResult(result);
+          return formatted;
+        },
+      );
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Job lance (id: ${jobId}). Pipeline "${pipeline || "auto"}" en cours pour "${resolvedTask.title}", tu recevras des notifications de progression sur Telegram.`,
           },
-        });
-
-        const formatted = formatOrchestrationResult(result);
-        return formatted;
-      });
-
-      return { content: [{ type: "text" as const, text: `Job lance (id: ${jobId}). Pipeline "${pipeline || "auto"}" en cours pour "${resolvedTask.title}", tu recevras des notifications de progression sur Telegram.` }] };
+        ],
+      };
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       return { content: [{ type: "text" as const, text: `Error: ${errMsg}` }] };
     }
-  }
+  },
 );
 
 const transport = new StdioServerTransport();

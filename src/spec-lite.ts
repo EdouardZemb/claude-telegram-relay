@@ -5,9 +5,11 @@
  */
 
 import { spawnClaude } from "./agent.ts";
-import type { Task } from "./tasks.ts";
 import type { ProtoSpec } from "./agent-schemas.ts";
+import { createLogger } from "./logger.ts";
+import type { Task } from "./tasks.ts";
 
+const log = createLogger("spec-lite");
 // ── Types ────────────────────────────────────────────────────
 
 export interface StoryFileInput {
@@ -32,7 +34,7 @@ export interface StoryFileInput {
 export async function generateProtoSpec(
   task: Task,
   storyFile: StoryFileInput | null,
-  agentContext?: string
+  agentContext?: string,
 ): Promise<ProtoSpec> {
   const startTime = Date.now();
 
@@ -85,13 +87,13 @@ export async function generateProtoSpec(
     });
 
     if (result.exitCode !== 0 || !result.stdout) {
-      console.warn("spec-lite: spawnClaude failed, returning default proto-spec");
+      log.warn("spec-lite: spawnClaude failed, returning default proto-spec");
       return buildDefaultProtoSpec(task, startTime);
     }
 
     return parseProtoSpec(result.stdout, task, startTime);
   } catch (error) {
-    console.error("spec-lite error:", error);
+    log.error("spec-lite error", { error: String(error) });
     return buildDefaultProtoSpec(task, startTime);
   }
 }
@@ -102,11 +104,7 @@ export async function generateProtoSpec(
  * Parse the agent output into a ProtoSpec.
  * Falls back to default on parse failure.
  */
-export function parseProtoSpec(
-  output: string,
-  task: Task,
-  startTime: number
-): ProtoSpec {
+export function parseProtoSpec(output: string, task: Task, startTime: number): ProtoSpec {
   // Try direct JSON parse
   try {
     const parsed = JSON.parse(output);
@@ -125,7 +123,7 @@ export function parseProtoSpec(
     }
   }
 
-  console.warn("spec-lite: could not parse agent output, returning default");
+  log.warn("spec-lite: could not parse agent output, returning default");
   return buildDefaultProtoSpec(task, startTime);
 }
 
@@ -141,12 +139,7 @@ function normalizeProtoSpec(obj: any, startTime: number): ProtoSpec {
   let vCriteria: ProtoSpec["v_criteria"] = [];
   if (Array.isArray(obj.v_criteria)) {
     vCriteria = obj.v_criteria
-      .filter(
-        (c: any) =>
-          c &&
-          typeof c.id === "string" &&
-          typeof c.description === "string"
-      )
+      .filter((c: any) => c && typeof c.id === "string" && typeof c.description === "string")
       .map((c: any) => ({
         id: c.id,
         description: c.description,

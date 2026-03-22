@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { getAction, getAllActions } from "../../src/action-registry.ts";
 
 describe("action-registry backgroundEligible", () => {
@@ -75,7 +75,17 @@ describe("action-registry backgroundEligible", () => {
     const bgCommands = getAllActions()
       .filter((a) => a.backgroundEligible)
       .map((a) => a.command);
-    const expected = ["exec", "orchestrate", "autopipeline", "explore", "plan", "prd", "planify", "retro", "rollback"];
+    const expected = [
+      "exec",
+      "orchestrate",
+      "autopipeline",
+      "explore",
+      "plan",
+      "prd",
+      "planify",
+      "retro",
+      "rollback",
+    ];
     for (const cmd of expected) {
       expect(bgCommands).toContain(cmd);
     }

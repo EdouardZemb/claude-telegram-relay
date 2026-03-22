@@ -7,7 +7,7 @@
  * notification bridge, and error handling.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -56,8 +56,11 @@ describe("MCP Business Server — S44 Task Tools", () => {
   });
 
   it("task_update accepts task_id and status enum", () => {
-    expect(serverCode).toContain('task_id: z.string().describe(');
-    expect(serverCode).toContain('z.enum(["backlog", "in_progress", "review", "done", "cancelled"])');
+    expect(serverCode).toContain("task_id: z.string().describe(");
+    expect(serverCode).toContain(
+      '.enum(["backlog", "in_progress", "review", "done", "cancelled"])',
+    );
+    expect(serverCode).toContain('.describe("New status")');
   });
 
   it("task_update calls updateTaskStatus from src/tasks.ts", () => {
@@ -94,7 +97,7 @@ describe("MCP Business Server — S44 Task Tools", () => {
   });
 
   it("notification bridge uses atomic write (tmp + rename)", () => {
-    expect(serverCode).toContain("MCP_PENDING_FILE + \".tmp\"");
+    expect(serverCode).toContain('MCP_PENDING_FILE + ".tmp"');
     expect(serverCode).toContain("fsRename(tmp, MCP_PENDING_FILE)");
   });
 
@@ -136,12 +139,16 @@ describe("MCP Business Server — S44 Task Tools", () => {
 
   it("task_create catches exceptions and returns error text", () => {
     // The try/catch wraps the entire handler
-    const createMatch = serverCode.match(/server\.tool\(\s*"task_create"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const createMatch = serverCode.match(
+      /server\.tool\(\s*"task_create"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(createMatch).not.toBeNull();
   });
 
   it("task_update catches exceptions and returns error text", () => {
-    const updateMatch = serverCode.match(/server\.tool\(\s*"task_update"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const updateMatch = serverCode.match(
+      /server\.tool\(\s*"task_update"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(updateMatch).not.toBeNull();
   });
 });
@@ -262,27 +269,37 @@ describe("MCP Business Server — S44 PRD Tools", () => {
   // ── Error handling ───────────────────────────────────────────
 
   it("prd_create catches exceptions and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"prd_create"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"prd_create"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 
   it("prd_list catches exceptions and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"prd_list"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"prd_list"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 
   it("prd_get catches exceptions and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"prd_get"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"prd_get"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 
   it("prd_approve catches exceptions and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"prd_approve"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"prd_approve"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 
   it("prd_reject catches exceptions and returns error text", () => {
-    const match = serverCode.match(/server\.tool\(\s*"prd_reject"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/);
+    const match = serverCode.match(
+      /server\.tool\(\s*"prd_reject"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
+    );
     expect(match).not.toBeNull();
   });
 
@@ -320,7 +337,7 @@ describe("MCP Background Job Launcher", () => {
   it("prd_create uses launchMcpBackgroundJob for async execution", () => {
     const prdSection = serverCode.slice(
       serverCode.indexOf('"prd_create"'),
-      serverCode.indexOf('"prd_create"') + 1500
+      serverCode.indexOf('"prd_create"') + 1500,
     );
     expect(prdSection).toContain("launchMcpBackgroundJob");
     expect(prdSection).toContain("Job lance (id:");
@@ -329,7 +346,7 @@ describe("MCP Background Job Launcher", () => {
   it("orchestrate_task uses launchMcpBackgroundJob for async execution", () => {
     const orchSection = serverCode.slice(
       serverCode.indexOf('"orchestrate_task"'),
-      serverCode.indexOf('"orchestrate_task"') + 4000
+      serverCode.indexOf('"orchestrate_task"') + 4000,
     );
     expect(orchSection).toContain("launchMcpBackgroundJob");
     expect(orchSection).toContain("Job lance (id:");

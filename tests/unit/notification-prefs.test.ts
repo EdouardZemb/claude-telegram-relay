@@ -4,9 +4,9 @@
  * Tests for notification preferences: load, save, quiet hours, type checks.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { writeFile, unlink, readFile } from "fs/promises";
-import { join, dirname } from "path";
+import { afterEach, describe, expect, it } from "bun:test";
+import { readFile, unlink, writeFile } from "fs/promises";
+import { dirname, join } from "path";
 
 const PROJECT_ROOT = dirname(dirname(dirname(import.meta.path)));
 const PREFS_FILE = join(PROJECT_ROOT, "config", "notification-prefs.json");
@@ -25,15 +25,18 @@ const {
 
 // Reset to clean defaults after each test across all describe blocks
 afterEach(async () => {
-  try { await unlink(PREFS_FILE); } catch {}
+  try {
+    await unlink(PREFS_FILE);
+  } catch {}
   // Reset cached prefs to defaults
   await loadPrefs();
 });
 
 describe("loadPrefs", () => {
-
   it("returns defaults when file does not exist", async () => {
-    try { await unlink(PREFS_FILE); } catch {}
+    try {
+      await unlink(PREFS_FILE);
+    } catch {}
     const prefs = await loadPrefs();
     expect(prefs.quietStart).toBe(20);
     expect(prefs.quietEnd).toBe(9);
@@ -43,11 +46,14 @@ describe("loadPrefs", () => {
   });
 
   it("loads prefs from file", async () => {
-    await writeFile(PREFS_FILE, JSON.stringify({
-      quietStart: 22,
-      quietEnd: 7,
-      types: { task: { enabled: false, immediate: false } },
-    }));
+    await writeFile(
+      PREFS_FILE,
+      JSON.stringify({
+        quietStart: 22,
+        quietEnd: 7,
+        types: { task: { enabled: false, immediate: false } },
+      }),
+    );
     const prefs = await loadPrefs();
     expect(prefs.quietStart).toBe(22);
     expect(prefs.quietEnd).toBe(7);

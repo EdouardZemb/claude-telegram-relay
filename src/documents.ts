@@ -6,11 +6,13 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { writeFile, unlink } from "fs/promises";
+import { createHash } from "crypto";
+import { unlink, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import { createHash } from "crypto";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("documents");
 // ── Types ────────────────────────────────────────────────────
 
 export interface DocumentCategory {
@@ -88,7 +90,14 @@ const STORAGE_BUCKET = "documents";
  * Call Claude CLI with a prompt. Uses Max subscription (no API key needed).
  */
 async function callClaudeCLI(prompt: string): Promise<string> {
-  const args = [CLAUDE_PATH, "-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"];
+  const args = [
+    CLAUDE_PATH,
+    "-p",
+    prompt,
+    "--output-format",
+    "text",
+    "--dangerously-skip-permissions",
+  ];
 
   const cleanEnv = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -113,15 +122,17 @@ async function callClaudeCLI(prompt: string): Promise<string> {
 /**
  * Extract text from an image using Claude CLI (reads the file via its Read tool).
  */
-export async function extractTextFromImage(
-  buffer: Buffer,
-  fileType: string,
-): Promise<string> {
-  const ext = fileType === "image/png" ? "png"
-    : fileType === "image/webp" ? "webp"
-    : fileType === "image/gif" ? "gif"
-    : fileType === "application/pdf" ? "pdf"
-    : "jpg";
+export async function extractTextFromImage(buffer: Buffer, fileType: string): Promise<string> {
+  const ext =
+    fileType === "image/png"
+      ? "png"
+      : fileType === "image/webp"
+        ? "webp"
+        : fileType === "image/gif"
+          ? "gif"
+          : fileType === "application/pdf"
+            ? "pdf"
+            : "jpg";
   const tmpPath = join(tmpdir(), `doc-extract-${Date.now()}.${ext}`);
 
   try {
@@ -146,25 +157,25 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     const parser = new PDFParse(new Uint8Array(buffer));
     await parser.load();
     const result = await parser.getText();
-    const text = (typeof result === "string" ? result : result?.text ?? "").trim();
+    const text = (typeof result === "string" ? result : (result?.text ?? "")).trim();
     if (text.length > 50) {
       // Check that text has a reasonable ratio of alphanumeric chars (not garbled binary)
       const alnumCount = (text.substring(0, 500).match(/[\p{L}\p{N}]/gu) || []).length;
       const ratio = alnumCount / Math.min(text.length, 500);
       if (ratio > 0.3) {
-        console.log(`pdf-parse OK: ${text.length} chars, alnum ratio ${ratio.toFixed(2)}`);
+        log.info(`pdf-parse OK: ${text.length} chars, alnum ratio ${ratio.toFixed(2)}`);
         return text;
       }
-      console.log(`pdf-parse rejected: alnum ratio too low (${ratio.toFixed(2)}), using Vision`);
+      log.info(`pdf-parse rejected: alnum ratio too low (${ratio.toFixed(2)}), using Vision`);
     } else {
-      console.log(`pdf-parse too short (${text.length} chars), using Vision`);
+      log.info(`pdf-parse too short (${text.length} chars), using Vision`);
     }
   } catch (e) {
-    console.error("pdf-parse failed, using Vision pipeline:", e);
+    log.error("pdf-parse failed, using Vision pipeline", { error: String(e) });
   }
 
   // Vision fallback: convert PDF to PNG images via pdftoppm, then extract via Claude Vision
-  console.log("Starting pdftoppm + Vision extraction for PDF...");
+  log.info("Starting pdftoppm + Vision extraction for PDF...");
   const tmpPdf = join(tmpdir(), `doc-pdf-${Date.now()}.pdf`);
   const tmpPrefix = join(tmpdir(), `doc-page-${Date.now()}`);
 
@@ -172,10 +183,10 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
     await writeFile(tmpPdf, buffer);
 
     // Convert PDF pages to PNG at 300 DPI (max 10 pages)
-    const proc = Bun.spawn(
-      ["pdftoppm", "-png", "-r", "300", "-l", "10", tmpPdf, tmpPrefix],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    const proc = Bun.spawn(["pdftoppm", "-png", "-r", "300", "-l", "10", tmpPdf, tmpPrefix], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     await proc.exited;
 
     // Find generated page images
@@ -188,11 +199,11 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
       .sort();
 
     if (pageFiles.length === 0) {
-      console.log("pdftoppm produced no pages, falling back to direct PDF read");
+      log.info("pdftoppm produced no pages, falling back to direct PDF read");
       return extractTextFromImage(buffer, "application/pdf");
     }
 
-    console.log(`pdftoppm produced ${pageFiles.length} page(s)`);
+    log.info(`pdftoppm produced ${pageFiles.length} page(s)`);
 
     // Extract text from each page image via Claude Vision
     const pageTexts: string[] = [];
@@ -210,11 +221,11 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
 
     const combined = pageTexts.join("\n\n--- Page suivante ---\n\n").trim();
     if (combined.length > 0) {
-      console.log(`Vision extraction OK: ${combined.length} chars from ${pageFiles.length} page(s)`);
+      log.debug(`Vision extraction OK: ${combined.length} chars from ${pageFiles.length} page(s)`);
       return combined;
     }
 
-    console.log("Vision extraction returned empty, falling back to direct PDF read");
+    log.info("Vision extraction returned empty, falling back to direct PDF read");
     return extractTextFromImage(buffer, "application/pdf");
   } finally {
     await unlink(tmpPdf).catch(() => {});
@@ -224,10 +235,7 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
 /**
  * Dispatch text extraction based on file type.
  */
-export async function extractText(
-  buffer: Buffer,
-  fileType: string,
-): Promise<string> {
+export async function extractText(buffer: Buffer, fileType: string): Promise<string> {
   if (fileType === "application/pdf") {
     return extractTextFromPDF(buffer);
   }
@@ -242,16 +250,14 @@ export async function extractText(
 /**
  * Fetch all document categories from Supabase.
  */
-export async function getCategories(
-  supabase: SupabaseClient,
-): Promise<DocumentCategory[]> {
+export async function getCategories(supabase: SupabaseClient): Promise<DocumentCategory[]> {
   const { data, error } = await supabase
     .from("document_categories")
     .select("*")
     .order("usage_count", { ascending: false });
 
   if (error) {
-    console.error("getCategories error:", error);
+    log.error("getCategories error", { error: String(error) });
     return [];
   }
   return data || [];
@@ -286,7 +292,7 @@ export async function getOrCreateCategory(
     .single();
 
   if (error) {
-    console.error("getOrCreateCategory error:", error);
+    log.error("getOrCreateCategory error", { error: String(error) });
     throw new Error(`Failed to create category: ${error.message}`);
   }
   return created!.id;
@@ -340,9 +346,7 @@ Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
   const suggestedTitle = parsed.suggested_title || null;
 
   // Check if category exists
-  const existingCategory = categories.find(
-    (c) => c.name.toLowerCase() === categoryName,
-  );
+  const existingCategory = categories.find((c) => c.name.toLowerCase() === categoryName);
 
   let categoryId: string;
   let isNewCategory = false;
@@ -363,7 +367,10 @@ Reponds UNIQUEMENT en JSON valide, sans aucun autre texte:
     .from("document_categories")
     .update({ usage_count: (existingCategory?.usage_count || 0) + 1 })
     .eq("id", categoryId)
-    .then(() => {}, (e: unknown) => console.error("usage_count bump error:", e));
+    .then(
+      () => {},
+      (e: unknown) => log.error("usage_count bump error", { error: String(e) }),
+    );
 
   return {
     category_id: categoryId,
@@ -449,7 +456,7 @@ export async function createDocument(
       extractionFailed = true;
     }
   } catch (e) {
-    console.error("Text extraction failed:", e);
+    log.error("Text extraction failed", { error: String(e) });
     extractionFailed = true;
   }
 
@@ -474,16 +481,25 @@ export async function createDocument(
     });
 
   if (uploadError) {
-    console.error("Storage upload error:", uploadError);
+    log.error("Storage upload error", { error: String(uploadError) });
     throw new Error(`Upload failed: ${uploadError.message}`);
   }
 
   // 4. Insert document record
   // Use suggested_title when input title is missing or generic (e.g. Adobe Scan default)
-  const genericTitles = ["créé et partagé avec adobe scan.", "créé et partagé avec adobe scan", "shared with adobe scan"];
-  const inputTitleIsGeneric = !input.title || genericTitles.includes(input.title.toLowerCase().trim());
-  const title = (inputTitleIsGeneric ? classification?.suggested_title : input.title)
-    || input.title || classification?.description || input.filePath.split("/").pop() || "Sans titre";
+  const genericTitles = [
+    "créé et partagé avec adobe scan.",
+    "créé et partagé avec adobe scan",
+    "shared with adobe scan",
+  ];
+  const inputTitleIsGeneric =
+    !input.title || genericTitles.includes(input.title.toLowerCase().trim());
+  const title =
+    (inputTitleIsGeneric ? classification?.suggested_title : input.title) ||
+    input.title ||
+    classification?.description ||
+    input.filePath.split("/").pop() ||
+    "Sans titre";
 
   const record = {
     user_id: input.userId,
@@ -505,16 +521,12 @@ export async function createDocument(
     },
   };
 
-  const { data, error } = await supabase
-    .from("documents")
-    .insert(record)
-    .select("*")
-    .single();
+  const { data, error } = await supabase.from("documents").insert(record).select("*").single();
 
   if (error) {
     // Cleanup uploaded file on insert failure
     await supabase.storage.from(STORAGE_BUCKET).remove([storagePath]);
-    console.error("Document insert error:", error);
+    log.error("Document insert error", { error: String(error) });
     throw new Error(`Insert failed: ${error.message}`);
   }
 
@@ -545,7 +557,7 @@ export async function listDocuments(
   const { data, error } = await query;
 
   if (error) {
-    console.error("listDocuments error:", error);
+    log.error("listDocuments error", { error: String(error) });
     return [];
   }
   return data || [];
@@ -558,14 +570,10 @@ export async function getDocumentById(
   supabase: SupabaseClient,
   id: string,
 ): Promise<Document | null> {
-  const { data, error } = await supabase
-    .from("documents")
-    .select("*")
-    .eq("id", id)
-    .single();
+  const { data, error } = await supabase.from("documents").select("*").eq("id", id).single();
 
   if (error) {
-    console.error("getDocumentById error:", error);
+    log.error("getDocumentById error", { error: String(error) });
     return null;
   }
   return data as Document;
@@ -574,22 +582,16 @@ export async function getDocumentById(
 /**
  * Delete a document: remove from DB and cleanup Storage.
  */
-export async function deleteDocument(
-  supabase: SupabaseClient,
-  id: string,
-): Promise<boolean> {
+export async function deleteDocument(supabase: SupabaseClient, id: string): Promise<boolean> {
   // Get file_path first for storage cleanup
   const doc = await getDocumentById(supabase, id);
   if (!doc) return false;
 
   // Delete from DB
-  const { error } = await supabase
-    .from("documents")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("documents").delete().eq("id", id);
 
   if (error) {
-    console.error("deleteDocument error:", error);
+    log.error("deleteDocument error", { error: String(error) });
     return false;
   }
 
@@ -600,7 +602,7 @@ export async function deleteDocument(
       .remove([doc.file_path]);
 
     if (storageError) {
-      console.error("Storage cleanup error:", storageError);
+      log.error("Storage cleanup error", { error: String(storageError) });
       // DB record already deleted, log but don't fail
     }
   }
@@ -634,13 +636,13 @@ export async function searchDocuments(
     });
 
     if (error) {
-      console.error("searchDocuments error:", error);
+      log.error("searchDocuments error", { error: String(error) });
       return [];
     }
 
     return (data || []) as DocumentSearchResult[];
   } catch (e) {
-    console.error("searchDocuments exception:", e);
+    log.error("searchDocuments exception", { error: String(e) });
     return [];
   }
 }
@@ -697,7 +699,7 @@ export async function createSignedUrls(
       .createSignedUrls(filePaths, expiresIn);
 
     if (error) {
-      console.error("createSignedUrls error:", error);
+      log.error("createSignedUrls error", { error: String(error) });
       return urlMap;
     }
 
@@ -707,7 +709,7 @@ export async function createSignedUrls(
       }
     }
   } catch (e) {
-    console.error("createSignedUrls exception:", e);
+    log.error("createSignedUrls exception", { error: String(e) });
   }
   return urlMap;
 }

@@ -6,12 +6,12 @@
  * JSON parsing from Claude output, and edge cases.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  formatReviewResult,
   type CodeReviewResult,
-  type ReviewFinding,
   type FindingSeverity,
+  formatReviewResult,
+  type ReviewFinding,
 } from "../../src/code-review";
 
 // ── Helper builders ──────────────────────────────────────────
@@ -151,10 +151,12 @@ describe("formatReviewResult", () => {
 
   it("includes finding description and suggestion", () => {
     const result = buildResult({
-      findings: [buildFinding({
-        description: "Missing null check",
-        suggestion: "Add if (!x) return early",
-      })],
+      findings: [
+        buildFinding({
+          description: "Missing null check",
+          suggestion: "Add if (!x) return early",
+        }),
+      ],
     });
     const formatted = formatReviewResult(result);
 
@@ -165,7 +167,7 @@ describe("formatReviewResult", () => {
   it("omits summary section when summary is empty", () => {
     const result = buildResult({ summary: "", findings: [] });
     const formatted = formatReviewResult(result);
-    const lines = formatted.split("\n").filter(l => l.trim() !== "");
+    const lines = formatted.split("\n").filter((l) => l.trim() !== "");
 
     // Should have: header line, gate line, "Aucun finding."
     expect(lines.length).toBe(3);
@@ -228,7 +230,7 @@ describe("CodeReviewResult gate logic", () => {
     // This mirrors the logic: score >= 50 && !findings.some(f => f.severity === "critical")
     const score = 75;
     const findings = [buildFinding({ severity: "minor" })];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(true);
   });
@@ -236,7 +238,7 @@ describe("CodeReviewResult gate logic", () => {
   it("fails gate when score < 50", () => {
     const score = 40;
     const findings: ReviewFinding[] = [];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(false);
   });
@@ -244,7 +246,7 @@ describe("CodeReviewResult gate logic", () => {
   it("fails gate when critical finding exists even with high score", () => {
     const score = 90;
     const findings = [buildFinding({ severity: "critical" })];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(false);
   });
@@ -252,7 +254,7 @@ describe("CodeReviewResult gate logic", () => {
   it("fails gate when score is exactly 49", () => {
     const score = 49;
     const findings: ReviewFinding[] = [];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(false);
   });
@@ -260,7 +262,7 @@ describe("CodeReviewResult gate logic", () => {
   it("passes gate when score is exactly 50", () => {
     const score = 50;
     const findings = [buildFinding({ severity: "suggestion" })];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(true);
   });
@@ -271,7 +273,7 @@ describe("CodeReviewResult gate logic", () => {
       buildFinding({ severity: "important" }),
       buildFinding({ severity: "important" }),
     ];
-    const passesGate = score >= 50 && !findings.some(f => f.severity === "critical");
+    const passesGate = score >= 50 && !findings.some((f) => f.severity === "critical");
 
     expect(passesGate).toBe(true);
   });
@@ -284,7 +286,9 @@ describe("Review JSON parsing", () => {
 
   it("extracts JSON from clean output", () => {
     const output = JSON.stringify({
-      findings: [{ severity: "minor", category: "style", file: "a.ts", description: "d", suggestion: "s" }],
+      findings: [
+        { severity: "minor", category: "style", file: "a.ts", description: "d", suggestion: "s" },
+      ],
       summary: "Clean code",
       score: 85,
     });
@@ -319,8 +323,21 @@ describe("Review JSON parsing", () => {
   it("handles nested JSON objects in findings", () => {
     const json = JSON.stringify({
       findings: [
-        { severity: "critical", category: "security", file: "auth.ts", line: 10, description: "SQL injection", suggestion: "Use parameterized query" },
-        { severity: "minor", category: "style", file: "utils.ts", description: "Long line", suggestion: "Break it" },
+        {
+          severity: "critical",
+          category: "security",
+          file: "auth.ts",
+          line: 10,
+          description: "SQL injection",
+          suggestion: "Use parameterized query",
+        },
+        {
+          severity: "minor",
+          category: "style",
+          file: "utils.ts",
+          description: "Long line",
+          suggestion: "Break it",
+        },
       ],
       summary: "Security issues found",
       score: 30,
@@ -400,7 +417,9 @@ describe("saveReviewResult", () => {
 
     const originalError = console.error;
     const errorCalls: any[][] = [];
-    console.error = (...args: any[]) => { errorCalls.push(args); };
+    console.error = (...args: any[]) => {
+      errorCalls.push(args);
+    };
 
     const mockSupabase = {
       from: () => ({
@@ -427,7 +446,7 @@ describe("saveReviewResult", () => {
 
     // Should not throw
     await expect(
-      saveReviewResult(mockSupabase, "task-1", "branch", buildResult())
+      saveReviewResult(mockSupabase, "task-1", "branch", buildResult()),
     ).resolves.toBeUndefined();
   });
 
@@ -526,7 +545,15 @@ describe("runCodeReview result construction", () => {
 
   it("sets passesGate false when critical finding exists", () => {
     const output = JSON.stringify({
-      findings: [{ severity: "critical", category: "security", file: "x.ts", description: "d", suggestion: "s" }],
+      findings: [
+        {
+          severity: "critical",
+          category: "security",
+          file: "x.ts",
+          description: "d",
+          suggestion: "s",
+        },
+      ],
       summary: "Critical issue",
       score: 80,
     });
@@ -536,7 +563,15 @@ describe("runCodeReview result construction", () => {
 
   it("sets passesGate true with score >= 50 and no critical findings", () => {
     const output = JSON.stringify({
-      findings: [{ severity: "important", category: "perf", file: "y.ts", description: "d", suggestion: "s" }],
+      findings: [
+        {
+          severity: "important",
+          category: "perf",
+          file: "y.ts",
+          description: "d",
+          suggestion: "s",
+        },
+      ],
       summary: "OK",
       score: 65,
     });
@@ -678,9 +713,10 @@ describe("Diff truncation logic", () => {
   it("truncates diff longer than 50000 chars", () => {
     const maxDiffLength = 50000;
     const longDiff = "a".repeat(60000);
-    const truncated = longDiff.length > maxDiffLength
-      ? longDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
-      : longDiff;
+    const truncated =
+      longDiff.length > maxDiffLength
+        ? longDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
+        : longDiff;
 
     expect(truncated.length).toBeLessThan(longDiff.length);
     expect(truncated).toContain("[... DIFF TRONQUE ...]");
@@ -690,9 +726,10 @@ describe("Diff truncation logic", () => {
   it("does not truncate diff shorter than 50000 chars", () => {
     const maxDiffLength = 50000;
     const shortDiff = "a".repeat(1000);
-    const truncated = shortDiff.length > maxDiffLength
-      ? shortDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
-      : shortDiff;
+    const truncated =
+      shortDiff.length > maxDiffLength
+        ? shortDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
+        : shortDiff;
 
     expect(truncated).toBe(shortDiff);
     expect(truncated).not.toContain("[... DIFF TRONQUE ...]");
@@ -701,9 +738,10 @@ describe("Diff truncation logic", () => {
   it("does not truncate diff of exactly 50000 chars", () => {
     const maxDiffLength = 50000;
     const exactDiff = "a".repeat(50000);
-    const truncated = exactDiff.length > maxDiffLength
-      ? exactDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
-      : exactDiff;
+    const truncated =
+      exactDiff.length > maxDiffLength
+        ? exactDiff.substring(0, maxDiffLength) + "\n\n[... DIFF TRONQUE ...]"
+        : exactDiff;
 
     expect(truncated).toBe(exactDiff);
   });

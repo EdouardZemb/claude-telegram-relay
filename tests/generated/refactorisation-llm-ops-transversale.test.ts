@@ -17,26 +17,21 @@
  * - HeartbeatState compatibility (V22)
  */
 
-import { describe, test, expect, mock, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import {
   buildSpanId,
+  formatLlmOpsSnapshot,
   getCircuitBreakerStatus,
-  recordPromptVersion,
-  logCostWithSpan,
   getLlmOpsSnapshot,
+  LLMOPS_CHECK_INTERVAL_MS,
+  type LlmOpsSnapshot,
+  logCostWithSpan,
+  recordPromptVersion,
   runLlmOpsCheck,
   sha256,
-  formatLlmOpsSnapshot,
-  LLMOPS_CHECK_INTERVAL_MS,
-  type CircuitBreakerStatus,
-  type LlmOpsSnapshot,
-  type LlmOpsCheckResult,
 } from "../../src/llm-ops";
-import {
-  resetTrustScoreCache,
-  getCachedTrustScores,
-} from "../../src/trust-scores";
+import { getCachedTrustScores, resetTrustScoreCache } from "../../src/trust-scores";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -44,7 +39,7 @@ import {
  * Inject a trust score directly into the in-memory cache.
  * Uses updateTrustScore internals via direct cache manipulation.
  */
-async function injectTrustScore(role: string, score: number, consecutiveFailures: number) {
+async function _injectTrustScore(role: string, _score: number, _consecutiveFailures: number) {
   const { updateTrustScore } = await import("../../src/trust-scores");
   // Reset then build up the state we need
   // We use updateTrustScore with null supabase to manipulate the cache
@@ -85,7 +80,7 @@ async function injectTrustScore(role: string, score: number, consecutiveFailures
   await updateTrustScore(null, role, { passed: true, hadRework: false });
   // Now the role exists in cache with score 55, consecutivePasses 1, consecutiveFailures 0
   // We need to get the cache entry and override it
-  const cache = getCachedTrustScores();
+  const _cache = getCachedTrustScores();
   // getCachedTrustScores returns a shallow copy, but the objects inside are references
   // Actually no: it uses spread operator { ...trustScoreCache } which copies references to values
   // But the values are TrustScore objects (not primitives), so we need the original ref.
@@ -274,7 +269,7 @@ describe("[V7] recordPromptVersion idempotent — meme hash = une seule ligne", 
     // The mock may or may not handle composite onConflict correctly
     // The important thing is the combined_hash values differ
     const hashes = rows.map((r: any) => r.combined_hash);
-    const uniqueHashes = new Set(hashes);
+    const _uniqueHashes = new Set(hashes);
     // At least one row exists (mock may upsert over the first with different combined_hash)
     expect(rows.length).toBeGreaterThanOrEqual(1);
     // Verify the hash format includes the separator ':'
@@ -299,7 +294,7 @@ describe("[V8] logCostWithSpan appelle logCost avec span_id et session_id", () =
         agentRole: "dev",
       },
       "ses1:dev:0",
-      "ses1"
+      "ses1",
     );
 
     const rows = supabase._getTable("cost_tracking");
@@ -316,7 +311,7 @@ describe("[V8] logCostWithSpan appelle logCost avec span_id et session_id", () =
       null,
       { tokensInput: 100, tokensOutput: 50, costUsd: 0.01, durationMs: 1000 },
       "span1",
-      "ses1"
+      "ses1",
     );
   });
 });
@@ -326,7 +321,7 @@ describe("[V8] logCostWithSpan appelle logCost avec span_id et session_id", () =
 // V-critere: V9
 describe("[V9] CostEntry accepte les champs optionnels span_id et session_id", () => {
   test("CostEntry type accepts span_id and session_id", async () => {
-    const { logCost } = await import("../../src/cost-tracking");
+    const { logCost: _logCost } = await import("../../src/cost-tracking");
     const entry = {
       tokensInput: 100,
       tokensOutput: 50,
@@ -392,10 +387,21 @@ describe("[V10] getLlmOpsSnapshot retourne un LlmOpsSnapshot complet", () => {
 
     const supabase = createMockSupabase({
       prompt_versions: [
-        { id: "pv1", agent_role: "dev", combined_hash: "h1:h2", created_at: "2026-03-20T10:00:00Z" },
+        {
+          id: "pv1",
+          agent_role: "dev",
+          combined_hash: "h1:h2",
+          created_at: "2026-03-20T10:00:00Z",
+        },
       ],
       cost_tracking: [
-        { id: "ct1", agent_role: "dev", cost_usd: 0.05, span_id: "s:dev:0", created_at: "2026-03-20T10:00:00Z" },
+        {
+          id: "ct1",
+          agent_role: "dev",
+          cost_usd: 0.05,
+          span_id: "s:dev:0",
+          created_at: "2026-03-20T10:00:00Z",
+        },
       ],
       gate_evaluations: [],
     });
@@ -514,9 +520,9 @@ describe("[V13] heartbeat appelle runLlmOpsCheck quand flag ON et intervalle dep
     // Structural test: verify the import exists in the heartbeat code
     const fs = await import("fs");
     const content = fs.readFileSync("src/heartbeat.ts", "utf-8");
-    expect(content).toContain('import { runLlmOpsCheck');
-    expect(content).toContain('llmops_monitoring');
-    expect(content).toContain('lastLlmOpsCheckAt');
+    expect(content).toContain("runLlmOpsCheck");
+    expect(content).toContain("llmops_monitoring");
+    expect(content).toContain("lastLlmOpsCheckAt");
   });
 
   test("heartbeat checks feature flag and interval before calling runLlmOpsCheck", async () => {
@@ -524,8 +530,8 @@ describe("[V13] heartbeat appelle runLlmOpsCheck quand flag ON et intervalle dep
     const content = fs.readFileSync("src/heartbeat.ts", "utf-8");
     // Verify the gating logic exists
     expect(content).toContain('isFeatureEnabled("llmops_monitoring")');
-    expect(content).toContain('LLMOPS_CHECK_INTERVAL_MS');
-    expect(content).toContain('state.lastLlmOpsCheckAt');
+    expect(content).toContain("LLMOPS_CHECK_INTERVAL_MS");
+    expect(content).toContain("state.lastLlmOpsCheckAt");
   });
 });
 
@@ -559,8 +565,8 @@ describe("[V15] heartbeat n'appelle PAS runLlmOpsCheck si intervalle non depasse
     const fs = await import("fs");
     const content = fs.readFileSync("src/heartbeat.ts", "utf-8");
     // Verify the interval comparison pattern exists
-    expect(content).toContain('new Date(state.lastLlmOpsCheckAt).getTime()');
-    expect(content).toContain('llmOpsThreshold');
+    expect(content).toContain("new Date(state.lastLlmOpsCheckAt).getTime()");
+    expect(content).toContain("llmOpsThreshold");
   });
 });
 
@@ -595,7 +601,8 @@ describe("[V17] orchestrateur utilise logCostWithSpan avec le bon span_id", () =
     const fs = await import("fs");
     const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
     // logCostWithSpan should be present
-    expect(content).toContain("logCostWithSpan(supabase,");
+    expect(content).toContain("logCostWithSpan(");
+    expect(content).toContain("supabase,");
     // buildSpanId should be used to create span IDs
     expect(content).toContain("buildSpanId(pipelineSessionId,");
   });
@@ -603,7 +610,12 @@ describe("[V17] orchestrateur utilise logCostWithSpan avec le bon span_id", () =
   test("logCostWithSpan is imported from llm-ops", async () => {
     const fs = await import("fs");
     const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
-    expect(content).toContain('import { logCostWithSpan, buildSpanId, recordPromptVersion, sha256 } from "./llm-ops.ts"');
+    // Verify all needed imports exist (order may vary due to formatter)
+    expect(content).toContain("logCostWithSpan");
+    expect(content).toContain("buildSpanId");
+    expect(content).toContain("recordPromptVersion");
+    expect(content).toContain("sha256");
+    expect(content).toContain('./llm-ops.ts"');
   });
 });
 

@@ -5,17 +5,17 @@
  * actionability filtering, and working memory promotion.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
+import type { WorkingMemoryData } from "../../src/memory";
 import {
-  findSimilarFact,
-  resolveMemoryConflict,
-  updateMemoryWithRevision,
   autoRemember,
+  findSimilarFact,
   processMemoryIntents,
   promoteWorkingMemory,
+  resolveMemoryConflict,
+  updateMemoryWithRevision,
 } from "../../src/memory";
-import type { ConflictResolution, WorkingMemoryData } from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── findSimilarFact (S36-03) ────────────────────────────────────
 
@@ -28,7 +28,7 @@ describe("findSimilarFact", () => {
 
   it("returns matching fact when similarity above threshold", async () => {
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Edouard is a developer", type: "fact", similarity: 0.90 },
+      { id: "f1", content: "Edouard is a developer", type: "fact", similarity: 0.9 },
     ]);
 
     const result = await findSimilarFact(supabase, "Edouard works as a developer");
@@ -36,7 +36,7 @@ describe("findSimilarFact", () => {
     expect(result).not.toBeNull();
     expect(result!.id).toBe("f1");
     expect(result!.content).toBe("Edouard is a developer");
-    expect(result!.similarity).toBe(0.90);
+    expect(result!.similarity).toBe(0.9);
   });
 
   it("returns null when no match found", async () => {
@@ -48,7 +48,7 @@ describe("findSimilarFact", () => {
 
   it("ignores non-fact types", async () => {
     supabase._registerFunction("search", () => [
-      { id: "g1", content: "Similar goal", type: "goal", similarity: 0.90 },
+      { id: "g1", content: "Similar goal", type: "goal", similarity: 0.9 },
     ]);
 
     const result = await findSimilarFact(supabase, "Similar goal text");
@@ -81,8 +81,8 @@ describe("findSimilarFact", () => {
       return [];
     });
 
-    await findSimilarFact(supabase, "test", 0.90);
-    expect(searchBody.match_threshold).toBe(0.90);
+    await findSimilarFact(supabase, "test", 0.9);
+    expect(searchBody.match_threshold).toBe(0.9);
   });
 });
 
@@ -175,7 +175,7 @@ describe("resolveMemoryConflict", () => {
 
   it("boundary: exactly 0.80 is update", async () => {
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Fact", type: "fact", similarity: 0.80 },
+      { id: "f1", content: "Fact", type: "fact", similarity: 0.8 },
     ]);
 
     const result = await resolveMemoryConflict(supabase, "Fact");
@@ -293,7 +293,7 @@ describe("processMemoryIntents conflict resolution", () => {
   it("skips duplicate REMEMBER tag (similarity >= 0.85)", async () => {
     supabase._registerRpc("bump_memory_access", () => null);
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Same fact exists", type: "fact", similarity: 0.90 },
+      { id: "f1", content: "Same fact exists", type: "fact", similarity: 0.9 },
     ]);
 
     const input = "Noted. [REMEMBER: Same fact exists already]";
@@ -475,7 +475,7 @@ describe("autoRemember conflict resolution for facts", () => {
   it("skips duplicate fact in autoRemember", async () => {
     supabase._registerRpc("bump_memory_access", () => null);
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Same fact", type: "fact", similarity: 0.90 },
+      { id: "f1", content: "Same fact", type: "fact", similarity: 0.9 },
     ]);
 
     const classification = {
@@ -495,9 +495,7 @@ describe("autoRemember conflict resolution for facts", () => {
   });
 
   it("updates existing fact on contradiction in autoRemember", async () => {
-    supabase._store.memory = [
-      { id: "f1", type: "fact", content: "Uses MySQL", metadata: {} },
-    ];
+    supabase._store.memory = [{ id: "f1", type: "fact", content: "Uses MySQL", metadata: {} }];
     supabase._registerFunction("search", () => [
       { id: "f1", content: "Uses MySQL", type: "fact", similarity: 0.82 },
     ]);
@@ -522,7 +520,7 @@ describe("autoRemember conflict resolution for facts", () => {
   it("still creates goals from action_items when fact is deduplicated", async () => {
     supabase._registerRpc("bump_memory_access", () => null);
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Same fact", type: "fact", similarity: 0.90 },
+      { id: "f1", content: "Same fact", type: "fact", similarity: 0.9 },
     ]);
 
     const classification = {
@@ -581,9 +579,7 @@ describe("promoteWorkingMemory", () => {
   it("promotes discoveries to permanent memories", async () => {
     const wm: WorkingMemoryData = {
       decisions: [],
-      discoveries: [
-        { agent: "qa", fact: "Coverage is 85%", source: "test run" },
-      ],
+      discoveries: [{ agent: "qa", fact: "Coverage is 85%", source: "test run" }],
       blockers: [],
       context_updates: [],
     };
@@ -599,13 +595,11 @@ describe("promoteWorkingMemory", () => {
   it("skips duplicate items during promotion", async () => {
     supabase._registerRpc("bump_memory_access", () => null);
     supabase._registerFunction("search", () => [
-      { id: "f1", content: "Same fact exists", type: "fact", similarity: 0.90 },
+      { id: "f1", content: "Same fact exists", type: "fact", similarity: 0.9 },
     ]);
 
     const wm: WorkingMemoryData = {
-      decisions: [
-        { agent: "dev", decision: "Same fact exists", reasoning: "Already known" },
-      ],
+      decisions: [{ agent: "dev", decision: "Same fact exists", reasoning: "Already known" }],
     };
 
     const count = await promoteWorkingMemory(supabase, wm, "session-3");
@@ -621,9 +615,7 @@ describe("promoteWorkingMemory", () => {
         { agent: "architect", decision: "Use REST", reasoning: "Simpler" },
         { agent: "dev", decision: "Use TypeScript", reasoning: "Type safety" },
       ],
-      discoveries: [
-        { agent: "qa", fact: "No regressions found", source: "tests" },
-      ],
+      discoveries: [{ agent: "qa", fact: "No regressions found", source: "tests" }],
     };
 
     const count = await promoteWorkingMemory(supabase, wm, "session-4");

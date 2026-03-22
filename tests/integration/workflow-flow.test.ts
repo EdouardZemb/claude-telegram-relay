@@ -5,26 +5,26 @@
  * metrics collection, pattern detection, alerts, and retro generation.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // Set PROJECT_DIR before importing workflow modules
 process.env.PROJECT_DIR = import.meta.dir + "/../fixtures";
 
+import { formatAlerts, runAllChecks } from "../../src/alerts";
+import { getMemoryContext, getRecentMessages, processMemoryIntents } from "../../src/memory";
+import { analyzePatterns, formatPatterns } from "../../src/patterns";
+import { addTask, getBacklog, getCurrentSprint, updateTaskStatus } from "../../src/tasks";
 import {
-  WorkflowTracker,
   collectSprintMetrics,
-  getSprintMetrics,
-  generateRetroData,
-  saveRetro,
   formatMetrics,
   formatRetro,
+  generateRetroData,
+  getSprintMetrics,
   reloadWorkflowConfig,
+  saveRetro,
+  WorkflowTracker,
 } from "../../src/workflow";
-import { addTask, updateTaskStatus, getBacklog, getCurrentSprint } from "../../src/tasks";
-import { analyzePatterns, formatPatterns } from "../../src/patterns";
-import { runAllChecks, formatAlerts } from "../../src/alerts";
-import { processMemoryIntents, getMemoryContext, getRecentMessages } from "../../src/memory";
 
 // ── Full Sprint Lifecycle ────────────────────────────────────
 
@@ -145,7 +145,7 @@ describe("Multi-Sprint Pattern Detection", () => {
             had_rework: false,
             checkpoint_result: "pass",
             created_at: `2026-0${sprint === "S10" ? 1 : 2}-0${i}`,
-          }))
+          })),
         ),
         // Decomposition checkpoint always passes
         ...["S10", "S11"].flatMap((sprint) =>
@@ -157,7 +157,7 @@ describe("Multi-Sprint Pattern Detection", () => {
             had_rework: false,
             checkpoint_result: "pass",
             created_at: `2026-0${sprint === "S10" ? 1 : 2}-0${i}`,
-          }))
+          })),
         ),
       ],
       retros: [],
@@ -169,7 +169,7 @@ describe("Multi-Sprint Pattern Detection", () => {
 
     // Should detect slow execution step
     const slowExec = analysis.patterns.find(
-      (p) => p.type === "slow_step" && p.data.step === "execution"
+      (p) => p.type === "slow_step" && p.data.step === "execution",
     );
     expect(slowExec).toBeDefined();
 
@@ -191,8 +191,20 @@ describe("Alert System Integration", () => {
     const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const supabase = createMockSupabase({
       tasks: [
-        { id: "t1", title: "Stuck task", status: "in_progress", updated_at: twoDaysAgo, sprint: "S12" },
-        { id: "t2", title: "Active task", status: "done", updated_at: new Date().toISOString(), sprint: "S12" },
+        {
+          id: "t1",
+          title: "Stuck task",
+          status: "in_progress",
+          updated_at: twoDaysAgo,
+          sprint: "S12",
+        },
+        {
+          id: "t2",
+          title: "Active task",
+          status: "done",
+          updated_at: new Date().toISOString(),
+          sprint: "S12",
+        },
       ],
       workflow_logs: [
         { sprint_id: "S12", had_rework: true, created_at: "2026-02-01" },
@@ -221,16 +233,62 @@ describe("Alert System Integration", () => {
 describe("Retro Generation with Workflow Data", () => {
   it("generates complete retro data from sprint history", async () => {
     const supabase = createMockSupabase({
-      sprint_metrics: [
-        { sprint_id: "S12", tasks_planned: 10, tasks_completed: 8 },
-      ],
+      sprint_metrics: [{ sprint_id: "S12", tasks_planned: 10, tasks_completed: 8 }],
       workflow_logs: [
-        { sprint_id: "S12", step_from: "request", step_to: "decomposition", duration_seconds: 60, had_rework: false, checkpoint_result: "skipped", created_at: "2026-02-10T10:00:00Z" },
-        { sprint_id: "S12", step_from: "decomposition", step_to: "execution", duration_seconds: 180, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-10T10:03:00Z" },
-        { sprint_id: "S12", step_from: "execution", step_to: "review", duration_seconds: 3600, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-10T11:00:00Z" },
-        { sprint_id: "S12", step_from: "review", step_to: "execution", duration_seconds: 120, had_rework: true, checkpoint_result: "fail", created_at: "2026-02-10T11:02:00Z" },
-        { sprint_id: "S12", step_from: "execution", step_to: "review", duration_seconds: 1800, had_rework: false, checkpoint_result: "corrected", created_at: "2026-02-10T11:32:00Z" },
-        { sprint_id: "S12", step_from: "review", step_to: "closure", duration_seconds: 60, had_rework: false, checkpoint_result: "pass", created_at: "2026-02-10T11:33:00Z" },
+        {
+          sprint_id: "S12",
+          step_from: "request",
+          step_to: "decomposition",
+          duration_seconds: 60,
+          had_rework: false,
+          checkpoint_result: "skipped",
+          created_at: "2026-02-10T10:00:00Z",
+        },
+        {
+          sprint_id: "S12",
+          step_from: "decomposition",
+          step_to: "execution",
+          duration_seconds: 180,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-10T10:03:00Z",
+        },
+        {
+          sprint_id: "S12",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 3600,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-10T11:00:00Z",
+        },
+        {
+          sprint_id: "S12",
+          step_from: "review",
+          step_to: "execution",
+          duration_seconds: 120,
+          had_rework: true,
+          checkpoint_result: "fail",
+          created_at: "2026-02-10T11:02:00Z",
+        },
+        {
+          sprint_id: "S12",
+          step_from: "execution",
+          step_to: "review",
+          duration_seconds: 1800,
+          had_rework: false,
+          checkpoint_result: "corrected",
+          created_at: "2026-02-10T11:32:00Z",
+        },
+        {
+          sprint_id: "S12",
+          step_from: "review",
+          step_to: "closure",
+          duration_seconds: 60,
+          had_rework: false,
+          checkpoint_result: "pass",
+          created_at: "2026-02-10T11:33:00Z",
+        },
       ],
       tasks: [
         { id: "t1", sprint: "S12", status: "done", title: "Task A" },
@@ -278,16 +336,16 @@ describe("Memory System Integration", () => {
   it("full memory lifecycle: store facts, goals, complete goals", async () => {
     const supabase = createMockSupabase();
     supabase._registerRpc("get_facts", () =>
-      supabase._getTable("memory").filter((m: any) => m.type === "fact")
+      supabase._getTable("memory").filter((m: any) => m.type === "fact"),
     );
     supabase._registerRpc("get_active_goals", () =>
-      supabase._getTable("memory").filter((m: any) => m.type === "goal")
+      supabase._getTable("memory").filter((m: any) => m.type === "goal"),
     );
 
     // 1. Process a response with memory tags
     const response1 = await processMemoryIntents(
       supabase,
-      "Entendu! [REMEMBER: Edouard utilise Bun comme runtime] [GOAL: Terminer le S12 | DEADLINE: 2026-02-20] Je m'en occupe."
+      "Entendu! [REMEMBER: Edouard utilise Bun comme runtime] [GOAL: Terminer le S12 | DEADLINE: 2026-02-20] Je m'en occupe.",
     );
     // Two tags removed leave extra spaces; just verify tags are stripped
     expect(response1).not.toContain("[REMEMBER:");

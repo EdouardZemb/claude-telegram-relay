@@ -5,7 +5,7 @@
  * All external calls (Claude CLI, Supabase, pdf-parse) are mocked.
  */
 
-import { describe, it, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ── Mock fetch globally ──────────────────────────────────────
@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const originalFetch = globalThis.fetch;
 let fetchMock: ReturnType<typeof mock>;
 
-function setupFetchMock(responseBody: unknown, status = 200) {
+function _setupFetchMock(responseBody: unknown, status = 200) {
   fetchMock = mock(() =>
     Promise.resolve({
       ok: status >= 200 && status < 300,
@@ -100,28 +100,27 @@ function createMockSupabase(overrides: Record<string, unknown> = {}) {
 // ── Import module under test ─────────────────────────────────
 
 import {
+  type ClassificationResult,
+  checkDuplicate,
+  classifyDocument,
+  computeFileHash,
+  createDocument,
+  createSignedUrls,
+  type Document,
+  type DocumentCategory,
+  type DocumentCreateInput,
+  type DocumentSearchResult,
+  deleteDocument,
+  extractText,
   extractTextFromImage,
   extractTextFromPDF,
-  extractText,
   getCategories,
-  getOrCreateCategory,
-  classifyDocument,
-  createDocument,
-  listDocuments,
   getDocumentById,
-  deleteDocument,
-  searchDocuments,
   getDocumentStats,
-  createSignedUrls,
-  computeFileHash,
-  checkDuplicate,
-  type DocumentCategory,
-  type Document,
-  type DocumentCreateInput,
-  type ClassificationResult,
-  type DocumentSearchResult,
+  getOrCreateCategory,
   type ListDocumentsOptions,
-  type DuplicateCheckResult,
+  listDocuments,
+  searchDocuments,
 } from "../../src/documents.ts";
 
 // ── Setup ────────────────────────────────────────────────────
@@ -158,9 +157,9 @@ describe("extractTextFromImage", () => {
   it("throws on CLI error", async () => {
     setupSpawnMock("error msg", 1);
 
-    await expect(
-      extractTextFromImage(Buffer.from("x"), "image/jpeg"),
-    ).rejects.toThrow("Claude CLI error");
+    await expect(extractTextFromImage(Buffer.from("x"), "image/jpeg")).rejects.toThrow(
+      "Claude CLI error",
+    );
   });
 
   it("writes temp file and cleans up", async () => {
@@ -212,15 +211,15 @@ describe("extractText", () => {
   });
 
   it("throws for unsupported file types", async () => {
-    await expect(
-      extractText(Buffer.from("x"), "text/plain"),
-    ).rejects.toThrow("Unsupported file type for extraction: text/plain");
+    await expect(extractText(Buffer.from("x"), "text/plain")).rejects.toThrow(
+      "Unsupported file type for extraction: text/plain",
+    );
   });
 
   it("throws for audio file types", async () => {
-    await expect(
-      extractText(Buffer.from("x"), "audio/mp3"),
-    ).rejects.toThrow("Unsupported file type");
+    await expect(extractText(Buffer.from("x"), "audio/mp3")).rejects.toThrow(
+      "Unsupported file type",
+    );
   });
 });
 
@@ -229,8 +228,22 @@ describe("extractText", () => {
 describe("getCategories", () => {
   it("returns categories from Supabase", async () => {
     const cats = [
-      { id: "1", name: "facture", description: "Factures", usage_count: 5, created_by: "system", created_at: "2026-01-01" },
-      { id: "2", name: "contrat", description: "Contrats", usage_count: 3, created_by: "system", created_at: "2026-01-01" },
+      {
+        id: "1",
+        name: "facture",
+        description: "Factures",
+        usage_count: 5,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
+      {
+        id: "2",
+        name: "contrat",
+        description: "Contrats",
+        usage_count: 3,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
     ];
 
     const { supabase } = createMockSupabase({ queryData: cats });
@@ -316,18 +329,34 @@ describe("getOrCreateCategory", () => {
 
 describe("classifyDocument", () => {
   const mockCategories: DocumentCategory[] = [
-    { id: "cat-1", name: "facture", description: "Factures", usage_count: 5, created_by: "system", created_at: "2026-01-01" },
-    { id: "cat-2", name: "contrat", description: "Contrats", usage_count: 3, created_by: "system", created_at: "2026-01-01" },
+    {
+      id: "cat-1",
+      name: "facture",
+      description: "Factures",
+      usage_count: 5,
+      created_by: "system",
+      created_at: "2026-01-01",
+    },
+    {
+      id: "cat-2",
+      name: "contrat",
+      description: "Contrats",
+      usage_count: 3,
+      created_by: "system",
+      created_at: "2026-01-01",
+    },
   ];
 
   it("classifies document into existing category", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 0.95,
-      description: "Facture EDF du 15 mars 2026",
-      document_date: "2026-03-15",
-      suggested_title: "Facture EDF Mars 2026",
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 0.95,
+        description: "Facture EDF du 15 mars 2026",
+        document_date: "2026-03-15",
+        suggested_title: "Facture EDF Mars 2026",
+      }),
+    );
 
     // Mock supabase for update
     const chain = {
@@ -351,12 +380,14 @@ describe("classifyDocument", () => {
   });
 
   it("creates new category when name not in existing list", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "ordonnance",
-      confidence: 0.8,
-      description: "Ordonnance medicale",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "ordonnance",
+        confidence: 0.8,
+        description: "Ordonnance medicale",
+        document_date: null,
+      }),
+    );
 
     // Mock supabase: getOrCreateCategory needs from().select().eq().single() then from().insert().select().single()
     let fromCallCount = 0;
@@ -378,9 +409,9 @@ describe("classifyDocument", () => {
     const supabase = {
       from: mock(() => {
         fromCallCount++;
-        if (fromCallCount === 1) return selectChain;  // getOrCreateCategory lookup
-        if (fromCallCount === 2) return insertChain;   // getOrCreateCategory insert
-        return updateChain;  // usage_count update
+        if (fromCallCount === 1) return selectChain; // getOrCreateCategory lookup
+        if (fromCallCount === 2) return insertChain; // getOrCreateCategory insert
+        return updateChain; // usage_count update
       }),
       rpc: mock(() => Promise.resolve({ data: null, error: null })),
     } as unknown as SupabaseClient;
@@ -393,7 +424,9 @@ describe("classifyDocument", () => {
   });
 
   it("handles JSON wrapped in markdown code blocks", async () => {
-    setupSpawnMock('```json\n{"category_name": "facture", "confidence": 0.9, "description": "test", "document_date": null}\n```');
+    setupSpawnMock(
+      '```json\n{"category_name": "facture", "confidence": 0.9, "description": "test", "document_date": null}\n```',
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -413,18 +446,20 @@ describe("classifyDocument", () => {
     setupSpawnMock("", 1);
     const { supabase } = createMockSupabase();
 
-    await expect(
-      classifyDocument(supabase, "text", mockCategories),
-    ).rejects.toThrow("Claude CLI error");
+    await expect(classifyDocument(supabase, "text", mockCategories)).rejects.toThrow(
+      "Claude CLI error",
+    );
   });
 
   it("clamps confidence to [0, 1]", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 1.5,
-      description: "test",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 1.5,
+        description: "test",
+        document_date: null,
+      }),
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -440,12 +475,14 @@ describe("classifyDocument", () => {
   });
 
   it("uses existing category when confidence >= 0.6 threshold", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 0.6,
-      description: "Facture probable",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 0.6,
+        description: "Facture probable",
+        document_date: null,
+      }),
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -462,12 +499,14 @@ describe("classifyDocument", () => {
   });
 
   it("still uses existing category when confidence < 0.6 (low confidence path)", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 0.4,
-      description: "Maybe a facture",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 0.4,
+        description: "Maybe a facture",
+        document_date: null,
+      }),
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -485,12 +524,14 @@ describe("classifyDocument", () => {
   });
 
   it("creates new category for unknown name regardless of confidence", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "medical",
-      confidence: 0.4,
-      description: "Document medical",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "medical",
+        confidence: 0.4,
+        description: "Document medical",
+        document_date: null,
+      }),
+    );
 
     // Mock: lookup returns null, insert returns new id
     let fromCallCount = 0;
@@ -525,12 +566,14 @@ describe("classifyDocument", () => {
   });
 
   it("defaults category_name to 'note' when LLM returns empty", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "",
-      confidence: 0.5,
-      description: "Some text",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "",
+        confidence: 0.5,
+        description: "Some text",
+        document_date: null,
+      }),
+    );
 
     // "note" exists in mockCategories? No — it doesn't, so it will create a new one
     // Actually the default is "note" from (parsed.category_name || "note")
@@ -564,12 +607,14 @@ describe("classifyDocument", () => {
   });
 
   it("bumps usage count on existing category via fire-and-forget", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 0.9,
-      description: "test",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 0.9,
+        description: "test",
+        document_date: null,
+      }),
+    );
 
     const updateMock = mock(() => updateChain);
     const eqMock = mock(() => Promise.resolve({ error: null }));
@@ -592,12 +637,14 @@ describe("classifyDocument", () => {
   });
 
   it("handles classification with empty categories list", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "nouveau",
-      confidence: 0.8,
-      description: "New category",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "nouveau",
+        confidence: 0.8,
+        description: "New category",
+        document_date: null,
+      }),
+    );
 
     let fromCallCount = 0;
     const selectChain = {
@@ -631,12 +678,14 @@ describe("classifyDocument", () => {
   });
 
   it("clamps negative confidence to 0", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: -0.5,
-      description: "test",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: -0.5,
+        description: "test",
+        document_date: null,
+      }),
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -652,12 +701,14 @@ describe("classifyDocument", () => {
   });
 
   it("truncates text to 2000 chars in prompt", async () => {
-    setupSpawnMock(JSON.stringify({
-      category_name: "facture",
-      confidence: 0.9,
-      description: "Long note",
-      document_date: null,
-    }));
+    setupSpawnMock(
+      JSON.stringify({
+        category_name: "facture",
+        confidence: 0.9,
+        description: "Long note",
+        document_date: null,
+      }),
+    );
 
     const chain = {
       update: mock(() => chain),
@@ -692,14 +743,15 @@ describe("createDocument", () => {
     let callCount = 0;
     spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
-      const output = callCount === 1
-        ? "Facture n°1"
-        : JSON.stringify({
-            category_name: "facture",
-            confidence: 0.9,
-            description: "Facture test",
-            document_date: "2026-01-01",
-          });
+      const output =
+        callCount === 1
+          ? "Facture n°1"
+          : JSON.stringify({
+              category_name: "facture",
+              confidence: 0.9,
+              description: "Facture test",
+              document_date: "2026-01-01",
+            });
       return {
         stdout: new Response(output).body,
         stderr: new Response("").body,
@@ -725,7 +777,14 @@ describe("createDocument", () => {
     };
 
     const categories = [
-      { id: "cat-1", name: "facture", description: "Factures", usage_count: 5, created_by: "system", created_at: "2026-01-01" },
+      {
+        id: "cat-1",
+        name: "facture",
+        description: "Factures",
+        usage_count: 5,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
     ];
 
     let fromCallCount = 0;
@@ -800,9 +859,15 @@ describe("createDocument", () => {
     let callCount = 0;
     spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
-      const output = callCount === 1
-        ? "extracted"
-        : JSON.stringify({ category_name: "note", confidence: 0.9, description: "test", document_date: null });
+      const output =
+        callCount === 1
+          ? "extracted"
+          : JSON.stringify({
+              category_name: "note",
+              confidence: 0.9,
+              description: "test",
+              document_date: null,
+            });
       return {
         stdout: new Response(output).body,
         stderr: new Response("").body,
@@ -812,7 +877,14 @@ describe("createDocument", () => {
 
     const removeMock = mock(() => Promise.resolve({ error: null }));
     const categories = [
-      { id: "cat-1", name: "note", description: "Notes", usage_count: 0, created_by: "system", created_at: "2026-01-01" },
+      {
+        id: "cat-1",
+        name: "note",
+        description: "Notes",
+        usage_count: 0,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
     ];
 
     let fromCallCount = 0;
@@ -874,9 +946,15 @@ describe("createDocument", () => {
     let callCount = 0;
     spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
-      const output = callCount === 1
-        ? "extracted text"
-        : JSON.stringify({ category_name: "note", confidence: 0.9, description: "t", document_date: null });
+      const output =
+        callCount === 1
+          ? "extracted text"
+          : JSON.stringify({
+              category_name: "note",
+              confidence: 0.9,
+              description: "t",
+              document_date: null,
+            });
       return {
         stdout: new Response(output).body,
         stderr: new Response("").body,
@@ -892,7 +970,8 @@ describe("createDocument", () => {
       then: undefined as unknown,
     };
     Object.defineProperty(getCatChain, "then", {
-      value: (resolve: (v: unknown) => void) => resolve({ data: [{ id: "c1", name: "note", usage_count: 0 }], error: null }),
+      value: (resolve: (v: unknown) => void) =>
+        resolve({ data: [{ id: "c1", name: "note", usage_count: 0 }], error: null }),
       configurable: true,
     });
 
@@ -995,9 +1074,15 @@ describe("createDocument", () => {
     let callCount = 0;
     spawnMock = spyOn(Bun, "spawn").mockImplementation(() => {
       callCount++;
-      const output = callCount === 1
-        ? "extracted"
-        : JSON.stringify({ category_name: "facture", confidence: 0.9, description: "auto title", document_date: null });
+      const output =
+        callCount === 1
+          ? "extracted"
+          : JSON.stringify({
+              category_name: "facture",
+              confidence: 0.9,
+              description: "auto title",
+              document_date: null,
+            });
       return {
         stdout: new Response(output).body,
         stderr: new Response("").body,
@@ -1029,7 +1114,8 @@ describe("createDocument", () => {
       then: undefined as unknown,
     };
     Object.defineProperty(getCatChain, "then", {
-      value: (resolve: (v: unknown) => void) => resolve({ data: [{ id: "c1", name: "facture", usage_count: 0 }], error: null }),
+      value: (resolve: (v: unknown) => void) =>
+        resolve({ data: [{ id: "c1", name: "facture", usage_count: 0 }], error: null }),
       configurable: true,
     });
 
@@ -1310,7 +1396,9 @@ describe("searchDocuments", () => {
   it("returns empty array on exception", async () => {
     const supabase = {
       functions: {
-        invoke: mock(() => { throw new Error("network"); }),
+        invoke: mock(() => {
+          throw new Error("network");
+        }),
       },
     } as unknown as SupabaseClient;
 
@@ -1340,18 +1428,28 @@ describe("searchDocuments", () => {
 
 describe("getDocumentStats", () => {
   it("returns stats grouped by category", async () => {
-    const docs = [
-      { category_id: "cat-1" },
-      { category_id: "cat-1" },
-      { category_id: "cat-2" },
-    ];
+    const docs = [{ category_id: "cat-1" }, { category_id: "cat-1" }, { category_id: "cat-2" }];
     const categories = [
-      { id: "cat-1", name: "facture", description: "Factures", usage_count: 2, created_by: "system", created_at: "2026-01-01" },
-      { id: "cat-2", name: "contrat", description: "Contrats", usage_count: 1, created_by: "system", created_at: "2026-01-01" },
+      {
+        id: "cat-1",
+        name: "facture",
+        description: "Factures",
+        usage_count: 2,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
+      {
+        id: "cat-2",
+        name: "contrat",
+        description: "Contrats",
+        usage_count: 1,
+        created_by: "system",
+        created_at: "2026-01-01",
+      },
     ];
 
     // We need two from() calls: one for documents, one for categories
-    let fromCallCount = 0;
+    const _fromCallCount = 0;
 
     const docsChain = {
       select: mock(() => docsChain),
@@ -1473,7 +1571,9 @@ describe("createSignedUrls", () => {
     const supabase = {
       storage: {
         from: mock(() => ({
-          createSignedUrls: mock(() => Promise.resolve({ data: null, error: { message: "bucket not found" } })),
+          createSignedUrls: mock(() =>
+            Promise.resolve({ data: null, error: { message: "bucket not found" } }),
+          ),
         })),
       },
     } as unknown as SupabaseClient;
@@ -1486,7 +1586,9 @@ describe("createSignedUrls", () => {
     const supabase = {
       storage: {
         from: mock(() => ({
-          createSignedUrls: mock(() => { throw new Error("network error"); }),
+          createSignedUrls: mock(() => {
+            throw new Error("network error");
+          }),
         })),
       },
     } as unknown as SupabaseClient;
@@ -1565,23 +1667,51 @@ describe("type exports", () => {
   it("exports all required types", () => {
     // Verify types exist at module level (compile-time check)
     const cat: DocumentCategory = {
-      id: "1", name: "test", description: null, usage_count: 0, created_by: "system", created_at: "",
+      id: "1",
+      name: "test",
+      description: null,
+      usage_count: 0,
+      created_by: "system",
+      created_at: "",
     };
     const doc: Document = {
-      id: "1", user_id: "u", project_id: null, category_id: null, title: null,
-      extracted_text: null, description: null, document_date: null,
-      file_path: "p", file_type: "t", file_size: null, metadata: {}, created_at: "",
+      id: "1",
+      user_id: "u",
+      project_id: null,
+      category_id: null,
+      title: null,
+      extracted_text: null,
+      description: null,
+      document_date: null,
+      file_path: "p",
+      file_type: "t",
+      file_size: null,
+      metadata: {},
+      created_at: "",
     };
     const input: DocumentCreateInput = {
-      userId: "u", filePath: "p", fileType: "t", buffer: Buffer.from(""),
+      userId: "u",
+      filePath: "p",
+      fileType: "t",
+      buffer: Buffer.from(""),
     };
     const classResult: ClassificationResult = {
-      category_id: "c", category_name: "n", confidence: 0.5,
-      description: "d", document_date: null, is_new_category: false,
+      category_id: "c",
+      category_name: "n",
+      confidence: 0.5,
+      description: "d",
+      document_date: null,
+      is_new_category: false,
     };
     const searchResult: DocumentSearchResult = {
-      id: "1", title: null, extracted_text: null, description: null,
-      document_date: null, category_id: null, created_at: "", similarity: 0.9,
+      id: "1",
+      title: null,
+      extracted_text: null,
+      description: null,
+      document_date: null,
+      category_id: null,
+      created_at: "",
+      similarity: 0.9,
       file_path: null,
     };
     const opts: ListDocumentsOptions = { categoryId: "c", limit: 10, offset: 0 };

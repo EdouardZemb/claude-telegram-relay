@@ -25,7 +25,7 @@
  * V16, V17: DEFERRED (V2 — conformance check)
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -38,8 +38,7 @@ mock.module("../../src/feature-flags", () => ({
   isFeatureEnabled: (flag: string) => mockFlagState[flag] === true,
   loadFeatures: () => ({ ...mockFlagState }),
   setFeature: mock(),
-  listFeatures: () =>
-    Object.entries(mockFlagState).map(([flag, enabled]) => ({ flag, enabled })),
+  listFeatures: () => Object.entries(mockFlagState).map(([flag, enabled]) => ({ flag, enabled })),
   formatFeatures: () => "",
 }));
 
@@ -107,20 +106,18 @@ mock.module("../../src/story-files", () => ({
 
 // ── Imports (after mocks) ────────────────────────────────────
 
+import { getCompletionKeyboard, type Job } from "../../src/job-manager";
 import {
-  runPrdPreflightChecks,
-  formatPreflightReport,
-  buildPreflightResultTag,
   buildPreflightKeyboard,
-  storePendingProtoSpec,
-  getPendingProtoSpec,
+  buildPreflightResultTag,
   clearPendingProtoSpec,
+  formatPreflightReport,
+  getPendingProtoSpec,
   isPrdMaturationEnabled,
   type PreflightReport,
+  runPrdPreflightChecks,
+  storePendingProtoSpec,
 } from "../../src/prd-workflow";
-
-import { getCompletionKeyboard, type Job } from "../../src/job-manager";
-import type { ProtoSpec, AdversarialResult, ImpactAnalysisResult } from "../../src/agent-schemas";
 
 // ── Test Data Helpers ────────────────────────────────────────
 
@@ -483,7 +480,13 @@ describe("[V7] formatPreflightReport filters findings by severity (R9)", () => {
     const report = makeFullReport({
       adversarial: {
         findings: [
-          { id: "F-1", severity: "BLOQUANT", title: "Blocking issue", description: "desc", source: "s" },
+          {
+            id: "F-1",
+            severity: "BLOQUANT",
+            title: "Blocking issue",
+            description: "desc",
+            source: "s",
+          },
         ],
         stats: { bloquants: 1, majeurs: 0, mineurs: 0 },
         verdict: "PAUSE",
@@ -552,7 +555,13 @@ describe("[V7] formatPreflightReport filters findings by severity (R9)", () => {
 
   test("combined: 1 BLOQUANT, 4 MAJEURS, 2 MINEURS — only BLOQUANT shown", () => {
     const findings = [
-      { id: "F-B1", severity: "BLOQUANT" as const, title: "Blocker one", description: "d", source: "s" },
+      {
+        id: "F-B1",
+        severity: "BLOQUANT" as const,
+        title: "Blocker one",
+        description: "d",
+        source: "s",
+      },
       ...Array.from({ length: 4 }, (_, i) => ({
         id: `F-M${i + 1}`,
         severity: "MAJEUR" as const,
@@ -560,8 +569,20 @@ describe("[V7] formatPreflightReport filters findings by severity (R9)", () => {
         description: "d",
         source: "s",
       })),
-      { id: "F-m1", severity: "MINEUR" as const, title: "Minor one", description: "d", source: "s" },
-      { id: "F-m2", severity: "MINEUR" as const, title: "Minor two", description: "d", source: "s" },
+      {
+        id: "F-m1",
+        severity: "MINEUR" as const,
+        title: "Minor one",
+        description: "d",
+        source: "s",
+      },
+      {
+        id: "F-m2",
+        severity: "MINEUR" as const,
+        title: "Minor two",
+        description: "d",
+        source: "s",
+      },
     ];
     const report = makeFullReport({
       adversarial: {
@@ -677,7 +698,14 @@ describe("[V13] prdWorkflowStep accepts spec_preflight value", () => {
 
   test("existing values still valid: triage, generation, revision, decomposition, implementation, done", () => {
     const { getSession, _resetSessions } = require("../../src/conversation-session");
-    const existing = ["triage", "generation", "revision", "decomposition", "implementation", "done"];
+    const existing = [
+      "triage",
+      "generation",
+      "revision",
+      "decomposition",
+      "implementation",
+      "done",
+    ];
     const session = getSession(999998, 888887);
     for (const step of existing) {
       session.prdWorkflowStep = step;

@@ -24,32 +24,33 @@
  */
 
 import "dotenv/config";
-import { spawnSync } from "bun";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import { createClient } from "@supabase/supabase-js";
+import { spawnSync } from "bun";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { join } from "path";
 import { spawnClaude } from "./agent.ts";
-import { addTask, getCurrentSprint } from "./tasks.ts";
+// Periodic task imports (consolidated from alert-cron + autonomy-cron)
+import { runAllChecks } from "./alerts.ts";
+import { isDuplicate, runAllScanners } from "./autonomy-scanner.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import {
   buildHeartbeatPrompt,
   createDefaultState,
   HEARTBEAT_SYSTEM_PROMPT,
-  HEARTBEAT_DECISION_SCHEMA,
-  type HeartbeatState,
+  type HeartbeatAction,
   type HeartbeatDecision,
   type HeartbeatDelta,
-  type HeartbeatAction,
+  type HeartbeatState,
 } from "./heartbeat-prompt.ts";
-// Periodic task imports (consolidated from alert-cron + autonomy-cron)
-import { runAllChecks } from "./alerts.ts";
-import { archiveOldMemories } from "./memory.ts";
-import { loadPrefs, isQuietHours } from "./notification-prefs.ts";
-import { loadQueue, getQueue, flushMorningDigest, enqueue } from "./notification-queue.ts";
-import { runAllScanners, isDuplicate } from "./autonomy-scanner.ts";
 // LLM-Ops periodic check
-import { runLlmOpsCheck, LLMOPS_CHECK_INTERVAL_MS } from "./llm-ops.ts";
+import { LLMOPS_CHECK_INTERVAL_MS, runLlmOpsCheck } from "./llm-ops.ts";
+import { createLogger } from "./logger.ts";
+import { archiveOldMemories } from "./memory.ts";
+import { isQuietHours, loadPrefs } from "./notification-prefs.ts";
+import { enqueue, flushMorningDigest, getQueue, loadQueue } from "./notification-queue.ts";
+import { addTask, getCurrentSprint } from "./tasks.ts";
 
+const log = createLogger("heartbeat");
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const STATE_FILE = join(PROJECT_DIR, "config", "heartbeat-state.json");
@@ -93,7 +94,11 @@ function gh(...args: string[]): string {
   }
 }
 
-export function getGitDelta(lastSha: string): { commits: string; currentSha: string; hasNew: boolean } {
+export function getGitDelta(lastSha: string): {
+  commits: string;
+  currentSha: string;
+  hasNew: boolean;
+} {
   const currentSha = git("rev-parse", "HEAD");
   if (!lastSha || lastSha === currentSha) {
     return { commits: "", currentSha, hasNew: false };
@@ -104,7 +109,7 @@ export function getGitDelta(lastSha: string): { commits: string; currentSha: str
 
 export async function getSprintDelta(
   supabase: ReturnType<typeof createClient>,
-  lastSnapshot: HeartbeatState["lastSprintSnapshot"]
+  lastSnapshot: HeartbeatState["lastSprintSnapshot"],
 ): Promise<{ summary: string; snapshot: HeartbeatState["lastSprintSnapshot"]; changed: boolean }> {
   const sprint = await getCurrentSprint(supabase);
   if (!sprint) {
@@ -115,18 +120,15 @@ export async function getSprintDelta(
     };
   }
 
-  const { data: tasks } = await supabase
-    .from("tasks")
-    .select("id, status")
-    .eq("sprint", sprint);
+  const { data: tasks } = await supabase.from("tasks").select("id, status").eq("sprint", sprint);
 
   const total = tasks?.length || 0;
   const done = tasks?.filter((t: { status: string }) => t.status === "done").length || 0;
-  const inProgress = tasks?.filter((t: { status: string }) => t.status === "in_progress").length || 0;
+  const inProgress =
+    tasks?.filter((t: { status: string }) => t.status === "in_progress").length || 0;
 
-  const changed = lastSnapshot.sprint !== sprint ||
-    lastSnapshot.done !== done ||
-    lastSnapshot.total !== total;
+  const changed =
+    lastSnapshot.sprint !== sprint || lastSnapshot.done !== done || lastSnapshot.total !== total;
 
   const summary = `Sprint ${sprint}: ${done}/${total} terminees, ${inProgress} en cours`;
   return { summary, snapshot: { sprint, done, total }, changed };
@@ -143,9 +145,7 @@ export function getCIStatus(): { status: string; hasFailed: boolean } {
       name: string;
       headBranch: string;
     }>;
-    const lines = parsed.map(
-      (r) => `${r.name} (${r.headBranch}): ${r.conclusion || r.status}`
-    );
+    const lines = parsed.map((r) => `${r.name} (${r.headBranch}): ${r.conclusion || r.status}`);
     const hasFailed = parsed.some((r) => r.conclusion === "failure");
     return { status: lines.join("\n"), hasFailed };
   } catch {
@@ -184,7 +184,7 @@ export function getOpenPRs(): { prs: string; hasStale: boolean } {
 }
 
 export async function getStaleTasks(
-  supabase: ReturnType<typeof createClient>
+  supabase: ReturnType<typeof createClient>,
 ): Promise<{ tasks: string; hasStale: boolean }> {
   const { data } = await supabase
     .from("tasks")
@@ -199,7 +199,7 @@ export async function getStaleTasks(
   const STALE_MS = 48 * 60 * 60 * 1000; // 48h
 
   const stale = data.filter(
-    (t: { updated_at: string }) => now - new Date(t.updated_at).getTime() > STALE_MS
+    (t: { updated_at: string }) => now - new Date(t.updated_at).getTime() > STALE_MS,
   );
 
   if (stale.length === 0) {
@@ -224,7 +224,7 @@ export interface TriageResult {
 
 export async function collectAndTriage(
   supabase: ReturnType<typeof createClient>,
-  state: HeartbeatState
+  state: HeartbeatState,
 ): Promise<TriageResult> {
   const reasons: string[] = [];
 
@@ -297,7 +297,7 @@ async function writeMcpPending(notification: {
 export async function executeActions(
   decision: HeartbeatDecision,
   supabase: ReturnType<typeof createClient>,
-  state: HeartbeatState
+  state: HeartbeatState,
 ): Promise<HeartbeatAction[]> {
   const executed: HeartbeatAction[] = [];
   const now = new Date().toISOString();
@@ -312,7 +312,7 @@ export async function executeActions(
       // Check cooldown
       const topic = action.message.substring(0, 50);
       if (state.cooldowns[topic] && state.cooldowns[topic] > Date.now()) {
-        console.log(`  Cooldown actif pour: ${topic}`);
+        log.info(`  Cooldown actif pour: ${topic}`);
         continue;
       }
 
@@ -326,7 +326,7 @@ export async function executeActions(
       state.cooldowns[topic] = Date.now() + COOLDOWN_MS;
 
       executed.push({ type: "notify", summary: action.message, timestamp: now });
-      console.log(`  Notification: ${action.message}`);
+      log.info(`  Notification: ${action.message}`);
     }
 
     if (action.type === "task_create" && action.taskTitle) {
@@ -340,7 +340,7 @@ export async function executeActions(
 
       if (task) {
         executed.push({ type: "task_create", summary: action.taskTitle, timestamp: now });
-        console.log(`  Tache creee: ${action.taskTitle} [${task.id.substring(0, 8)}]`);
+        log.info(`  Tache creee: ${action.taskTitle} [${task.id.substring(0, 8)}]`);
       }
     }
   }
@@ -356,11 +356,11 @@ export async function pulse(): Promise<{
   actions: HeartbeatAction[];
 }> {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] Heartbeat pulse starting...`);
+  log.info(`Heartbeat pulse starting...`);
 
   // Check feature flag
   if (!isFeatureEnabled("heartbeat")) {
-    console.log(`[${timestamp}] Heartbeat disabled (feature flag off).`);
+    log.info(`Heartbeat disabled (feature flag off).`);
     return { skipped: true, reasons: ["disabled"], actions: [] };
   }
 
@@ -371,7 +371,7 @@ export async function pulse(): Promise<{
   const supabaseUrl = process.env.SUPABASE_URL || "";
   const supabaseKey = process.env.SUPABASE_ANON_KEY || "";
   if (!supabaseUrl || !supabaseKey) {
-    console.log(`[${timestamp}] Supabase not configured, skipping.`);
+    log.info(`Supabase not configured, skipping.`);
     return { skipped: true, reasons: ["no_supabase"], actions: [] };
   }
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -398,10 +398,10 @@ export async function pulse(): Promise<{
   let skipped = true;
 
   if (!triage.interesting) {
-    console.log(`[${timestamp}] Nothing interesting. Skipping Claude spawn.`);
+    log.info(`Nothing interesting. Skipping Claude spawn.`);
   } else {
     skipped = false;
-    console.log(`[${timestamp}] Interesting: ${triage.reasons.join(", ")}. Spawning Claude...`);
+    log.info(`Interesting: ${triage.reasons.join(", ")}. Spawning Claude...`);
 
     // Build prompt and spawn Claude
     const prompt = buildHeartbeatPrompt(state, triage.delta);
@@ -417,15 +417,13 @@ export async function pulse(): Promise<{
       });
 
       if (result.exitCode !== 0) {
-        console.error(`[${timestamp}] Claude spawn failed:`, result.stderr);
+        log.error(`Claude spawn failed:`, { error: String(result.stderr) });
       } else {
         // Parse decision — Claude CLI with --output-format json may wrap the response
         let decision: HeartbeatDecision | null = null;
         try {
           const raw = result.stdout;
-          if (process.env.HEARTBEAT_DEBUG) {
-            console.log(`[${timestamp}] Raw output (first 500 chars):`, raw.substring(0, 500));
-          }
+          log.debug("Raw output (first 500 chars)", { output: raw.substring(0, 500) });
           let parsed: unknown;
 
           try {
@@ -433,14 +431,19 @@ export async function pulse(): Promise<{
             if (wrapper && typeof wrapper === "object" && "result" in wrapper) {
               const content = (wrapper as Record<string, unknown>).result;
               if (typeof content === "string" && content.trim()) {
-                const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+                const cleaned = content
+                  .replace(/```json\s*/g, "")
+                  .replace(/```\s*/g, "")
+                  .trim();
                 const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
                   parsed = JSON.parse(jsonMatch[0]);
                 }
               }
               if (!parsed) {
-                console.log(`[${timestamp}] Claude wrapper result field empty or not JSON. Result:`, String(content).substring(0, 200));
+                log.info(`Claude wrapper result field empty or not JSON. Result:`, {
+                  detail: String(content).substring(0, 200),
+                });
               }
             } else {
               parsed = wrapper;
@@ -455,55 +458,62 @@ export async function pulse(): Promise<{
           if (parsed) {
             const d = parsed as Record<string, unknown>;
             decision = {
-              observations: Array.isArray(d.observations) ? d.observations as string[] : [],
-              actions: Array.isArray(d.actions) ? d.actions as HeartbeatDecision["actions"] : [{ type: "none" }],
+              observations: Array.isArray(d.observations) ? (d.observations as string[]) : [],
+              actions: Array.isArray(d.actions)
+                ? (d.actions as HeartbeatDecision["actions"])
+                : [{ type: "none" }],
               reasoning: typeof d.reasoning === "string" ? d.reasoning : "No reasoning provided",
             };
           } else {
-            console.log(`[${timestamp}] No decision parsed from Claude output, skipping.`);
+            log.info(`No decision parsed from Claude output, skipping.`);
           }
         } catch (parseError) {
-          console.error(`[${timestamp}] JSON parse failed:`, parseError, "Raw:", result.stdout.substring(0, 500));
+          log.error(`JSON parse failed:`, {
+            error: String(parseError),
+            raw: result.stdout.substring(0, 500),
+          });
         }
 
         if (decision) {
-          console.log(`[${timestamp}] Decision: ${decision.reasoning}`);
-          console.log(`[${timestamp}] Observations: ${decision.observations.length}, Actions: ${decision.actions.length}`);
+          log.info(`Decision: ${decision.reasoning}`);
+          log.info(
+            `Observations: ${decision.observations.length}, Actions: ${decision.actions.length}`,
+          );
 
           executed = await executeActions(decision, supabase, state);
           state.recentActions = [...state.recentActions, ...executed].slice(-10);
         }
       }
     } catch (error) {
-      console.error(`[${timestamp}] Heartbeat Claude error:`, error);
+      log.error(`Heartbeat Claude error:`, { error: String(error) });
     }
   }
 
   // ── Periodic tasks (no Claude needed, run directly) ───────
   // These run regardless of triage result, gated only by time intervals.
 
-  const sprint = await getCurrentSprint(supabase) || undefined;
+  const sprint = (await getCurrentSprint(supabase)) || undefined;
 
   // Every pulse: Morning digest flush (if quiet hours just ended)
   try {
     await loadPrefs();
     await loadQueue();
     if (!isQuietHours() && getQueue().length > 0) {
-      console.log(`[${timestamp}] Flushing ${getQueue().length} queued notifications as morning digest.`);
+      log.info(`Flushing ${getQueue().length} queued notifications as morning digest.`);
       await flushMorningDigest();
     }
   } catch (err) {
-    console.error(`[${timestamp}] Morning digest flush error:`, err);
+    log.error(`Morning digest flush error:`, { error: String(err) });
   }
 
   // Hourly: Alert checks
   try {
     const hourAgo = now - 60 * 60 * 1000;
     if (!state.lastAlertCheckAt || new Date(state.lastAlertCheckAt).getTime() < hourAgo) {
-      console.log(`[${timestamp}] Running hourly alert checks...`);
+      log.info(`Running hourly alert checks...`);
       const alerts = await runAllChecks(supabase, sprint);
       if (alerts.length > 0) {
-        console.log(`[${timestamp}] ${alerts.length} alert(s) detected.`);
+        log.info(`${alerts.length} alert(s) detected.`);
         for (const alert of alerts) {
           await enqueue({
             type: "alert",
@@ -519,30 +529,33 @@ export async function pulse(): Promise<{
       state.lastAlertCheckAt = timestamp;
     }
   } catch (err) {
-    console.error(`[${timestamp}] Alert check error:`, err);
+    log.error(`Alert check error:`, { error: String(err) });
   }
 
   // Hourly: Memory archival
   try {
     const hourAgo = now - 60 * 60 * 1000;
     if (!state.lastArchivalAt || new Date(state.lastArchivalAt).getTime() < hourAgo) {
-      console.log(`[${timestamp}] Running memory archival...`);
+      log.info(`Running memory archival...`);
       const archived = await archiveOldMemories(supabase);
       if (archived > 0) {
-        console.log(`[${timestamp}] Archived ${archived} old memories.`);
+        log.info(`Archived ${archived} old memories.`);
       }
       state.lastArchivalAt = timestamp;
     }
   } catch (err) {
-    console.error(`[${timestamp}] Memory archival error:`, err);
+    log.error(`Memory archival error:`, { error: String(err) });
   }
 
   // Every 30min: LLM-Ops check (gated on feature flag)
   try {
     if (isFeatureEnabled("llmops_monitoring")) {
       const llmOpsThreshold = now - LLMOPS_CHECK_INTERVAL_MS;
-      if (!state.lastLlmOpsCheckAt || new Date(state.lastLlmOpsCheckAt).getTime() < llmOpsThreshold) {
-        console.log(`[${timestamp}] Running LLM-Ops check...`);
+      if (
+        !state.lastLlmOpsCheckAt ||
+        new Date(state.lastLlmOpsCheckAt).getTime() < llmOpsThreshold
+      ) {
+        log.info(`Running LLM-Ops check...`);
         const notifyFn = async (msg: string) => {
           await enqueue({
             type: "alert",
@@ -552,30 +565,32 @@ export async function pulse(): Promise<{
         };
         const llmOpsResult = await runLlmOpsCheck(supabase, notifyFn);
         if (llmOpsResult.anomalies.length > 0) {
-          console.log(`[${timestamp}] LLM-Ops: ${llmOpsResult.anomalies.length} anomaly(ies), ${llmOpsResult.notificationsSent} notification(s).`);
+          log.info(
+            `LLM-Ops: ${llmOpsResult.anomalies.length} anomaly(ies), ${llmOpsResult.notificationsSent} notification(s).`,
+          );
         }
         state.lastLlmOpsCheckAt = timestamp;
       }
     }
   } catch (err) {
-    console.error(`[${timestamp}] LLM-Ops check error:`, err);
+    log.error(`LLM-Ops check error:`, { error: String(err) });
   }
 
   // Daily: Autonomy scan
   try {
     const dayAgo = now - 24 * 60 * 60 * 1000;
     if (!state.lastAutonomyScanAt || new Date(state.lastAutonomyScanAt).getTime() < dayAgo) {
-      console.log(`[${timestamp}] Running daily autonomy scan...`);
+      log.info(`Running daily autonomy scan...`);
       const scanResult = await runAllScanners(PROJECT_DIR, supabase);
       if (scanResult.opportunities.length > 0) {
-        console.log(`[${timestamp}] ${scanResult.opportunities.length} opportunity(ies) found.`);
+        log.info(`${scanResult.opportunities.length} opportunity(ies) found.`);
         const currentSprint = await getCurrentSprint(supabase);
         let created = 0;
         const MAX_TASKS_PER_RUN = 3;
         for (const opp of scanResult.opportunities.slice(0, MAX_TASKS_PER_RUN)) {
           const duplicate = await isDuplicate(supabase, opp.dedup_key);
           if (duplicate) {
-            console.log(`[${timestamp}]   Skip (duplicate): ${opp.title}`);
+            log.info(`Skip (duplicate): ${opp.title}`);
             continue;
           }
           const task = await addTask(supabase, opp.title, {
@@ -585,9 +600,12 @@ export async function pulse(): Promise<{
             tags: ["auto-generated", opp.type],
           });
           if (task) {
-            const { error: updateError } = await supabase.from("tasks").update({ notes: opp.dedup_key }).eq("id", task.id);
-            if (updateError) console.error(`[${timestamp}]   update task notes error:`, updateError);
-            console.log(`[${timestamp}]   Created: ${opp.title} [${task.id.substring(0, 8)}]`);
+            const { error: updateError } = await supabase
+              .from("tasks")
+              .update({ notes: opp.dedup_key })
+              .eq("id", task.id);
+            if (updateError) log.error(`update task notes error:`, { error: String(updateError) });
+            log.info(`Created: ${opp.title} [${task.id.substring(0, 8)}]`);
             created++;
           }
         }
@@ -602,13 +620,13 @@ export async function pulse(): Promise<{
       state.lastAutonomyScanAt = timestamp;
     }
   } catch (err) {
-    console.error(`[${timestamp}] Autonomy scan error:`, err);
+    log.error(`Autonomy scan error:`, { error: String(err) });
   }
 
   // ── Save state and return ─────────────────────────────────
   await saveState(state);
 
-  console.log(`[${timestamp}] Pulse complete. ${executed.length} action(s) executed.`);
+  log.info(`Pulse complete. ${executed.length} action(s) executed.`);
   return { skipped, reasons: triage.interesting ? triage.reasons : [], actions: executed };
 }
 
@@ -616,7 +634,7 @@ export async function pulse(): Promise<{
 
 if (import.meta.main) {
   pulse().catch((err) => {
-    console.error("Heartbeat fatal error:", err);
+    log.error("Heartbeat fatal error", { error: String(err) });
     process.exit(1);
   });
 }

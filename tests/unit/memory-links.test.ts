@@ -5,15 +5,14 @@
  * enriched getMemoryContext(), and memory_links table schema.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { createMockSupabase } from "../fixtures/mock-supabase";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  linkMemories,
   getLinkedMemories,
   getLinkedMemoriesBatch,
   getMemoryContext,
+  linkMemories,
 } from "../../src/memory";
-import type { LinkedMemory } from "../../src/memory";
+import { createMockSupabase } from "../fixtures/mock-supabase";
 
 describe("linkMemories", () => {
   let supabase: ReturnType<typeof createMockSupabase>;
@@ -44,9 +43,9 @@ describe("linkMemories", () => {
       return 2;
     });
 
-    const result = await linkMemories(supabase, "mem-456", 0.80);
+    const result = await linkMemories(supabase, "mem-456", 0.8);
 
-    expect(calledWith.p_threshold).toBe(0.80);
+    expect(calledWith.p_threshold).toBe(0.8);
     expect(result).toBe(2);
   });
 
@@ -201,7 +200,14 @@ describe("getLinkedMemories", () => {
     supabase._registerRpc("get_linked_memories", (params: any) => {
       calledWith = params;
       return [
-        { origin_id: "mem-1", linked_id: "mem-2", linked_content: "Fact B", linked_type: "fact", similarity: 0.82, link_type: "extends" },
+        {
+          origin_id: "mem-1",
+          linked_id: "mem-2",
+          linked_content: "Fact B",
+          linked_type: "fact",
+          similarity: 0.82,
+          link_type: "extends",
+        },
       ];
     });
 
@@ -233,15 +239,36 @@ describe("getLinkedMemories", () => {
 
   it("returns multiple links sorted by similarity", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "mem-1", linked_id: "mem-2", linked_content: "High sim", linked_type: "fact", similarity: 0.90, link_type: "extends" },
-      { origin_id: "mem-1", linked_id: "mem-3", linked_content: "Mid sim", linked_type: "goal", similarity: 0.72, link_type: "related" },
-      { origin_id: "mem-1", linked_id: "mem-4", linked_content: "Low sim", linked_type: "fact", similarity: 0.66, link_type: "related" },
+      {
+        origin_id: "mem-1",
+        linked_id: "mem-2",
+        linked_content: "High sim",
+        linked_type: "fact",
+        similarity: 0.9,
+        link_type: "extends",
+      },
+      {
+        origin_id: "mem-1",
+        linked_id: "mem-3",
+        linked_content: "Mid sim",
+        linked_type: "goal",
+        similarity: 0.72,
+        link_type: "related",
+      },
+      {
+        origin_id: "mem-1",
+        linked_id: "mem-4",
+        linked_content: "Low sim",
+        linked_type: "fact",
+        similarity: 0.66,
+        link_type: "related",
+      },
     ]);
 
     const result = await getLinkedMemories(supabase, "mem-1");
 
     expect(result).toHaveLength(3);
-    expect(result[0].similarity).toBe(0.90);
+    expect(result[0].similarity).toBe(0.9);
     expect(result[1].similarity).toBe(0.72);
     expect(result[2].similarity).toBe(0.66);
   });
@@ -264,8 +291,22 @@ describe("getLinkedMemories", () => {
 
   it("returns all link types from RPC", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "m1", linked_id: "m2", linked_content: "A", linked_type: "fact", similarity: 0.80, link_type: "extends" },
-      { origin_id: "m1", linked_id: "m3", linked_content: "B", linked_type: "goal", similarity: 0.70, link_type: "related" },
+      {
+        origin_id: "m1",
+        linked_id: "m2",
+        linked_content: "A",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "extends",
+      },
+      {
+        origin_id: "m1",
+        linked_id: "m3",
+        linked_content: "B",
+        linked_type: "goal",
+        similarity: 0.7,
+        link_type: "related",
+      },
     ]);
 
     const result = await getLinkedMemories(supabase, "m1");
@@ -284,9 +325,30 @@ describe("getLinkedMemoriesBatch", () => {
 
   it("returns grouped results by origin_id", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "f1", linked_id: "f2", linked_content: "Linked to F1", linked_type: "fact", similarity: 0.85, link_type: "extends" },
-      { origin_id: "f1", linked_id: "f3", linked_content: "Also linked to F1", linked_type: "fact", similarity: 0.70, link_type: "related" },
-      { origin_id: "g1", linked_id: "f4", linked_content: "Linked to G1", linked_type: "fact", similarity: 0.75, link_type: "related" },
+      {
+        origin_id: "f1",
+        linked_id: "f2",
+        linked_content: "Linked to F1",
+        linked_type: "fact",
+        similarity: 0.85,
+        link_type: "extends",
+      },
+      {
+        origin_id: "f1",
+        linked_id: "f3",
+        linked_content: "Also linked to F1",
+        linked_type: "fact",
+        similarity: 0.7,
+        link_type: "related",
+      },
+      {
+        origin_id: "g1",
+        linked_id: "f4",
+        linked_content: "Linked to G1",
+        linked_type: "fact",
+        similarity: 0.75,
+        link_type: "related",
+      },
     ]);
 
     const result = await getLinkedMemoriesBatch(supabase, ["f1", "g1"]);
@@ -298,11 +360,46 @@ describe("getLinkedMemoriesBatch", () => {
 
   it("caps at 3 links per origin", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "m1", linked_id: "a", linked_content: "A", linked_type: "fact", similarity: 0.90, link_type: "extends" },
-      { origin_id: "m1", linked_id: "b", linked_content: "B", linked_type: "fact", similarity: 0.85, link_type: "extends" },
-      { origin_id: "m1", linked_id: "c", linked_content: "C", linked_type: "fact", similarity: 0.80, link_type: "extends" },
-      { origin_id: "m1", linked_id: "d", linked_content: "D", linked_type: "fact", similarity: 0.75, link_type: "related" },
-      { origin_id: "m1", linked_id: "e", linked_content: "E", linked_type: "fact", similarity: 0.70, link_type: "related" },
+      {
+        origin_id: "m1",
+        linked_id: "a",
+        linked_content: "A",
+        linked_type: "fact",
+        similarity: 0.9,
+        link_type: "extends",
+      },
+      {
+        origin_id: "m1",
+        linked_id: "b",
+        linked_content: "B",
+        linked_type: "fact",
+        similarity: 0.85,
+        link_type: "extends",
+      },
+      {
+        origin_id: "m1",
+        linked_id: "c",
+        linked_content: "C",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "extends",
+      },
+      {
+        origin_id: "m1",
+        linked_id: "d",
+        linked_content: "D",
+        linked_type: "fact",
+        similarity: 0.75,
+        link_type: "related",
+      },
+      {
+        origin_id: "m1",
+        linked_id: "e",
+        linked_content: "E",
+        linked_type: "fact",
+        similarity: 0.7,
+        link_type: "related",
+      },
     ]);
 
     const result = await getLinkedMemoriesBatch(supabase, ["m1"]);
@@ -376,7 +473,14 @@ describe("getMemoryContext with links", () => {
 
   it("includes linked memories in FACTS section", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "f1", linked_id: "f3", linked_content: "Works in Paris", linked_type: "fact", similarity: 0.78, link_type: "extends" },
+      {
+        origin_id: "f1",
+        linked_id: "f3",
+        linked_content: "Works in Paris",
+        linked_type: "fact",
+        similarity: 0.78,
+        link_type: "extends",
+      },
     ]);
 
     const context = await getMemoryContext(supabase);
@@ -388,7 +492,14 @@ describe("getMemoryContext with links", () => {
 
   it("includes linked memories in GOALS section", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "g1", linked_id: "f5", linked_content: "S36 spec ready", linked_type: "fact", similarity: 0.72, link_type: "related" },
+      {
+        origin_id: "g1",
+        linked_id: "f5",
+        linked_content: "S36 spec ready",
+        linked_type: "fact",
+        similarity: 0.72,
+        link_type: "related",
+      },
     ]);
 
     const context = await getMemoryContext(supabase);
@@ -418,8 +529,22 @@ describe("getMemoryContext with links", () => {
 
   it("shows multiple links per fact", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "f1", linked_id: "x1", linked_content: "Link A", linked_type: "fact", similarity: 0.90, link_type: "extends" },
-      { origin_id: "f1", linked_id: "x2", linked_content: "Link B", linked_type: "fact", similarity: 0.80, link_type: "related" },
+      {
+        origin_id: "f1",
+        linked_id: "x1",
+        linked_content: "Link A",
+        linked_type: "fact",
+        similarity: 0.9,
+        link_type: "extends",
+      },
+      {
+        origin_id: "f1",
+        linked_id: "x2",
+        linked_content: "Link B",
+        linked_type: "fact",
+        similarity: 0.8,
+        link_type: "related",
+      },
     ]);
 
     const context = await getMemoryContext(supabase);
@@ -430,7 +555,14 @@ describe("getMemoryContext with links", () => {
 
   it("does not show links for facts without matching origin_id", async () => {
     supabase._registerRpc("get_linked_memories", () => [
-      { origin_id: "unknown-id", linked_id: "x1", linked_content: "Orphan link", linked_type: "fact", similarity: 0.85, link_type: "extends" },
+      {
+        origin_id: "unknown-id",
+        linked_id: "x1",
+        linked_content: "Orphan link",
+        linked_type: "fact",
+        similarity: 0.85,
+        link_type: "extends",
+      },
     ]);
 
     const context = await getMemoryContext(supabase);

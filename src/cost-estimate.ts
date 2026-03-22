@@ -47,8 +47,8 @@ export function estimatePipelineCost(pipeline: string, taskCount: number): Pipel
   let costPerTask = 0;
 
   for (const agentId of agentIds) {
-    const agent = agents.find(a => a.id === agentId);
-    const budget = agent?.maxBudgetUsd ?? 0.50;
+    const agent = agents.find((a) => a.id === agentId);
+    const budget = agent?.maxBudgetUsd ?? 0.5;
     agentBreakdown.push({ role: agentId, budget });
     costPerTask += budget;
   }
@@ -67,14 +67,12 @@ export function estimatePipelineCost(pipeline: string, taskCount: number): Pipel
  */
 export async function getHistoricalAverage(
   supabase: SupabaseClient | null,
-  n: number = 3
+  n: number = 3,
 ): Promise<number | null> {
   if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase
-      .from("cost_tracking")
-      .select("sprint_id, cost_usd");
+    const { data, error } = await supabase.from("cost_tracking").select("sprint_id, cost_usd");
 
     if (error || !data?.length) return null;
 
@@ -104,14 +102,15 @@ export async function getHistoricalAverage(
 export async function estimateSprintCost(
   supabase: SupabaseClient | null,
   taskCount: number,
-  pipeline: string = "DEFAULT"
+  pipeline: string = "DEFAULT",
 ): Promise<SprintCostEstimate> {
   const estimate = estimatePipelineCost(pipeline, taskCount);
   const historicalAvg = await getHistoricalAverage(supabase);
 
-  const ratio = historicalAvg && historicalAvg > 0
-    ? Math.round((estimate.totalEstimate / historicalAvg) * 10) / 10
-    : null;
+  const ratio =
+    historicalAvg && historicalAvg > 0
+      ? Math.round((estimate.totalEstimate / historicalAvg) * 10) / 10
+      : null;
 
   return {
     pipeline: estimate.pipeline,

@@ -7,21 +7,31 @@
 
 import { Composer, type Context, InputFile } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { synthesize } from "../tts.ts";
-import { setFeature, formatFeatures } from "../feature-flags.ts";
 import { estimateSprintCost, formatCostEstimate } from "../cost-estimate.ts";
+import { formatFeatures, setFeature } from "../feature-flags.ts";
 import { overrideGate } from "../gates.ts";
-import { updateTaskStatus, getCurrentSprint, getSprintSummary, formatSprintSummary } from "../tasks.ts";
-import { getIdea, promoteIdea, archiveIdea } from "../memory.ts";
-import { launch as launchJob, isJobManagerEnabled } from "../job-manager.ts";
+import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
+import { createLogger } from "../logger.ts";
+import { archiveIdea, getIdea, promoteIdea } from "../memory.ts";
+import {
+  formatSprintSummary,
+  getCurrentSprint,
+  getSprintSummary,
+  updateTaskStatus,
+} from "../tasks.ts";
+import { synthesize } from "../tts.ts";
 
+const log = createLogger("utilities");
 export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
   // /speak
   composer.command("speak", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "speak");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     const text = ctx.match?.trim();
 
     await ctx.replyWithChatAction("record_voice");
@@ -31,13 +41,19 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
       if (audioBuffer) {
         await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), bctx.threadOpts(ctx));
       } else {
-        await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          "TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.",
+          bctx.threadOpts(ctx),
+        );
       }
       return;
     }
 
     if (!bctx.supabase) {
-      await ctx.reply("Supabase not configured — cannot retrieve last message.", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Supabase not configured — cannot retrieve last message.",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -58,14 +74,20 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     if (audioBuffer) {
       await ctx.replyWithVoice(new InputFile(audioBuffer, "voice.ogg"), bctx.threadOpts(ctx));
     } else {
-      await ctx.reply("TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "TTS is not configured. Set TTS_PROVIDER=local and PIPER_* vars in .env.",
+        bctx.threadOpts(ctx),
+      );
     }
   });
 
   // /export
   composer.command("export", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "export");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
@@ -75,9 +97,15 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
 
     try {
       const [messagesResult, memoryResult, tasksResult] = await Promise.all([
-        bctx.supabase.from("messages").select("role, content, created_at").order("created_at", { ascending: true }),
+        bctx.supabase
+          .from("messages")
+          .select("role, content, created_at")
+          .order("created_at", { ascending: true }),
         bctx.supabase.from("memory").select("type, content, created_at"),
-        bctx.supabase.from("tasks").select("title, description, status, priority, sprint, created_at, completed_at").order("priority", { ascending: true }),
+        bctx.supabase
+          .from("tasks")
+          .select("title, description, status, priority, sprint, created_at, completed_at")
+          .order("priority", { ascending: true }),
       ]);
 
       const exportData = {
@@ -96,7 +124,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
         ...bctx.threadOpts(ctx),
       });
     } catch (error) {
-      console.error("Export error:", error);
+      log.error("Export error", { error: String(error) });
       await ctx.reply("Erreur lors de l'export.", bctx.threadOpts(ctx));
     }
   });
@@ -104,7 +132,10 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   // /feature
   composer.command("feature", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "feature");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     const input = ctx.match?.trim() || "";
     const parts = input.split(/\s+/);
@@ -133,7 +164,10 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   // /estimate
   composer.command("estimate", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "estimate");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     const input = ctx.match?.trim() || "";
     const parts = input.split(/\s+/);
@@ -141,7 +175,10 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     const pipeline = parts[1]?.toUpperCase() || "DEFAULT";
 
     if (!taskCount || taskCount < 1) {
-      await ctx.reply("Usage: /estimate <nombre_taches> [pipeline]\nPipelines: DEFAULT, QUICK, REVIEW", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Usage: /estimate <nombre_taches> [pipeline]\nPipelines: DEFAULT, QUICK, REVIEW",
+        bctx.threadOpts(ctx),
+      );
       return;
     }
 
@@ -149,7 +186,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
       const result = await estimateSprintCost(bctx.supabase, taskCount, pipeline);
       await ctx.reply(formatCostEstimate(result), bctx.threadOpts(ctx));
     } catch (error) {
-      console.error("Estimate error:", error);
+      log.error("Estimate error", { error: String(error) });
       await ctx.reply("Erreur lors de l'estimation.", bctx.threadOpts(ctx));
     }
   });
@@ -157,7 +194,10 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   // /rollback
   composer.command("rollback", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "rollback");
-    if (blocked) { await ctx.reply(blocked, bctx.threadOpts(ctx)); return; }
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
 
     const reason = ctx.match?.trim() || "rollback manuel via Telegram";
 
@@ -189,7 +229,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
         const resultMsg = await rollbackFn();
         await ctx.reply(resultMsg, bctx.threadOpts(ctx));
       } catch (error: any) {
-        console.error("Rollback error:", error);
+        log.error("Rollback error", { error: String(error) });
         await ctx.reply(error.message || "Erreur lors du rollback.", bctx.threadOpts(ctx));
       }
     }
@@ -198,7 +238,10 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
   // Gate override callbacks
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("gate_")) { await next(); return; }
+    if (!data.startsWith("gate_")) {
+      await next();
+      return;
+    }
 
     const parts = data.split(":");
     const action = parts[0];
@@ -214,16 +257,17 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
       );
     } else if (action === "gate_cancel" && taskId) {
       await ctx.answerCallbackQuery({ text: "Execution annulee." });
-      await ctx.editMessageText(
-        `Execution annulee. Resous la gate avant de relancer /exec.`,
-      );
+      await ctx.editMessageText(`Execution annulee. Resous la gate avant de relancer /exec.`);
     }
   });
 
   // Notification action callbacks (notif_*)
   composer.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    if (!data.startsWith("notif_")) { await next(); return; }
+    if (!data.startsWith("notif_")) {
+      await next();
+      return;
+    }
 
     const [action, id] = data.split(":");
 
@@ -250,7 +294,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           .select("*")
           .or(`id.eq.${id},id.like.${id}%`)
           .limit(1);
-        if (tasks && tasks[0]) {
+        if (tasks?.[0]) {
           const t = tasks[0];
           await ctx.answerCallbackQuery();
           await ctx.editMessageText(
@@ -265,7 +309,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           .select("*")
           .or(`id.eq.${id},id.like.${id}%`)
           .limit(1);
-        if (tasks && tasks[0]) {
+        if (tasks?.[0]) {
           const t = tasks[0];
           await ctx.answerCallbackQuery();
           await ctx.editMessageText(
@@ -280,7 +324,9 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           const result = await promoteIdea(bctx.supabase, id);
           if (result) {
             await ctx.answerCallbackQuery({ text: "Idee promue !" });
-            await ctx.editMessageText(`Idee promue en tache : ${result.title || idea.content?.substring(0, 60)}`);
+            await ctx.editMessageText(
+              `Idee promue en tache : ${result.title || idea.content?.substring(0, 60)}`,
+            );
           } else {
             await ctx.answerCallbackQuery({ text: "Erreur lors de la promotion." });
           }
@@ -302,7 +348,9 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
           if (sprintId) {
             const summary = await getSprintSummary(bctx.supabase, sprintId);
             await ctx.answerCallbackQuery();
-            await ctx.editMessageText(summary ? formatSprintSummary(summary) : "Sprint non trouve.");
+            await ctx.editMessageText(
+              summary ? formatSprintSummary(summary) : "Sprint non trouve.",
+            );
           } else {
             await ctx.answerCallbackQuery({ text: "Pas de sprint actif." });
           }
@@ -314,7 +362,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
         await ctx.answerCallbackQuery();
       }
     } catch (error) {
-      console.error("Notification callback error:", error);
+      log.error("Notification callback error", { error: String(error) });
       await ctx.answerCallbackQuery({ text: "Action expiree." });
     }
   });

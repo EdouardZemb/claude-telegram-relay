@@ -1,21 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  launch,
-  list,
-  get,
+  _resetForTests,
   cancel,
   cleanup,
   formatJobList,
+  get,
   getCapacity,
   getCompletionKeyboard,
   initJobManager,
   isJobManagerEnabled,
-  _resetForTests,
   type Job,
+  launch,
+  list,
 } from "../../src/job-manager.ts";
 
 // Mock notification-queue to avoid side effects
-const originalEnqueue = await import("../../src/notification-queue.ts");
+const _originalEnqueue = await import("../../src/notification-queue.ts");
 
 describe("job-manager", () => {
   beforeEach(() => {
@@ -505,7 +505,7 @@ describe("job-manager", () => {
 
       initJobManager(fakeBotInstance);
 
-      const id = await launch("plan", 12345, async () => "3 taches creees", {
+      const _id = await launch("plan", 12345, async () => "3 taches creees", {
         messageThreadId: 678,
       });
 
@@ -532,9 +532,14 @@ describe("job-manager", () => {
 
       initJobManager(fakeBotInstance);
 
-      await launch("exec", 999, async () => {
-        throw new Error("agent crashed");
-      }, { messageThreadId: 111 });
+      await launch(
+        "exec",
+        999,
+        async () => {
+          throw new Error("agent crashed");
+        },
+        { messageThreadId: 111 },
+      );
 
       await new Promise((r) => setTimeout(r, 200));
 

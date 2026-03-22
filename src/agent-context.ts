@@ -5,14 +5,16 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AgentRole } from "./orchestrator.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { getGraph, formatGraphContext, findAffectedModules } from "./code-graph.ts";
-import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
+import { findAffectedModules, formatGraphContext, getGraph } from "./code-graph.ts";
 import { buildTaskContext } from "./document-sharding.ts";
+import { createLogger } from "./logger.ts";
 import { buildMemoryChains, findSimilarPastTasks } from "./memory.ts";
+import type { AgentRole } from "./orchestrator.ts";
+import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
 
+const log = createLogger("agent-context");
 const PROJECT_ROOT = process.env.PROJECT_DIR || process.cwd();
 
 // ── Token Budgets per Role ───────────────────────────────────
@@ -64,7 +66,7 @@ export interface AgentContextOptions {
  */
 export async function buildAgentContext(
   supabase: SupabaseClient | null,
-  options: AgentContextOptions
+  options: AgentContextOptions,
 ): Promise<string> {
   if (!supabase) return "";
 
@@ -118,17 +120,72 @@ export async function buildAgentContext(
 
     // Shares rebalanced to accommodate exploration report (12% when present)
     const hasExploration = !!options.explorationReport;
-    if (memoryCtx) sections.push({ label: "CONTEXTE MEMOIRE", content: memoryCtx, share: hasExploration ? 0.21 : 0.23 });
-    if (options.explorationReport) sections.push({ label: "RAPPORT EXPLORATION", content: options.explorationReport, share: 0.12 });
-    if (sprintCtx) sections.push({ label: "SPRINT ACTUEL", content: sprintCtx, share: hasExploration ? 0.08 : 0.10 });
-    if (tasksCtx) sections.push({ label: "TACHES RECENTES", content: tasksCtx, share: hasExploration ? 0.11 : 0.13 });
-    if (graphCtx) sections.push({ label: "GRAPHE CODE", content: graphCtx, share: hasExploration ? 0.08 : 0.10 });
-    if (trustCtx) sections.push({ label: "CONFIANCE AGENTS", content: trustCtx, share: hasExploration ? 0.06 : 0.07 });
-    if (metricsCtx) sections.push({ label: "METRIQUES SPRINT", content: metricsCtx, share: hasExploration ? 0.07 : 0.09 });
-    if (docCtx) sections.push({ label: "DOCUMENTS PROJET", content: docCtx, share: hasExploration ? 0.08 : 0.10 });
-    if (profileCtx) sections.push({ label: "PROFIL UTILISATEUR", content: profileCtx, share: hasExploration ? 0.06 : 0.08 });
-    if (similarCtx) sections.push({ label: "TACHES SIMILAIRES", content: similarCtx, share: hasExploration ? 0.07 : 0.10 });
-    if (options.conversationContext) sections.push({ label: "CONTEXTE CONVERSATION", content: options.conversationContext, share: hasExploration ? 0.06 : 0.08 });
+    if (memoryCtx)
+      sections.push({
+        label: "CONTEXTE MEMOIRE",
+        content: memoryCtx,
+        share: hasExploration ? 0.21 : 0.23,
+      });
+    if (options.explorationReport)
+      sections.push({
+        label: "RAPPORT EXPLORATION",
+        content: options.explorationReport,
+        share: 0.12,
+      });
+    if (sprintCtx)
+      sections.push({
+        label: "SPRINT ACTUEL",
+        content: sprintCtx,
+        share: hasExploration ? 0.08 : 0.1,
+      });
+    if (tasksCtx)
+      sections.push({
+        label: "TACHES RECENTES",
+        content: tasksCtx,
+        share: hasExploration ? 0.11 : 0.13,
+      });
+    if (graphCtx)
+      sections.push({
+        label: "GRAPHE CODE",
+        content: graphCtx,
+        share: hasExploration ? 0.08 : 0.1,
+      });
+    if (trustCtx)
+      sections.push({
+        label: "CONFIANCE AGENTS",
+        content: trustCtx,
+        share: hasExploration ? 0.06 : 0.07,
+      });
+    if (metricsCtx)
+      sections.push({
+        label: "METRIQUES SPRINT",
+        content: metricsCtx,
+        share: hasExploration ? 0.07 : 0.09,
+      });
+    if (docCtx)
+      sections.push({
+        label: "DOCUMENTS PROJET",
+        content: docCtx,
+        share: hasExploration ? 0.08 : 0.1,
+      });
+    if (profileCtx)
+      sections.push({
+        label: "PROFIL UTILISATEUR",
+        content: profileCtx,
+        share: hasExploration ? 0.06 : 0.08,
+      });
+    if (similarCtx)
+      sections.push({
+        label: "TACHES SIMILAIRES",
+        content: similarCtx,
+        share: hasExploration ? 0.07 : 0.1,
+      });
+    if (options.conversationContext)
+      sections.push({
+        label: "CONTEXTE CONVERSATION",
+        content: options.conversationContext,
+        share: hasExploration ? 0.06 : 0.08,
+      });
 
     if (sections.length === 0) return "";
 
@@ -136,13 +193,15 @@ export async function buildAgentContext(
     let totalChars = parts[0].length;
 
     for (const section of sections) {
-      const maxChars = section.label === "PROFIL UTILISATEUR"
-        ? Math.min(Math.floor(charBudget * section.share), 500 * CHARS_PER_TOKEN)
-        : Math.floor(charBudget * section.share);
+      const maxChars =
+        section.label === "PROFIL UTILISATEUR"
+          ? Math.min(Math.floor(charBudget * section.share), 500 * CHARS_PER_TOKEN)
+          : Math.floor(charBudget * section.share);
 
-      const truncated = section.content.length > maxChars
-        ? section.content.substring(0, maxChars) + "..."
-        : section.content;
+      const truncated =
+        section.content.length > maxChars
+          ? section.content.substring(0, maxChars) + "..."
+          : section.content;
 
       if (totalChars + truncated.length + section.label.length + 4 > charBudget) break;
 
@@ -152,14 +211,14 @@ export async function buildAgentContext(
 
     return parts.join("\n");
   } catch (error) {
-    console.error("buildAgentContext error:", error);
+    log.error("buildAgentContext error", { error: String(error) });
     return "";
   }
 }
 
 // ── Data Fetchers ────────────────────────────────────────────
 
-async function fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
+async function _fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
   try {
     const [factsResult, goalsResult] = await Promise.all([
       supabase.rpc("get_facts"),
@@ -169,20 +228,28 @@ async function fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
     const parts: string[] = [];
 
     if (factsResult.data?.length) {
-      parts.push("Faits cles:\n" + factsResult.data
-        .slice(0, 10)
-        .map((f: any) => `- ${f.content}`)
-        .join("\n"));
+      parts.push(
+        "Faits cles:\n" +
+          factsResult.data
+            .slice(0, 10)
+            .map((f: any) => `- ${f.content}`)
+            .join("\n"),
+      );
     }
 
     if (goalsResult.data?.length) {
-      parts.push("Objectifs actifs:\n" + goalsResult.data
-        .slice(0, 5)
-        .map((g: any) => {
-          const deadline = g.deadline ? ` (echeance: ${new Date(g.deadline).toLocaleDateString("fr-FR")})` : "";
-          return `- ${g.content}${deadline}`;
-        })
-        .join("\n"));
+      parts.push(
+        "Objectifs actifs:\n" +
+          goalsResult.data
+            .slice(0, 5)
+            .map((g: any) => {
+              const deadline = g.deadline
+                ? ` (echeance: ${new Date(g.deadline).toLocaleDateString("fr-FR")})`
+                : "";
+              return `- ${g.content}${deadline}`;
+            })
+            .join("\n"),
+      );
     }
 
     return parts.join("\n\n");
@@ -191,10 +258,7 @@ async function fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
   }
 }
 
-async function fetchSprintContext(
-  supabase: SupabaseClient,
-  sprintId?: string
-): Promise<string> {
+async function fetchSprintContext(supabase: SupabaseClient, sprintId?: string): Promise<string> {
   try {
     let sprint = sprintId;
 
@@ -228,10 +292,7 @@ async function fetchSprintContext(
   }
 }
 
-async function fetchRecentTasks(
-  supabase: SupabaseClient,
-  projectId?: string
-): Promise<string> {
+async function fetchRecentTasks(supabase: SupabaseClient, projectId?: string): Promise<string> {
   try {
     let query = supabase
       .from("tasks")
@@ -263,9 +324,7 @@ function loadProfile(): Promise<string> {
     const profilePath = join(PROJECT_ROOT, "config", "profile.md");
     const content = readFileSync(profilePath, "utf-8");
     // Keep only key info lines (headers + list items)
-    const lines = content
-      .split("\n")
-      .filter((l) => l.startsWith("- ") || l.startsWith("## "));
+    const lines = content.split("\n").filter((l) => l.startsWith("- ") || l.startsWith("## "));
     return Promise.resolve(lines.join("\n"));
   } catch {
     return Promise.resolve("");
@@ -288,24 +347,28 @@ export async function fetchTrustContext(role: AgentRole | string): Promise<strin
     if (roles.length === 0 && ownScore.totalEvaluations === 0) return "";
 
     const lines: string[] = [];
-    lines.push(`Ton score de confiance: ${ownScore.score}/100 (${ownScore.totalPasses}/${ownScore.totalEvaluations} passes)`);
+    lines.push(
+      `Ton score de confiance: ${ownScore.score}/100 (${ownScore.totalPasses}/${ownScore.totalEvaluations} passes)`,
+    );
 
     if (ownScore.score >= 80) {
       lines.push("Statut: fiable — auto-approbation possible pour les gates spec/plan (P3+)");
     }
     if (ownScore.score >= 90) {
-      lines.push("Statut: tres fiable — auto-approbation possible pour les gates implementation (P3+)");
+      lines.push(
+        "Statut: tres fiable — auto-approbation possible pour les gates implementation (P3+)",
+      );
     }
     if (ownScore.consecutiveFailures > 0) {
-      lines.push(`Attention: ${ownScore.consecutiveFailures} echec(s) consecutif(s) — sois plus rigoureux`);
+      lines.push(
+        `Attention: ${ownScore.consecutiveFailures} echec(s) consecutif(s) — sois plus rigoureux`,
+      );
     }
 
     // Peer scores (compact)
     const peers = roles.filter((r) => r !== role);
     if (peers.length > 0) {
-      const peerSummary = peers
-        .map((r) => `${r}:${allScores[r].score}`)
-        .join(", ");
+      const peerSummary = peers.map((r) => `${r}:${allScores[r].score}`).join(", ");
       lines.push(`Pairs: ${peerSummary}`);
     }
 
@@ -321,7 +384,7 @@ export async function fetchTrustContext(role: AgentRole | string): Promise<strin
  */
 export async function fetchSprintMetrics(
   supabase: SupabaseClient,
-  sprintId?: string
+  _sprintId?: string,
 ): Promise<string> {
   try {
     const { data, error } = await supabase
@@ -355,7 +418,7 @@ export async function fetchSprintMetrics(
 export async function fetchDocumentContext(
   supabase: SupabaseClient,
   projectId?: string,
-  taskTitle?: string
+  taskTitle?: string,
 ): Promise<string> {
   if (!projectId || !taskTitle) return "";
 
@@ -372,7 +435,7 @@ export async function fetchDocumentContext(
  */
 export async function fetchSimilarTasksContext(
   supabase: SupabaseClient,
-  taskTitle?: string
+  taskTitle?: string,
 ): Promise<string> {
   if (!taskTitle) return "";
 

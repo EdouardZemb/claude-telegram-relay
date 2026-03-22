@@ -34,9 +34,12 @@ function matchFilter(row: Row, filters: Filter[]): boolean {
         break;
       }
       case "ilike":
-        if (!String(row[f.column] ?? "").toLowerCase().includes(
-          String(f.value).replace(/%/g, "").toLowerCase()
-        )) return false;
+        if (
+          !String(row[f.column] ?? "")
+            .toLowerCase()
+            .includes(String(f.value).replace(/%/g, "").toLowerCase())
+        )
+          return false;
         break;
       case "in":
         if (!Array.isArray(f.value) || !f.value.includes(row[f.column])) return false;
@@ -88,7 +91,7 @@ class MockQueryBuilder {
     if (!this.store[table]) this.store[table] = [];
   }
 
-  select(columns?: string) {
+  select(_columns?: string) {
     this._selectCalled = true;
     // Only set mode to select if no write operation was initiated
     if (this._mode === "select") {
@@ -220,13 +223,13 @@ class MockQueryBuilder {
         this.store[this.table] = rows;
 
         if (this._selectCalled) {
-          return { data: this._single ? inserted[0] ?? null : inserted, error: null };
+          return { data: this._single ? (inserted[0] ?? null) : inserted, error: null };
         }
         return { data: null, error: null };
       }
 
       case "update": {
-        let updated: Row[] = [];
+        const updated: Row[] = [];
         for (const row of rows) {
           if (matchFilter(row, this.filters)) {
             Object.assign(row, this._updateData, { updated_at: new Date().toISOString() });
@@ -234,16 +237,14 @@ class MockQueryBuilder {
           }
         }
         if (this._selectCalled) {
-          return { data: this._single ? updated[0] ?? null : updated, error: null };
+          return { data: this._single ? (updated[0] ?? null) : updated, error: null };
         }
         return { data: null, error: null };
       }
 
       case "upsert": {
         const conflictCol = this._upsertConflict ?? "id";
-        const existing = rows.find(
-          (r) => r[conflictCol] === this._upsertData![conflictCol]
-        );
+        const existing = rows.find((r) => r[conflictCol] === this._upsertData![conflictCol]);
         if (existing) {
           Object.assign(existing, this._upsertData, { updated_at: new Date().toISOString() });
           return { data: this._single ? existing : [existing], error: null };
@@ -258,13 +259,11 @@ class MockQueryBuilder {
           return { data: this._single ? row : [row], error: null };
         }
       }
-
-      case "select":
       default: {
         let filtered = this._applyFilters(rows);
         filtered = this._applyOrder(filtered);
         if (this._limit !== null) filtered = filtered.slice(0, this._limit);
-        return { data: this._single ? filtered[0] ?? null : filtered, error: null };
+        return { data: this._single ? (filtered[0] ?? null) : filtered, error: null };
       }
     }
   }
@@ -284,7 +283,7 @@ class MockQueryBuilder {
           const val = parts.slice(2).join(".");
           const filter: Filter = { column: col, op, value: val };
           return matchFilter(row, [filter]);
-        })
+        }),
       );
     }
 

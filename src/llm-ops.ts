@@ -6,18 +6,16 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-// Type-only import to avoid circular runtime dependency (R2)
-import type { AgentRole } from "./orchestrator.ts";
+import { type CostEntry, logCost } from "./cost-tracking.ts";
+import { createLogger } from "./logger.ts";
 import {
-  getCachedTrustScores,
-  getCachedTrustScore,
-  getAutonomyLevel,
   formatRecentGateEvaluations,
-  type TrustScore,
+  getAutonomyLevel,
+  getCachedTrustScore,
+  getCachedTrustScores,
 } from "./trust-scores.ts";
-import { logCost, type CostEntry } from "./cost-tracking.ts";
-import { getFeedbackRulesForAgent } from "./feedback-loop.ts";
 
+const log = createLogger("llm-ops");
 // ── Constants ────────────────────────────────────────────────
 
 /** Trust score below which circuit-breaker opens (R6) */
@@ -47,7 +45,10 @@ export interface CircuitBreakerStatus {
 }
 
 export interface LlmOpsSnapshot {
-  trustScores: Record<string, { score: number; autonomyLevel: string; consecutiveFailures: number }>;
+  trustScores: Record<
+    string,
+    { score: number; autonomyLevel: string; consecutiveFailures: number }
+  >;
   recentGateEvaluations: string;
   circuitBreakers: Array<{ role: string; open: boolean; reason: string }>;
   promptVersions: Array<{ role: string; combinedHash: string; createdAt: string }>;
@@ -78,7 +79,7 @@ export async function logCostWithSpan(
   supabase: SupabaseClient | null,
   entry: CostEntry,
   spanId: string,
-  sessionId: string
+  sessionId: string,
 ): Promise<void> {
   await logCost(supabase, {
     ...entry,
@@ -131,30 +132,28 @@ export async function recordPromptVersion(
   supabase: SupabaseClient | null,
   role: string,
   templateHash: string,
-  feedbackHash: string
+  feedbackHash: string,
 ): Promise<void> {
   if (!supabase) return;
 
   const combinedHash = `${templateHash}:${feedbackHash}`;
 
   try {
-    const { error } = await supabase
-      .from("prompt_versions")
-      .upsert(
-        {
-          agent_role: role,
-          template_hash: templateHash,
-          feedback_hash: feedbackHash,
-          combined_hash: combinedHash,
-        },
-        { onConflict: "agent_role,combined_hash" }
-      );
+    const { error } = await supabase.from("prompt_versions").upsert(
+      {
+        agent_role: role,
+        template_hash: templateHash,
+        feedback_hash: feedbackHash,
+        combined_hash: combinedHash,
+      },
+      { onConflict: "agent_role,combined_hash" },
+    );
 
     if (error) {
-      console.error("recordPromptVersion error:", error);
+      log.error("recordPromptVersion error", { error: String(error) });
     }
   } catch (err) {
-    console.error("recordPromptVersion error:", err);
+    log.error("recordPromptVersion error", { error: String(err) });
   }
 }
 
@@ -163,7 +162,7 @@ export async function recordPromptVersion(
  */
 export async function getActivePromptVersion(
   supabase: SupabaseClient | null,
-  role: string
+  role: string,
 ): Promise<PromptVersion | null> {
   if (!supabase) return null;
 
@@ -197,9 +196,7 @@ export async function getActivePromptVersion(
  * Get a full LLM-Ops snapshot — real-time aggregation from multiple sources.
  * Acceptable latency for /monitor (< 1/h usage). Cost summary filtered to 7 days (F-DA-4).
  */
-export async function getLlmOpsSnapshot(
-  supabase: SupabaseClient
-): Promise<LlmOpsSnapshot> {
+export async function getLlmOpsSnapshot(supabase: SupabaseClient): Promise<LlmOpsSnapshot> {
   // Trust scores from in-memory cache (no query needed)
   const rawScores = getCachedTrustScores();
   const trustScores: LlmOpsSnapshot["trustScores"] = {};
@@ -294,8 +291,8 @@ export async function getLlmOpsSnapshot(
  * Does NOT create tasks — notification-only (R10).
  */
 export async function runLlmOpsCheck(
-  supabase: SupabaseClient,
-  notifyFn: (msg: string) => Promise<void>
+  _supabase: SupabaseClient,
+  notifyFn: (msg: string) => Promise<void>,
 ): Promise<LlmOpsCheckResult> {
   const anomalies: string[] = [];
   const circuitBreakersOpen: string[] = [];
@@ -319,7 +316,7 @@ export async function runLlmOpsCheck(
         await notifyFn(msg);
         notificationsSent++;
       } catch (err) {
-        console.error("runLlmOpsCheck notify error:", err);
+        log.error("runLlmOpsCheck notify error", { error: String(err) });
       }
     }
   }
@@ -370,7 +367,9 @@ export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
 
   // Cost summary
   parts.push("");
-  parts.push(`Couts 7j: $${snapshot.costSummary.totalCostUsd.toFixed(4)} (${snapshot.costSummary.totalSpans} spans)`);
+  parts.push(
+    `Couts 7j: $${snapshot.costSummary.totalCostUsd.toFixed(4)} (${snapshot.costSummary.totalSpans} spans)`,
+  );
   if (snapshot.costSummary.topRoleByCost) {
     parts.push(`  Top role: ${snapshot.costSummary.topRoleByCost}`);
   }

@@ -12,45 +12,41 @@
  * 5. Voice/text parity: same flow works for both input types
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  isPrdWorkflowEnabled,
-  triageDescription,
-  buildTriageResponse,
-  extractSessionConstraints,
-  generateAndSavePRD,
-  getRevisionCount,
-  canRevise,
-  buildRevisionKeyboard,
-  revisePRD,
-  buildLaunchConfirmation,
-  storePendingDescription,
-  getPendingDescription,
-  clearPendingDescription,
-  storePendingRevision,
-  getPendingRevision,
-  clearPendingRevision,
-  chatKey,
-  type TriageResult,
-} from "../../src/prd-workflow.ts";
-import type { PRD, PRDSessionConstraints } from "../../src/prd.ts";
-import { formatPRDDetail } from "../../src/prd.ts";
-import { detectIntent, detectIntentWithLLM } from "../../src/intent-detection.ts";
-import {
-  getSession,
   _resetSessions,
-  addMessage as addSessionMessage,
-  addIntent as addSessionIntent,
-  extractConstraints,
   addConstraint,
-  formatSessionForIntent,
+  addIntent as addSessionIntent,
+  addMessage as addSessionMessage,
   buildConversationContext,
-  hasActiveSession,
+  type ConversationSession,
   cleanupExpiredSessions,
   type DetectedConstraint,
-  type ConversationSession,
+  extractConstraints,
+  formatSessionForIntent,
+  getSession,
+  hasActiveSession,
 } from "../../src/conversation-session.ts";
-import { isPhotoDocument } from "../../src/commands/zz-messages.ts";
+import { detectIntent, detectIntentWithLLM } from "../../src/intent-detection.ts";
+import type { PRD, PRDSessionConstraints } from "../../src/prd.ts";
+import {
+  buildLaunchConfirmation,
+  buildRevisionKeyboard,
+  buildTriageResponse,
+  canRevise,
+  chatKey,
+  clearPendingDescription,
+  clearPendingRevision,
+  extractSessionConstraints,
+  getPendingDescription,
+  getPendingRevision,
+  getRevisionCount,
+  isPrdWorkflowEnabled,
+  storePendingDescription,
+  storePendingRevision,
+  type TriageResult,
+  triageDescription,
+} from "../../src/prd-workflow.ts";
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -111,7 +107,7 @@ function simulateTextMessageFlow(
  * Simulate the prdwf_create callback handler flow.
  * This mirrors planning.ts:330-384.
  */
-function simulateCreateCallback(
+function _simulateCreateCallback(
   chatId: number,
   threadId: number | undefined,
 ): {
@@ -150,7 +146,8 @@ describe("Junction 1: Text Message → Intent Detection → Triage", () => {
 
   it("natural language 'j'aimerais ajouter X' flows to suggest_prd with description as args", () => {
     const { intentResult } = simulateTextMessageFlow(
-      1001, undefined,
+      1001,
+      undefined,
       "j'aimerais ajouter un systeme d'audit de qualite du code",
     );
     expect(intentResult.detected).not.toBeNull();
@@ -162,11 +159,13 @@ describe("Junction 1: Text Message → Intent Detection → Triage", () => {
 
   it("extracted args become the pending description stored for the callback", () => {
     const { intentResult, chatKeyStr } = simulateTextMessageFlow(
-      1002, undefined,
+      1002,
+      undefined,
       "il faudrait que le bot envoie des rappels automatiques",
     );
     // In real code, args OR full text is stored as pending description
-    const description = intentResult.detected!.args || "il faudrait que le bot envoie des rappels automatiques";
+    const description =
+      intentResult.detected!.args || "il faudrait que le bot envoie des rappels automatiques";
     storePendingDescription(chatKeyStr, description);
 
     expect(getPendingDescription(chatKeyStr)).toBeDefined();
@@ -175,10 +174,12 @@ describe("Junction 1: Text Message → Intent Detection → Triage", () => {
 
   it("triage receives the same description that was stored as pending", async () => {
     const { intentResult, chatKeyStr } = simulateTextMessageFlow(
-      1003, undefined,
+      1003,
+      undefined,
       "on devrait ajouter une API REST pour le dashboard",
     );
-    const description = intentResult.detected!.args || "on devrait ajouter une API REST pour le dashboard";
+    const description =
+      intentResult.detected!.args || "on devrait ajouter une API REST pour le dashboard";
     storePendingDescription(chatKeyStr, description);
 
     // Triage uses the same description
@@ -192,11 +193,12 @@ describe("Junction 1: Text Message → Intent Detection → Triage", () => {
 
   it("constraints from the same message are stored in session before triage", () => {
     const { session } = simulateTextMessageFlow(
-      1004, undefined,
+      1004,
+      undefined,
       "j'aimerais ajouter un audit qualite, fais ca vite",
     );
     // "vite" should be detected as speed constraint
-    const speedConstraint = session.constraints.find(c => c.type === "speed");
+    const speedConstraint = session.constraints.find((c) => c.type === "speed");
     expect(speedConstraint).toBeDefined();
     expect(speedConstraint!.value).toBe("fast");
   });
@@ -211,8 +213,8 @@ describe("Junction 1: Text Message → Intent Detection → Triage", () => {
     const { session } = simulateTextMessageFlow(chatId, undefined, "j'aimerais ajouter un cache");
 
     // Both constraints should be in session
-    const speed = session.constraints.find(c => c.type === "speed");
-    const quality = session.constraints.find(c => c.type === "quality");
+    const speed = session.constraints.find((c) => c.type === "speed");
+    const quality = session.constraints.find((c) => c.type === "quality");
     expect(speed).toBeDefined();
     expect(quality).toBeDefined();
   });
@@ -535,7 +537,8 @@ describe("Context Loss: Pending Revision TTL", () => {
 describe("Context Loss: Description Truncation", () => {
   it("short args from intent detection may lose context", () => {
     // Simulate: user says a long message, but argExtractor only captures part of it
-    const fullMessage = "j'aimerais ajouter un systeme d'audit de qualite du code avec analyse statique, detection de code mort, verification de couverture";
+    const fullMessage =
+      "j'aimerais ajouter un systeme d'audit de qualite du code avec analyse statique, detection de code mort, verification de couverture";
     const result = detectIntent(fullMessage);
 
     if (result.detected?.args) {
@@ -562,7 +565,12 @@ describe("Context Loss: Description Truncation", () => {
     const ck = "trunc-test:1";
 
     // Triage shows truncated version
-    const triage: TriageResult = { score: 0.5, pipeline: "LIGHT", pipelineExplanation: "test", label: "moyenne" };
+    const triage: TriageResult = {
+      score: 0.5,
+      pipeline: "LIGHT",
+      pipelineExplanation: "test",
+      label: "moyenne",
+    };
     const { message } = buildTriageResponse(longDescription, triage);
     expect(message).toContain("...");
 
@@ -619,9 +627,8 @@ describe("Error Recovery: Session Missing for Constraints", () => {
     if (constraints.scope === "minimal") constraintLines.push("scope");
     if (constraints.deadline) constraintLines.push("deadline");
 
-    const constraintBlock = constraintLines.length > 0
-      ? `\nCONTRAINTES:\n${constraintLines.join("\n")}\n`
-      : "";
+    const constraintBlock =
+      constraintLines.length > 0 ? `\nCONTRAINTES:\n${constraintLines.join("\n")}\n` : "";
 
     expect(constraintBlock).toBe("");
     // PRD is generated without constraint guidance — this is the root cause
@@ -720,14 +727,19 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
     simulateTextMessageFlow(chatId, undefined, "j'ai des problemes de performance sur le bot");
 
     // Message 2: more context
-    simulateTextMessageFlow(chatId, undefined, "le temps de reponse est trop long quand il y a beaucoup de messages");
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "le temps de reponse est trop long quand il y a beaucoup de messages",
+    );
 
     // Message 3: constraint
     simulateTextMessageFlow(chatId, undefined, "il faudrait que ca soit rapide a implementer");
 
     // Message 4: PRD trigger
     const { session, intentResult } = simulateTextMessageFlow(
-      chatId, undefined,
+      chatId,
+      undefined,
       "j'aimerais ajouter un systeme de cache pour ameliorer les performances",
     );
 
@@ -739,7 +751,7 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
     expect(session.recentMessages.length).toBeGreaterThanOrEqual(4);
 
     // Constraint from message 3
-    const speed = session.constraints.find(c => c.type === "speed");
+    const speed = session.constraints.find((c) => c.type === "speed");
     expect(speed).toBeDefined();
 
     // Session context for agents
@@ -756,7 +768,8 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
     const botResponse = "Tu veux que je lance le prd pour cette fonctionnalite ?";
 
     // Proposal detection regex (from zz-messages.ts)
-    const proposalRegex = /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i;
+    const proposalRegex =
+      /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i;
     const match = botResponse.match(proposalRegex);
     expect(match).not.toBeNull();
     expect(match![1].toLowerCase()).toBe("prd");
@@ -771,8 +784,13 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
 
     // User confirms
     const confirmText = "oui lance";
-    const confirmRegex = /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/;
-    const normalized = confirmText.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const confirmRegex =
+      /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/;
+    const normalized = confirmText
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
     expect(confirmRegex.test(normalized)).toBe(true);
 
     // Proposal is consumed
@@ -795,7 +813,11 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
 
     const rejectText = "non pas maintenant";
     const rejectRegex = /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/;
-    const normalized = rejectText.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const normalized = rejectText
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
     expect(rejectRegex.test(normalized)).toBe(true);
 
     // Proposal is cleared on rejection
@@ -811,7 +833,7 @@ describe("Full Flow: Discussion → Proposal → Confirmation → PRD", () => {
       action: "prd_workflow",
       args: "old feature",
       timestamp: Date.now() - 6 * 60 * 1000, // 6 minutes ago
-    sourceMessage: "Tu veux que je lance le prd ?",
+      sourceMessage: "Tu veux que je lance le prd ?",
     };
 
     // In zz-messages.ts:275, proposal is checked against 5-min TTL
@@ -831,7 +853,7 @@ describe("Full Flow: Triage → Create → Revision → Approval Lifecycle", () 
     // Step 1: Triage
     const description = "implementer un systeme de notifications push avec batching";
     const triage = await triageDescription(description);
-    const { message, keyboard } = buildTriageResponse(description, triage);
+    const { message, keyboard: _keyboard } = buildTriageResponse(description, triage);
 
     expect(message).toContain("Complexite estimee");
     expect(triage.pipeline).toBeDefined();
@@ -880,7 +902,10 @@ describe("Full Flow: Triage → Create → Revision → Approval Lifecycle", () 
     // Step 8: User approves → decomposition → launch
     // (decomposition and launch are async external calls, tested via their output builders)
     const { message: launchMsg } = buildLaunchConfirmation(
-      prd.id, triage.pipeline, triage.pipelineExplanation, 4,
+      prd.id,
+      triage.pipeline,
+      triage.pipelineExplanation,
+      4,
     );
     expect(launchMsg).toContain("4 taches");
     expect(launchMsg).toContain("Confirmer");
@@ -954,7 +979,7 @@ describe("Voice/Text Parity: Same Intent Detection", () => {
     // Voice transcriptions often lack accents
     const transcribed = "fais ca vite et bien";
     const constraints = extractConstraints(transcribed);
-    const speed = constraints.find(c => c.type === "speed");
+    const speed = constraints.find((c) => c.type === "speed");
     expect(speed).toBeDefined();
   });
 });
@@ -966,47 +991,47 @@ describe("Voice/Text Parity: Same Intent Detection", () => {
 describe("Constraint Extraction: Edge Cases", () => {
   it("extracts speed from 'rapide'", () => {
     const c = extractConstraints("fais ca rapidement");
-    expect(c.find(x => x.type === "speed")).toBeDefined();
+    expect(c.find((x) => x.type === "speed")).toBeDefined();
   });
 
   it("extracts speed from 'urgent'", () => {
     const c = extractConstraints("c'est urgent");
-    expect(c.find(x => x.type === "speed")).toBeDefined();
+    expect(c.find((x) => x.type === "speed")).toBeDefined();
   });
 
   it("extracts quality from 'robuste'", () => {
     const c = extractConstraints("un truc robuste");
-    expect(c.find(x => x.type === "quality")).toBeDefined();
+    expect(c.find((x) => x.type === "quality")).toBeDefined();
   });
 
   it("extracts quality from 'tests complets'", () => {
     const c = extractConstraints("avec des tests complets");
-    expect(c.find(x => x.type === "quality")).toBeDefined();
+    expect(c.find((x) => x.type === "quality")).toBeDefined();
   });
 
   it("extracts budget from 'pas cher'", () => {
     const c = extractConstraints("pas cher si possible");
-    expect(c.find(x => x.type === "budget")).toBeDefined();
+    expect(c.find((x) => x.type === "budget")).toBeDefined();
   });
 
   it("extracts scope from 'simple'", () => {
     const c = extractConstraints("garde ca simple");
-    expect(c.find(x => x.type === "scope")).toBeDefined();
+    expect(c.find((x) => x.type === "scope")).toBeDefined();
   });
 
   it("extracts scope from 'juste le minimum'", () => {
     const c = extractConstraints("juste le minimum viable");
-    expect(c.find(x => x.type === "scope")).toBeDefined();
+    expect(c.find((x) => x.type === "scope")).toBeDefined();
   });
 
   it("extracts deadline from 'avant vendredi'", () => {
     const c = extractConstraints("il faut que ce soit pret avant vendredi");
-    expect(c.find(x => x.type === "deadline")).toBeDefined();
+    expect(c.find((x) => x.type === "deadline")).toBeDefined();
   });
 
   it("extracts deadline from 'pour demain'", () => {
     const c = extractConstraints("pour demain matin");
-    expect(c.find(x => x.type === "deadline")).toBeDefined();
+    expect(c.find((x) => x.type === "deadline")).toBeDefined();
   });
 
   it("no constraints from neutral text", () => {
@@ -1017,8 +1042,8 @@ describe("Constraint Extraction: Edge Cases", () => {
   it("multiple constraints from single message", () => {
     const c = extractConstraints("fais ca vite et en haute qualite, budget serre");
     expect(c.length).toBeGreaterThanOrEqual(2);
-    expect(c.find(x => x.type === "speed")).toBeDefined();
-    expect(c.find(x => x.type === "quality")).toBeDefined();
+    expect(c.find((x) => x.type === "speed")).toBeDefined();
+    expect(c.find((x) => x.type === "quality")).toBeDefined();
   });
 
   it("addConstraint replaces same type (no duplicates)", () => {
@@ -1027,7 +1052,7 @@ describe("Constraint Extraction: Edge Cases", () => {
     addConstraint(session, "speed", "slow", "pas presse");
 
     // Only one speed constraint, the latest
-    const speedConstraints = session.constraints.filter(c => c.type === "speed");
+    const speedConstraints = session.constraints.filter((c) => c.type === "speed");
     expect(speedConstraints.length).toBe(1);
     expect(speedConstraints[0].value).toBe("slow");
   });
@@ -1064,7 +1089,7 @@ describe("LLM Intent Detection: Session Context Injection", () => {
 
   it("LLM receives session context via detectIntentWithLLM", async () => {
     let capturedPrompt = "";
-    const result = await detectIntentWithLLM("montre moi le design", {
+    const _result = await detectIntentWithLLM("montre moi le design", {
       callLLM: async (prompt) => {
         capturedPrompt = prompt;
         return '{"command": null, "args": "", "confidence": 0}';
@@ -1093,12 +1118,12 @@ describe("LLM Intent Detection: Session Context Injection", () => {
   });
 
   it("regex fast-path skips LLM for high confidence matches", async () => {
-    let llmCalled = false;
+    let _llmCalled = false;
     // "je voudrais ajouter un cache" has multiple regex matches (0.9+)
     // But regex single match is 0.7, need to check
     const result = await detectIntentWithLLM("je voudrais ajouter un systeme de cache", {
       callLLM: async () => {
-        llmCalled = true;
+        _llmCalled = true;
         return '{"command": "prd_workflow", "confidence": 0.85}';
       },
       timeoutMs: 5000,
@@ -1200,20 +1225,32 @@ describe("BUG SIMULATION: Full PRD Creation Without Conversation Context", () =>
 
     // ── ACT 1: Rich discussion building context ──
     // User explains what they want over multiple messages
-    simulateTextMessageFlow(chatId, undefined,
-      "J'aimerais que le systeme soit capable d'auditer la qualite de sa codebase");
-    simulateTextMessageFlow(chatId, undefined,
-      "Il faudrait des verifications deterministes d'abord, puis un LLM pour les analyses fines");
-    simulateTextMessageFlow(chatId, undefined,
-      "Et que chaque finding devienne automatiquement une tache dans le backlog");
-    simulateTextMessageFlow(chatId, undefined,
-      "Tout ca en haute qualite avec des tests exhaustifs");
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "J'aimerais que le systeme soit capable d'auditer la qualite de sa codebase",
+    );
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "Il faudrait des verifications deterministes d'abord, puis un LLM pour les analyses fines",
+    );
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "Et que chaque finding devienne automatiquement une tache dans le backlog",
+    );
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "Tout ca en haute qualite avec des tests exhaustifs",
+    );
 
     const session = getSession(chatId);
 
     // Session has accumulated context
     expect(session.recentMessages.length).toBe(4);
-    expect(session.constraints.find(c => c.type === "quality")).toBeDefined();
+    expect(session.constraints.find((c) => c.type === "quality")).toBeDefined();
 
     // ── ACT 2: Bot proposes PRD in its response ──
     session.pendingProposal = {
@@ -1252,14 +1289,23 @@ describe("BUG SIMULATION: Full PRD Creation Without Conversation Context", () =>
     const chatId = 11002;
 
     // Multiple messages of context
-    simulateTextMessageFlow(chatId, undefined,
-      "Le probleme c'est que nos PRDs ne prennent pas le contexte de la conversation");
-    simulateTextMessageFlow(chatId, undefined,
-      "Il faut corriger le passage de contexte entre intent detection et generation");
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "Le probleme c'est que nos PRDs ne prennent pas le contexte de la conversation",
+    );
+    simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "Il faut corriger le passage de contexte entre intent detection et generation",
+    );
 
     // PRD trigger with intent detection
-    const { intentResult } = simulateTextMessageFlow(chatId, undefined,
-      "j'aimerais ajouter un systeme de passage de contexte enrichi");
+    const { intentResult } = simulateTextMessageFlow(
+      chatId,
+      undefined,
+      "j'aimerais ajouter un systeme de passage de contexte enrichi",
+    );
 
     expect(intentResult.detected).not.toBeNull();
     expect(intentResult.detected!.intent).toBe("suggest_prd");
@@ -1317,7 +1363,7 @@ describe("Callback Data: Telegram 64-byte Limit", () => {
       "prdwf_task",
       "prdwf_cancel",
       "prdwf_revise:" + "a".repeat(36), // Full UUID
-      "prdwf_launch:" + "a".repeat(8),   // 8-char prefix
+      "prdwf_launch:" + "a".repeat(8), // 8-char prefix
       "prdwf_merge:999",
       "prd_approve:" + "a".repeat(36),
       "prd_reject:" + "a".repeat(36),
@@ -1382,12 +1428,15 @@ describe("Fix Verification: Description Should Include Conversation Context", ()
   it("CURRENT: only args are stored as pending description", () => {
     const chatId = 12001;
     const { intentResult, chatKeyStr } = simulateTextMessageFlow(
-      chatId, undefined,
+      chatId,
+      undefined,
       "j'aimerais ajouter un systeme de cache intelligent avec invalidation",
     );
 
     // Current behavior: store args (or full text as fallback)
-    const description = intentResult.detected!.args || "j'aimerais ajouter un systeme de cache intelligent avec invalidation";
+    const description =
+      intentResult.detected!.args ||
+      "j'aimerais ajouter un systeme de cache intelligent avec invalidation";
     storePendingDescription(chatKeyStr, description);
 
     // Description has the args but NOT the prior conversation messages
@@ -1402,13 +1451,15 @@ describe("Fix Verification: Description Should Include Conversation Context", ()
     simulateTextMessageFlow(chatId, undefined, "ca prend 30 secondes parfois");
 
     // PRD trigger
-    const { intentResult, session, chatKeyStr } = simulateTextMessageFlow(
-      chatId, undefined,
-      "j'aimerais ajouter un systeme de cache",
-    );
+    const {
+      intentResult,
+      session,
+      chatKeyStr: _chatKeyStr,
+    } = simulateTextMessageFlow(chatId, undefined, "j'aimerais ajouter un systeme de cache");
 
     // Current: only args are stored
-    const currentDescription = intentResult.detected!.args || "j'aimerais ajouter un systeme de cache";
+    const currentDescription =
+      intentResult.detected!.args || "j'aimerais ajouter un systeme de cache";
 
     // IMPROVEMENT: description should include conversation context
     const conversationContext = buildConversationContext(session);

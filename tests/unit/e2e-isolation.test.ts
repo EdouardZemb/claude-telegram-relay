@@ -2,7 +2,7 @@
  * Unit tests for E2E data isolation and cleanup mechanisms.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 // Test the tag mechanism and isolation logic without importing the full framework
 // (which would load relay.ts and all dependencies)
@@ -34,9 +34,7 @@ describe("E2E Data Isolation", () => {
 
     // Simulate SQL LIKE matching
     const like = (text: string, pat: string) => {
-      const regex = new RegExp(
-        pat.replace(/%/g, ".*").replace(/\[/g, "\\[").replace(/\]/g, "\\]")
-      );
+      const regex = new RegExp(pat.replace(/%/g, ".*").replace(/\[/g, "\\[").replace(/\]/g, "\\]"));
       return regex.test(text);
     };
 
@@ -83,11 +81,6 @@ describe("E2E Data Isolation", () => {
     ];
 
     expect(tables).toHaveLength(4);
-    expect(tables.map((t) => t.table)).toEqual([
-      "tasks",
-      "memory",
-      "messages",
-      "logs",
-    ]);
+    expect(tables.map((t) => t.table)).toEqual(["tasks", "memory", "messages", "logs"]);
   });
 });

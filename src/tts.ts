@@ -12,9 +12,11 @@
  */
 
 import { spawn } from "bun";
-import { writeFile, readFile, unlink } from "fs/promises";
+import { readFile, unlink, writeFile } from "fs/promises";
 import { join } from "path";
+import { createLogger } from "./logger.ts";
 
+const log = createLogger("tts");
 const TTS_PROVIDER = process.env.TTS_PROVIDER || "";
 
 /**
@@ -26,7 +28,7 @@ export async function synthesize(text: string): Promise<Buffer | null> {
 
   // Guard: empty or whitespace-only text would crash Piper
   if (!text || !text.trim()) {
-    console.warn("TTS: skipping empty text");
+    log.warn("TTS: skipping empty text");
     return null;
   }
 
@@ -38,7 +40,7 @@ export async function synthesize(text: string): Promise<Buffer | null> {
     return synthesizeLocal(text);
   }
 
-  console.error(`Unknown TTS_PROVIDER: ${TTS_PROVIDER}`);
+  log.error(`Unknown TTS_PROVIDER: ${TTS_PROVIDER}`);
   return null;
 }
 
@@ -58,7 +60,10 @@ function splitTextForGroq(text: string, maxLen = 190): string[] {
     // Try to split at sentence boundary (. ! ? followed by space)
     let splitAt = -1;
     for (let i = maxLen; i >= 40; i--) {
-      if (".!?".includes(remaining[i - 1]) && (i >= remaining.length || remaining[i] === " " || remaining[i] === "\n")) {
+      if (
+        ".!?".includes(remaining[i - 1]) &&
+        (i >= remaining.length || remaining[i] === " " || remaining[i] === "\n")
+      ) {
         splitAt = i;
         break;
       }
@@ -81,14 +86,19 @@ function splitTextForGroq(text: string, maxLen = 190): string[] {
     remaining = remaining.slice(splitAt).trim();
   }
 
-  return chunks.filter(c => c.length > 0);
+  return chunks.filter((c) => c.length > 0);
 }
 
-async function synthesizeGroqChunk(text: string, apiKey: string, model: string, voice: string): Promise<Buffer | null> {
+async function synthesizeGroqChunk(
+  text: string,
+  apiKey: string,
+  model: string,
+  voice: string,
+): Promise<Buffer | null> {
   const response = await fetch("https://api.groq.com/openai/v1/audio/speech", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -101,7 +111,7 @@ async function synthesizeGroqChunk(text: string, apiKey: string, model: string, 
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "unknown error");
-    console.error(`Groq TTS API error (${response.status}): ${errorText}`);
+    log.error(`Groq TTS API error (${response.status}): ${errorText}`);
     return null;
   }
 
@@ -111,7 +121,7 @@ async function synthesizeGroqChunk(text: string, apiKey: string, model: string, 
 async function synthesizeGroq(text: string): Promise<Buffer | null> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    console.warn("TTS: GROQ_API_KEY not set, falling back to local");
+    log.warn("TTS: GROQ_API_KEY not set, falling back to local");
     return synthesizeLocal(text);
   }
 
@@ -125,7 +135,7 @@ async function synthesizeGroq(text: string): Promise<Buffer | null> {
     for (const chunk of chunks) {
       const wav = await synthesizeGroqChunk(chunk, apiKey, model, voice);
       if (!wav) {
-        console.warn("TTS: Groq chunk failed, falling back to local");
+        log.warn("TTS: Groq chunk failed, falling back to local");
         return synthesizeLocal(text);
       }
       wavBuffers.push(wav);
@@ -156,7 +166,7 @@ async function synthesizeGroq(text: string): Promise<Buffer | null> {
 
         // Build ffmpeg concat filter
         const concatPath = join(tmpDir, `tts_groq_${timestamp}_concat.txt`);
-        const concatContent = chunkPaths.map(p => `file '${p}'`).join("\n");
+        const concatContent = chunkPaths.map((p) => `file '${p}'`).join("\n");
         await writeFile(concatPath, concatContent);
         tempFiles.push(concatPath);
 
@@ -165,12 +175,12 @@ async function synthesizeGroq(text: string): Promise<Buffer | null> {
 
         const concat = spawn(
           ["ffmpeg", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "-y", wavPath],
-          { stdout: "pipe", stderr: "pipe" }
+          { stdout: "pipe", stderr: "pipe" },
         );
         const concatExit = await concat.exited;
         if (concatExit !== 0) {
-          console.error("ffmpeg concat failed");
-          console.warn("TTS: falling back to local");
+          log.error("ffmpeg concat failed");
+          log.warn("TTS: falling back to local");
           return synthesizeLocal(text);
         }
       }
@@ -179,24 +189,24 @@ async function synthesizeGroq(text: string): Promise<Buffer | null> {
       tempFiles.push(oggPath);
       const ffmpeg = spawn(
         ["ffmpeg", "-i", wavPath, "-c:a", "libopus", "-b:a", "64k", "-y", oggPath],
-        { stdout: "pipe", stderr: "pipe" }
+        { stdout: "pipe", stderr: "pipe" },
       );
       const ffmpegExit = await ffmpeg.exited;
       if (ffmpegExit !== 0) {
         const stderr = await new Response(ffmpeg.stderr).text();
-        console.error(`ffmpeg (Groq TTS) failed (code ${ffmpegExit}): ${stderr}`);
-        console.warn("TTS: falling back to local");
+        log.error(`ffmpeg (Groq TTS) failed (code ${ffmpegExit}): ${stderr}`);
+        log.warn("TTS: falling back to local");
         return synthesizeLocal(text);
       }
 
       const oggBuffer = await readFile(oggPath);
       return Buffer.from(oggBuffer);
     } finally {
-      await Promise.all(tempFiles.map(f => unlink(f).catch(() => {})));
+      await Promise.all(tempFiles.map((f) => unlink(f).catch(() => {})));
     }
   } catch (err) {
-    console.error(`Groq TTS network error: ${err}`);
-    console.warn("TTS: falling back to local");
+    log.error(`Groq TTS network error: ${err}`);
+    log.warn("TTS: falling back to local");
     return synthesizeLocal(text);
   }
 }
@@ -206,7 +216,7 @@ async function synthesizeLocal(text: string): Promise<Buffer | null> {
   const modelPath = process.env.PIPER_MODEL_PATH || "";
 
   if (!modelPath) {
-    console.error("PIPER_MODEL_PATH not set");
+    log.error("PIPER_MODEL_PATH not set");
     return null;
   }
 
@@ -217,14 +227,11 @@ async function synthesizeLocal(text: string): Promise<Buffer | null> {
 
   try {
     // Piper: text via stdin → WAV file
-    const piper = spawn(
-      [piperBinary, "--model", modelPath, "--output_file", wavPath],
-      {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      }
-    );
+    const piper = spawn([piperBinary, "--model", modelPath, "--output_file", wavPath], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
     // Write text to piper's stdin and close it
     piper.stdin.write(text);
@@ -233,19 +240,19 @@ async function synthesizeLocal(text: string): Promise<Buffer | null> {
     const piperExit = await piper.exited;
     if (piperExit !== 0) {
       const stderr = await new Response(piper.stderr).text();
-      console.error(`Piper failed (code ${piperExit}): ${stderr}`);
+      log.error(`Piper failed (code ${piperExit}): ${stderr}`);
       return null;
     }
 
     // Convert WAV → OGG/Opus via ffmpeg
     const ffmpeg = spawn(
       ["ffmpeg", "-i", wavPath, "-c:a", "libopus", "-b:a", "64k", "-y", oggPath],
-      { stdout: "pipe", stderr: "pipe" }
+      { stdout: "pipe", stderr: "pipe" },
     );
     const ffmpegExit = await ffmpeg.exited;
     if (ffmpegExit !== 0) {
       const stderr = await new Response(ffmpeg.stderr).text();
-      console.error(`ffmpeg (TTS) failed (code ${ffmpegExit}): ${stderr}`);
+      log.error(`ffmpeg (TTS) failed (code ${ffmpegExit}): ${stderr}`);
       return null;
     }
 

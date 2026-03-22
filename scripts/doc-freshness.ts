@@ -8,19 +8,19 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import {
-  extractModules,
   extractCommands,
-  parseClaudeMdModules,
-  parseClaudeMdCommands,
-  parseClaudeMdTestCount,
+  extractModules,
   findGaps,
+  parseClaudeMdCommands,
+  parseClaudeMdModules,
+  parseClaudeMdTestCount,
 } from "./doc-utils.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const SRC_DIR = join(ROOT, "src");
 const RELAY_PATH = join(SRC_DIR, "relay.ts");
 const CLAUDE_MD_PATH = join(ROOT, "CLAUDE.md");
-const TESTS_DIR = join(ROOT, "tests");
+const _TESTS_DIR = join(ROOT, "tests");
 
 async function main() {
   console.log("Documentation freshness check\n");
@@ -48,8 +48,12 @@ async function main() {
   });
 
   if (gaps.length === 0) {
-    console.log(`Modules: ${srcModules.length} in src/, ${claudeMdModules.length} in CLAUDE.md — OK`);
-    console.log(`Commands: ${srcCommands.length} in relay.ts, ${claudeMdCommands.length} in CLAUDE.md — OK`);
+    console.log(
+      `Modules: ${srcModules.length} in src/, ${claudeMdModules.length} in CLAUDE.md — OK`,
+    );
+    console.log(
+      `Commands: ${srcCommands.length} in relay.ts, ${claudeMdCommands.length} in CLAUDE.md — OK`,
+    );
     console.log("\nAll documentation is up to date.");
     process.exit(0);
   }

@@ -5,15 +5,14 @@
  * rework loop, and feedback formatting.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  parseEvaluationOutput,
-  formatEvaluationFeedback,
+  EXPLORATION_RUBRIC_DIMENSIONS,
   evaluateAndRework,
   evaluateExplorationCompleteness,
-  EXPLORATION_RUBRIC_DIMENSIONS,
+  formatEvaluationFeedback,
   type GateEvaluation,
-  type EvaluateReworkResult,
+  parseEvaluationOutput,
 } from "../../src/gate-evaluator";
 
 // ── parseEvaluationOutput ────────────────────────────────────
@@ -102,7 +101,11 @@ describe("formatEvaluationFeedback", () => {
       pass: false,
       score: 35,
       issues: [
-        { severity: "critical", description: "Missing AC for FR-001", suggestion: "Add GIVEN/WHEN/THEN" },
+        {
+          severity: "critical",
+          description: "Missing AC for FR-001",
+          suggestion: "Add GIVEN/WHEN/THEN",
+        },
         { severity: "major", description: "No edge cases", suggestion: "Define EC-001 to EC-005" },
       ],
       gate_name: "spec",
@@ -132,18 +135,18 @@ describe("evaluateAndRework", () => {
       "pm",
       "tasks",
       { subtasks: [{ title: "T1" }] },
-      async (feedback) => {
+      async (_feedback) => {
         agentCallCount++;
         return { subtasks: [{ title: "T1 improved" }] };
       },
       2,
       // Custom evaluator: always pass
-      async (data) => ({
+      async (_data) => ({
         pass: true,
         score: 90,
         issues: [],
         gate_name: "tasks",
-      })
+      }),
     );
 
     expect(result.finalEvaluation.pass).toBe(true);
@@ -168,18 +171,20 @@ describe("evaluateAndRework", () => {
         return { subtasks: [{ title: "Fixed" }] };
       },
       2,
-      async (data) => {
+      async (_data) => {
         evalCount++;
         if (evalCount === 1) {
           return {
             pass: false,
             score: 30,
-            issues: [{ severity: "critical", description: "Empty subtasks", suggestion: "Add subtasks" }],
+            issues: [
+              { severity: "critical", description: "Empty subtasks", suggestion: "Add subtasks" },
+            ],
             gate_name: "tasks",
           };
         }
         return { pass: true, score: 80, issues: [], gate_name: "tasks" };
-      }
+      },
     );
 
     expect(result.finalEvaluation.pass).toBe(true);
@@ -198,26 +203,26 @@ describe("evaluateAndRework", () => {
       "dev",
       "implementation",
       { files: [] },
-      async (feedback) => {
+      async (_feedback) => {
         agentCallCount++;
         return { files: [] }; // never good enough
       },
       2,
       // Custom evaluator: always fail
-      async (data) => ({
+      async (_data) => ({
         pass: false,
         score: 20,
         issues: [{ severity: "critical", description: "Bad output", suggestion: "Fix" }],
         gate_name: "implementation",
-      })
+      }),
     );
 
     expect(result.finalEvaluation.pass).toBe(false);
     expect(result.passedAtIteration).toBeNull();
     expect(agentCallCount).toBe(2); // called twice (2 rework iterations)
     // Should have the warning about max iterations
-    const warningIssue = result.finalEvaluation.issues.find(
-      i => i.description.includes("did not pass after 2 rework iterations")
+    const warningIssue = result.finalEvaluation.issues.find((i) =>
+      i.description.includes("did not pass after 2 rework iterations"),
     );
     expect(warningIssue).toBeDefined();
   });
@@ -231,17 +236,17 @@ describe("evaluateAndRework", () => {
       "architect",
       "plan",
       { design: "v1" },
-      async (feedback) => {
+      async (_feedback) => {
         return { design: "v2" };
       },
       1,
-      async (data) => {
+      async (_data) => {
         evalCount++;
         if (evalCount === 1) {
           return { pass: false, score: 40, issues: [], gate_name: "plan" };
         }
         return { pass: true, score: 85, issues: [], gate_name: "plan" };
-      }
+      },
     );
 
     expect(result.finalEvaluation.pass).toBe(true);
@@ -258,17 +263,17 @@ describe("evaluateAndRework", () => {
       "pm",
       "tasks",
       { subtasks: [] },
-      async (feedback) => {
+      async (_feedback) => {
         agentCallCount++;
         return { subtasks: [{ title: "Fixed" }] };
       },
       0,
-      async (data) => ({
+      async (_data) => ({
         pass: false,
         score: 30,
         issues: [{ severity: "major", description: "Bad", suggestion: "Fix" }],
         gate_name: "tasks",
-      })
+      }),
     );
 
     expect(result.finalEvaluation.pass).toBe(false);
@@ -343,7 +348,10 @@ describe("evaluateExplorationCompleteness", () => {
       ],
       recommendation: "A clear recommendation with enough detail here",
       confidence: 0.3,
-      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+      alternatives: [
+        { label: "A", description: "..." },
+        { label: "B", description: "..." },
+      ],
     };
 
     const result = evaluateExplorationCompleteness(data);
@@ -363,7 +371,12 @@ describe("evaluateExplorationCompleteness", () => {
   });
 
   it("has correct rubric dimensions", () => {
-    expect(EXPLORATION_RUBRIC_DIMENSIONS).toEqual(["coverage", "depth", "actionability", "confidence"]);
+    expect(EXPLORATION_RUBRIC_DIMENSIONS).toEqual([
+      "coverage",
+      "depth",
+      "actionability",
+      "confidence",
+    ]);
   });
 
   it("scores higher with sourced findings", () => {
@@ -374,7 +387,10 @@ describe("evaluateExplorationCompleteness", () => {
       ],
       recommendation: "A clear recommendation with enough detail here",
       confidence: 0.8,
-      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+      alternatives: [
+        { label: "A", description: "..." },
+        { label: "B", description: "..." },
+      ],
     };
     const withoutSources = {
       findings: [
@@ -383,7 +399,10 @@ describe("evaluateExplorationCompleteness", () => {
       ],
       recommendation: "A clear recommendation with enough detail here",
       confidence: 0.8,
-      alternatives: [{ label: "A", description: "..." }, { label: "B", description: "..." }],
+      alternatives: [
+        { label: "A", description: "..." },
+        { label: "B", description: "..." },
+      ],
     };
 
     const resultWith = evaluateExplorationCompleteness(withSources);

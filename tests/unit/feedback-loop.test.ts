@@ -4,12 +4,12 @@
  * Tests for feedback pattern extraction and prompt enrichment.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
-  extractFeedbackFromRetro,
   buildFeedbackContext,
-  formatFeedbackRules,
+  extractFeedbackFromRetro,
   type FeedbackRule,
+  formatFeedbackRules,
 } from "../../src/feedback-loop";
 
 describe("extractFeedbackFromRetro", () => {
@@ -56,9 +56,7 @@ describe("extractFeedbackFromRetro", () => {
       sprint_id: "S12",
       what_didnt: [],
       patterns_detected: [],
-      actions_proposed: [
-        { action: "Ameliorer la couverture de tests", priority: "haute" },
-      ],
+      actions_proposed: [{ action: "Ameliorer la couverture de tests", priority: "haute" }],
     };
 
     const results = extractFeedbackFromRetro(retro);

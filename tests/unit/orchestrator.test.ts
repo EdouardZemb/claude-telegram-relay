@@ -5,22 +5,22 @@
  * S22: Structured message passing, retry loop, dynamic pipeline selection.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { isFeatureEnabled, loadFeatures } from "../../src/feature-flags";
 import {
+  type AgentRole,
+  type AgentStepResult,
+  classifyPipeline,
   DEFAULT_PIPELINE,
+  formatOrchestrationResult,
+  LIGHT_PIPELINE,
+  type OrchestratedResult,
   QUICK_PIPELINE,
   REVIEW_PIPELINE,
   SOLO_PIPELINE,
-  LIGHT_PIPELINE,
-  formatOrchestrationResult,
   selectPipeline,
-  classifyPipeline,
-  type AgentRole,
-  type OrchestratedResult,
-  type AgentStepResult,
 } from "../../src/orchestrator";
 import type { Task } from "../../src/tasks";
-import { isFeatureEnabled, loadFeatures } from "../../src/feature-flags";
 
 describe("Pipeline Definitions", () => {
   it("DEFAULT_PIPELINE includes all main agents in order", () => {
@@ -52,7 +52,7 @@ describe("formatOrchestrationResult", () => {
     success: boolean,
     output: string = "test output",
     durationMs: number = 5000,
-    opts?: { structured?: any; retryCount?: number }
+    opts?: { structured?: any; retryCount?: number },
   ): AgentStepResult {
     return {
       agentId,
@@ -166,7 +166,14 @@ describe("formatOrchestrationResult", () => {
       success: true,
       steps: [
         makeStep("analyst", "Mary", true, "Done", 5000, {
-          structured: { role: "analyst", analysis: "ok", risks: [], recommendations: [], dependencies: [], feasibility: "high" },
+          structured: {
+            role: "analyst",
+            analysis: "ok",
+            risks: [],
+            recommendations: [],
+            dependencies: [],
+            feasibility: "high",
+          },
         }),
         makeStep("dev", "Amelia", true, "Done", 10000),
       ],
@@ -185,9 +192,7 @@ describe("formatOrchestrationResult", () => {
   it("shows retry count in formatted output", () => {
     const result: OrchestratedResult = {
       success: true,
-      steps: [
-        makeStep("dev", "Amelia", true, "Done", 15000, { retryCount: 2 }),
-      ],
+      steps: [makeStep("dev", "Amelia", true, "Done", 15000, { retryCount: 2 })],
       totalDurationMs: 15000,
       summary: "Done after retries",
     };
@@ -349,7 +354,9 @@ describe("classifyPipeline", () => {
   });
 
   it("classifies feature tasks as DEFAULT", () => {
-    expect(classifyPipeline(makeTask({ title: "Implement new auth system", priority: 1 }))).toBe("DEFAULT");
+    expect(classifyPipeline(makeTask({ title: "Implement new auth system", priority: 1 }))).toBe(
+      "DEFAULT",
+    );
   });
 });
 
@@ -387,7 +394,7 @@ describe("[V14] Feature Flags for P1/P2/E1/P3", () => {
 });
 
 describe("[V12] P1/P2/E1/P3 pipeline scope guards", () => {
-  function makeTask(overrides: Partial<Task> = {}): Task {
+  function _makeTask(overrides: Partial<Task> = {}): Task {
     return {
       id: "test-scope",
       title: "Test task",
