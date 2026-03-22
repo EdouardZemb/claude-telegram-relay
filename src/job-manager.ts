@@ -12,6 +12,7 @@ import type { Bot } from "grammy";
 import { Semaphore } from "./semaphore.ts";
 import { enqueue } from "./notification-queue.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { buildPreflightKeyboard } from "./prd-workflow.ts";
 
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const JOBS_FILE = join(RELAY_DIR, "jobs.json");
@@ -216,6 +217,22 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
         }
       }
       break;
+    case "prd-preflight":
+      // R14: Parse PRDWF_PREFLIGHT:{prdId}|{verdict}|{resume}
+      if (job.result?.startsWith("PRDWF_PREFLIGHT:")) {
+        const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
+        const verdict = (parts[1] || "") as "GO" | "PAUSE" | "STOP";
+        const preflightKb = buildPreflightKeyboard(verdict);
+        // Copy buttons from preflight keyboard
+        for (const row of preflightKb.inline_keyboard) {
+          for (const btn of row) {
+            kb.text(btn.text, btn.callback_data || "");
+          }
+          kb.row();
+        }
+        hasButtons = true;
+      }
+      break;
     case "prd":
       // result format: PRD_CREATED:<id>|<title>
       if (job.result?.startsWith("PRD_CREATED:")) {
@@ -255,7 +272,12 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       const parts = job.result.replace("PRDWF_DECOMPOSED:", "").split("|");
       const taskCount = parts[1] || "?";
       const details = parts.slice(2).join("|");
-      message = `Decomposition terminée (${elapsed})\n${taskCount} taches creees\n\n${details}`;
+      message = `Décomposition terminée (${elapsed})\n${taskCount} tâches créées\n\n${details}`;
+    } else if (job.type === "prd-preflight" && job.result?.startsWith("PRDWF_PREFLIGHT:")) {
+      const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
+      const verdict = parts[1] || "?";
+      const resume = parts.slice(2).join("|");
+      message = `Preflight termine (${elapsed})\nVerdict : ${verdict}\n${resume}`;
     } else if (job.type === "autopipeline-batch" && job.result?.startsWith("BATCH_COMPLETE:")) {
       const summary = job.result.replace("BATCH_COMPLETE:", "").split("\n")[0];
       message = `Implementation batch terminée (${elapsed})\nResultat : ${summary} taches reussies`;
