@@ -23,6 +23,7 @@
     "cost:estimate": "bun run scripts/cost-estimate.ts",
     "graph:index": "bun run scripts/index-graph.ts",
     "migrate": "bun run scripts/migrate.ts",
+    "rotate-token": "./scripts/rotate-token.sh",
     "prepare": "lefthook install"
   },
   "dependencies": {
