@@ -60,6 +60,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `code-review.ts` | Adversarial code review before merge |
 | `feedback-loop.ts` | Double-loop learning: retro + gate analysis → agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
+| `doc-utils.ts` | Documentation parsing utilities: module/command extraction, test count, gap detection |
 | `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads relevant shards |
 | `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
@@ -176,14 +177,14 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    62 TypeScript modules (core logic)
+src/                    63 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3212 tests (unit + integration + E2E)
+tests/                  3242 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -215,7 +216,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (3212 tests, all must pass before merge)
+- Tests: `bun test` (3242 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

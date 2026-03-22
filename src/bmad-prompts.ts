@@ -270,6 +270,9 @@ function getDevInstructions(command: string): string {
       "- Documente chaque decision technique prise",
       "- Si tu es bloque, explique clairement pourquoi",
       "- Fais un resume concis de ce que tu as fait a la fin",
+      "- Apres ajout/suppression de tests ou modules, mettre a jour CLAUDE.md (compteur tests, table modules)",
+      "- Avant de terminer, executer bun build --no-bundle --target=bun pour verifier les types",
+      "- Avant de terminer, executer bun test tests/unit pour verifier les tests unitaires",
       "",
       "Commence maintenant.",
     ].join("\n");

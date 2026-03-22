@@ -14,7 +14,7 @@ import {
   parseClaudeMdModuleCount,
   parseClaudeMdModules,
   parseClaudeMdTestCount,
-} from "../../scripts/doc-utils.ts";
+} from "../../src/doc-utils.ts";
 
 const ROOT = join(import.meta.dir, "../..");
 const SRC_DIR = join(ROOT, "src");

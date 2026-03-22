@@ -255,14 +255,80 @@ function git(...args: string[]): { ok: boolean; stdout: string; stderr: string }
   };
 }
 
+/**
+ * Pre-commit validation: typecheck + unit tests.
+ * Runs before git commit in executeTask to catch errors early.
+ *
+ * Defense in profondeur: ce gate hard couvre le chemin executeTask.
+ * Les instructions soft (R4-R5 dans bmad-prompts.ts) couvrent les chemins
+ * hors executeTask (orchestrateur via spawnClaude direct). Les deux
+ * mecanismes coexistent par design.
+ *
+ * Fail-fast: typecheck first, skip tests if typecheck fails.
+ * Error truncation: messages capped at 2000 chars for Telegram readability.
+ */
+const PRE_COMMIT_TIMEOUT_MS = 60_000;
+const ERROR_MAX_LENGTH = 2000;
+
+export function runPreCommitValidation(projectDir: string): { passed: boolean; errors: string[] } {
+  const errors: string[] = [];
+  // Use the current runtime's bun binary to avoid PATH resolution issues
+  const bunPath = process.execPath || "bun";
+
+  try {
+    // Step 1: Typecheck (fail-fast — if this fails, skip tests)
+    const typecheck = spawnSync([bunPath, "build", "--no-bundle", "--target=bun", "src/"], {
+      cwd: projectDir,
+      env: { ...process.env },
+      timeout: PRE_COMMIT_TIMEOUT_MS,
+    });
+
+    if (typecheck.exitCode !== 0) {
+      const stderr = new TextDecoder().decode(typecheck.stderr).trim();
+      const stdout = new TextDecoder().decode(typecheck.stdout).trim();
+      const msg = (stderr || stdout || "typecheck failed").substring(0, ERROR_MAX_LENGTH);
+      errors.push(`TypeCheck: ${msg}`);
+      log.error("Pre-commit typecheck failed", { exitCode: typecheck.exitCode });
+      return { passed: false, errors };
+    }
+
+    // Step 2: Unit tests (only if typecheck passed)
+    const tests = spawnSync([bunPath, "test", "tests/unit", "--bail"], {
+      cwd: projectDir,
+      env: { ...process.env },
+      timeout: PRE_COMMIT_TIMEOUT_MS,
+    });
+
+    if (tests.exitCode !== 0) {
+      const stderr = new TextDecoder().decode(tests.stderr).trim();
+      const stdout = new TextDecoder().decode(tests.stdout).trim();
+      const msg = (stderr || stdout || "tests failed").substring(0, ERROR_MAX_LENGTH);
+      errors.push(`Tests: ${msg}`);
+      log.error("Pre-commit tests failed", { exitCode: tests.exitCode });
+      return { passed: false, errors };
+    }
+
+    return { passed: true, errors: [] };
+  } catch (err) {
+    // spawnSync throws ENOENT if cwd doesn't exist or bun binary not found
+    const msg = String(err).substring(0, ERROR_MAX_LENGTH);
+    errors.push(`TypeCheck: ${msg}`);
+    log.error("Pre-commit validation error", { error: String(err) });
+    return { passed: false, errors };
+  }
+}
+
 function sanitizeBranchName(title: string): string {
-  return title
+  const base = title
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
-    .substring(0, 50);
+    .substring(0, 40);
+  // Append short unique suffix to prevent branch name collisions
+  const suffix = Date.now().toString(36).slice(-5);
+  return `${base}-${suffix}`;
 }
 
 /**
@@ -436,8 +502,22 @@ export async function executeTask(
     let reviewResult: Awaited<ReturnType<typeof runCodeReview>> | undefined;
 
     if (status.stdout) {
-      // Stage and commit all changes
+      // Stage all changes
       git("add", "-A");
+
+      // Pre-commit validation: typecheck + unit tests (R1, R2)
+      const validation = runPreCommitValidation(PROJECT_DIR);
+      if (!validation.passed) {
+        log.error("Pre-commit validation failed, aborting commit", { errors: validation.errors });
+        git("checkout", "master");
+        return {
+          success: false,
+          output: output.trim(),
+          error: `Pre-commit validation failed:\n${validation.errors.join("\n")}`,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
       git("commit", "-m", `feat: ${task.title}`);
 
       // Gate 3: Adversarial code review before push
@@ -471,63 +551,103 @@ export async function executeTask(
 
       // Push branch
       const pushResult = git("push", "-u", "origin", branchName);
-      if (pushResult.ok) {
-        // Create PR via gh CLI (sanitize user-controlled strings)
-        const safeTitle = sanitizeShellArg(task.title);
-        const safeDesc = sanitizeShellArg(task.description || "");
-        const prBody =
-          `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${safeDesc}`.trim();
-        const prResult = spawnSync(
-          [
-            "gh",
-            "pr",
-            "create",
-            "-R",
-            GITHUB_REPO,
-            "--title",
-            safeTitle,
-            "--body",
-            prBody,
-            "--base",
-            "master",
-            "--head",
-            branchName,
-          ],
-          { cwd: PROJECT_DIR },
-        );
-        const prOutput = new TextDecoder().decode(prResult.stdout).trim();
-        if (prResult.exitCode === 0 && prOutput.startsWith("http")) {
-          prUrl = prOutput;
-
-          // Wait for CI checks to complete
-          if (onProgress) {
-            await onProgress("PR creee. Attente des checks CI...");
-          }
-          const ciResult = await waitForCIChecks(branchName, onProgress);
-          if (!ciResult.passed) {
-            git("checkout", "master");
-            if (supabase) {
-              await updateTaskStatus(supabase, task.id, "review");
-            }
-            return {
-              success: true,
-              output: output.trim(),
-              durationMs: Date.now() - startTime,
-              prUrl,
-              ciPassed: false,
-              ciDetails: ciResult.details,
-            };
-          }
+      if (!pushResult.ok) {
+        log.error("git push failed", { branch: branchName, stderr: pushResult.stderr });
+        git("checkout", "master");
+        if (supabase) {
+          await updateTaskStatus(supabase, task.id, "review");
         }
+        return {
+          success: false,
+          output: output.trim(),
+          error: `Push echoue: ${pushResult.stderr}`,
+          durationMs: Date.now() - startTime,
+          reviewScore: reviewResult?.score,
+        };
+      }
+
+      // Create PR via gh CLI (sanitize user-controlled strings)
+      const safeTitle = sanitizeShellArg(task.title);
+      const safeDesc = sanitizeShellArg(task.description || "");
+      const prBody =
+        `Tache automatisee via /exec\n\nID: ${task.id.substring(0, 8)}\nPriorite: P${task.priority}\n\n${safeDesc}`.trim();
+      const prResult = spawnSync(
+        [
+          "gh",
+          "pr",
+          "create",
+          "-R",
+          GITHUB_REPO,
+          "--title",
+          safeTitle,
+          "--body",
+          prBody,
+          "--base",
+          "master",
+          "--head",
+          branchName,
+        ],
+        { cwd: PROJECT_DIR },
+      );
+      const prOutput = new TextDecoder().decode(prResult.stdout).trim();
+      const prStderr = new TextDecoder().decode(prResult.stderr).trim();
+
+      if (prResult.exitCode !== 0 || !prOutput.startsWith("http")) {
+        log.error("PR creation failed", {
+          branch: branchName,
+          exitCode: prResult.exitCode,
+          stderr: prStderr,
+        });
+        if (onProgress) {
+          await onProgress(`Branche ${branchName} poussee mais creation PR echouee: ${prStderr}`);
+        }
+        git("checkout", "master");
+        if (supabase) {
+          await updateTaskStatus(supabase, task.id, "review");
+        }
+        return {
+          success: false,
+          output: output.trim(),
+          error: `PR creation echouee (branche poussee: ${branchName}): ${prStderr}`,
+          durationMs: Date.now() - startTime,
+          reviewScore: reviewResult?.score,
+        };
+      }
+
+      prUrl = prOutput;
+
+      // Wait for CI checks to complete
+      if (onProgress) {
+        await onProgress("PR creee. Attente des checks CI...");
+      }
+      const ciResult = await waitForCIChecks(branchName, onProgress);
+      if (!ciResult.passed) {
+        git("checkout", "master");
+        if (supabase) {
+          await updateTaskStatus(supabase, task.id, "review");
+        }
+        return {
+          success: true,
+          output: output.trim(),
+          durationMs: Date.now() - startTime,
+          prUrl,
+          ciPassed: false,
+          ciDetails: ciResult.details,
+        };
       }
     }
 
     // Go back to master
     git("checkout", "master");
 
-    // Mark task as done
+    // Only mark task as done if we have a PR (or no changes were needed)
     if (supabase) {
-      await updateTaskStatus(supabase, task.id, "done");
+      if (prUrl || !status.stdout) {
+        await updateTaskStatus(supabase, task.id, "done");
+      } else {
+        log.error("task completed without PR despite having changes", { taskId: task.id });
+        await updateTaskStatus(supabase, task.id, "review");
+      }
     }
 
     return {

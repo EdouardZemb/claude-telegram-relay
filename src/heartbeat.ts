@@ -32,6 +32,16 @@ import { spawnClaude } from "./agent.ts";
 // Periodic task imports (consolidated from alert-cron + autonomy-cron)
 import { runAllChecks } from "./alerts.ts";
 import { isDuplicate, runAllScanners } from "./autonomy-scanner.ts";
+import {
+  countTests,
+  type DocState,
+  extractCommands,
+  extractModules,
+  findGaps,
+  parseClaudeMdCommands,
+  parseClaudeMdModules,
+  parseClaudeMdTestCount,
+} from "./doc-utils.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import {
   buildHeartbeatPrompt,
@@ -51,6 +61,7 @@ import { enqueue, flushMorningDigest, getQueue, loadQueue } from "./notification
 import { addTask, getCurrentSprint } from "./tasks.ts";
 
 const log = createLogger("heartbeat");
+
 const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const STATE_FILE = join(PROJECT_DIR, "config", "heartbeat-state.json");
@@ -120,7 +131,19 @@ export async function getSprintDelta(
     };
   }
 
-  const { data: tasks } = await supabase.from("tasks").select("id, status").eq("sprint", sprint);
+  const { data: tasks, error } = await supabase
+    .from("tasks")
+    .select("id, status")
+    .eq("sprint", sprint);
+
+  if (error) {
+    log.error("Supabase error in getSprintDelta", { error });
+    return {
+      summary: "Erreur Supabase",
+      snapshot: lastSnapshot,
+      changed: false,
+    };
+  }
 
   const total = tasks?.length || 0;
   const done = tasks?.filter((t: { status: string }) => t.status === "done").length || 0;
@@ -186,10 +209,15 @@ export function getOpenPRs(): { prs: string; hasStale: boolean } {
 export async function getStaleTasks(
   supabase: ReturnType<typeof createClient>,
 ): Promise<{ tasks: string; hasStale: boolean }> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("tasks")
     .select("id, title, status, updated_at")
     .eq("status", "in_progress");
+
+  if (error) {
+    log.error("Supabase error in getStaleTasks", { error });
+    return { tasks: "", hasStale: false };
+  }
 
   if (!data || data.length === 0) {
     return { tasks: "", hasStale: false };
@@ -312,7 +340,7 @@ export async function executeActions(
       // Check cooldown
       const topic = action.message.substring(0, 50);
       if (state.cooldowns[topic] && state.cooldowns[topic] > Date.now()) {
-        log.info(`  Cooldown actif pour: ${topic}`);
+        log.info(`Cooldown actif pour: ${topic}`);
         continue;
       }
 
@@ -326,7 +354,7 @@ export async function executeActions(
       state.cooldowns[topic] = Date.now() + COOLDOWN_MS;
 
       executed.push({ type: "notify", summary: action.message, timestamp: now });
-      log.info(`  Notification: ${action.message}`);
+      log.info(`Notification: ${action.message}`);
     }
 
     if (action.type === "task_create" && action.taskTitle) {
@@ -340,12 +368,85 @@ export async function executeActions(
 
       if (task) {
         executed.push({ type: "task_create", summary: action.taskTitle, timestamp: now });
-        log.info(`  Tache creee: ${action.taskTitle} [${task.id.substring(0, 8)}]`);
+        log.info(`Tache creee: ${action.taskTitle} [${task.id.substring(0, 8)}]`);
       }
     }
   }
 
   return executed;
+}
+
+// ── Lightweight Audit ─────────────────────────────────────────
+
+export interface LightweightAuditResult {
+  score: number;
+  gaps: Array<{ type: string; item: string; detail: string }>;
+  testCount: number;
+}
+
+/**
+ * Compute audit score from gaps list.
+ * Score: 100 - (5 * missing/extra modules) - (5 * missing/extra commands) - (10 if test count drifts).
+ * Clamped to [0, 100].
+ */
+export function computeAuditScore(gaps: Array<{ type: string }>): number {
+  let score = 100;
+  for (const gap of gaps) {
+    score -= gap.type === "test_count" ? 10 : 5;
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
+/**
+ * Run a lightweight structure + tests audit using doc-utils.
+ */
+export async function runLightweightAudit(projectDir: string): Promise<LightweightAuditResult> {
+  const srcDir = join(projectDir, "src");
+  const relayPath = join(srcDir, "relay.ts");
+  const claudeMdPath = join(projectDir, "CLAUDE.md");
+  const testsDir = join(projectDir, "tests");
+
+  const srcModules = await extractModules(srcDir);
+  const srcCommands = await extractCommands(relayPath);
+  const claudeMdModules = await parseClaudeMdModules(claudeMdPath);
+  const claudeMdCommands = await parseClaudeMdCommands(claudeMdPath);
+
+  const claudeMdContent = await readFile(claudeMdPath, "utf-8");
+  const claudeMdTestCount = parseClaudeMdTestCount(claudeMdContent);
+
+  // Only run countTests if structural checks pass (avoid heavy operation)
+  let actualTestCount = claudeMdTestCount; // assume no drift by default
+  const structState: DocState = {
+    srcModules,
+    claudeMdModules,
+    srcCommands,
+    claudeMdCommands,
+    actualTestCount,
+    claudeMdTestCount,
+  };
+  const structGaps = findGaps(structState);
+  const structuralGapsOnly = structGaps.filter((g) => g.type !== "test_count");
+
+  if (structuralGapsOnly.length === 0) {
+    try {
+      actualTestCount = await countTests(testsDir);
+    } catch {
+      actualTestCount = claudeMdTestCount; // fallback: assume no drift
+    }
+  }
+
+  const fullState: DocState = {
+    srcModules,
+    claudeMdModules,
+    srcCommands,
+    claudeMdCommands,
+    actualTestCount,
+    claudeMdTestCount,
+  };
+  const gaps = findGaps(fullState);
+  const score = computeAuditScore(gaps);
+
+  return { score, gaps, testCount: actualTestCount };
 }
 
 // ── Main Pulse ────────────────────────────────────────────────
@@ -356,11 +457,11 @@ export async function pulse(): Promise<{
   actions: HeartbeatAction[];
 }> {
   const timestamp = new Date().toISOString();
-  log.info(`Heartbeat pulse starting...`);
+  log.info("Heartbeat pulse starting...");
 
   // Check feature flag
   if (!isFeatureEnabled("heartbeat")) {
-    log.info(`Heartbeat disabled (feature flag off).`);
+    log.info("Heartbeat disabled (feature flag off).");
     return { skipped: true, reasons: ["disabled"], actions: [] };
   }
 
@@ -371,7 +472,7 @@ export async function pulse(): Promise<{
   const supabaseUrl = process.env.SUPABASE_URL || "";
   const supabaseKey = process.env.SUPABASE_ANON_KEY || "";
   if (!supabaseUrl || !supabaseKey) {
-    log.info(`Supabase not configured, skipping.`);
+    log.info("Supabase not configured, skipping.");
     return { skipped: true, reasons: ["no_supabase"], actions: [] };
   }
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -398,7 +499,7 @@ export async function pulse(): Promise<{
   let skipped = true;
 
   if (!triage.interesting) {
-    log.info(`Nothing interesting. Skipping Claude spawn.`);
+    log.info("Nothing interesting. Skipping Claude spawn.");
   } else {
     skipped = false;
     log.info(`Interesting: ${triage.reasons.join(", ")}. Spawning Claude...`);
@@ -417,13 +518,15 @@ export async function pulse(): Promise<{
       });
 
       if (result.exitCode !== 0) {
-        log.error(`Claude spawn failed:`, { error: String(result.stderr) });
+        log.error("Claude spawn failed", { stderr: result.stderr });
       } else {
         // Parse decision — Claude CLI with --output-format json may wrap the response
         let decision: HeartbeatDecision | null = null;
         try {
           const raw = result.stdout;
-          log.debug("Raw output (first 500 chars)", { output: raw.substring(0, 500) });
+          if (process.env.HEARTBEAT_DEBUG) {
+            log.debug("Raw output (first 500 chars)", { raw: raw.substring(0, 500) });
+          }
           let parsed: unknown;
 
           try {
@@ -441,8 +544,8 @@ export async function pulse(): Promise<{
                 }
               }
               if (!parsed) {
-                log.info(`Claude wrapper result field empty or not JSON. Result:`, {
-                  detail: String(content).substring(0, 200),
+                log.info("Claude wrapper result field empty or not JSON", {
+                  result: String(content).substring(0, 200),
                 });
               }
             } else {
@@ -465,13 +568,10 @@ export async function pulse(): Promise<{
               reasoning: typeof d.reasoning === "string" ? d.reasoning : "No reasoning provided",
             };
           } else {
-            log.info(`No decision parsed from Claude output, skipping.`);
+            log.info("No decision parsed from Claude output, skipping.");
           }
         } catch (parseError) {
-          log.error(`JSON parse failed:`, {
-            error: String(parseError),
-            raw: result.stdout.substring(0, 500),
-          });
+          log.error("JSON parse failed", { parseError, raw: result.stdout.substring(0, 500) });
         }
 
         if (decision) {
@@ -485,7 +585,7 @@ export async function pulse(): Promise<{
         }
       }
     } catch (error) {
-      log.error(`Heartbeat Claude error:`, { error: String(error) });
+      log.error("Heartbeat Claude error", { error });
     }
   }
 
@@ -503,14 +603,14 @@ export async function pulse(): Promise<{
       await flushMorningDigest();
     }
   } catch (err) {
-    log.error(`Morning digest flush error:`, { error: String(err) });
+    log.error("Morning digest flush error", { error: err });
   }
 
   // Hourly: Alert checks
   try {
     const hourAgo = now - 60 * 60 * 1000;
     if (!state.lastAlertCheckAt || new Date(state.lastAlertCheckAt).getTime() < hourAgo) {
-      log.info(`Running hourly alert checks...`);
+      log.info("Running hourly alert checks...");
       const alerts = await runAllChecks(supabase, sprint);
       if (alerts.length > 0) {
         log.info(`${alerts.length} alert(s) detected.`);
@@ -529,14 +629,14 @@ export async function pulse(): Promise<{
       state.lastAlertCheckAt = timestamp;
     }
   } catch (err) {
-    log.error(`Alert check error:`, { error: String(err) });
+    log.error("Alert check error", { error: err });
   }
 
   // Hourly: Memory archival
   try {
     const hourAgo = now - 60 * 60 * 1000;
     if (!state.lastArchivalAt || new Date(state.lastArchivalAt).getTime() < hourAgo) {
-      log.info(`Running memory archival...`);
+      log.info("Running memory archival...");
       const archived = await archiveOldMemories(supabase);
       if (archived > 0) {
         log.info(`Archived ${archived} old memories.`);
@@ -544,7 +644,7 @@ export async function pulse(): Promise<{
       state.lastArchivalAt = timestamp;
     }
   } catch (err) {
-    log.error(`Memory archival error:`, { error: String(err) });
+    log.error("Memory archival error", { error: err });
   }
 
   // Every 30min: LLM-Ops check (gated on feature flag)
@@ -555,7 +655,7 @@ export async function pulse(): Promise<{
         !state.lastLlmOpsCheckAt ||
         new Date(state.lastLlmOpsCheckAt).getTime() < llmOpsThreshold
       ) {
-        log.info(`Running LLM-Ops check...`);
+        log.info("Running LLM-Ops check...");
         const notifyFn = async (msg: string) => {
           await enqueue({
             type: "alert",
@@ -573,14 +673,14 @@ export async function pulse(): Promise<{
       }
     }
   } catch (err) {
-    log.error(`LLM-Ops check error:`, { error: String(err) });
+    log.error("LLM-Ops check error", { error: err });
   }
 
   // Daily: Autonomy scan
   try {
     const dayAgo = now - 24 * 60 * 60 * 1000;
     if (!state.lastAutonomyScanAt || new Date(state.lastAutonomyScanAt).getTime() < dayAgo) {
-      log.info(`Running daily autonomy scan...`);
+      log.info("Running daily autonomy scan...");
       const scanResult = await runAllScanners(PROJECT_DIR, supabase);
       if (scanResult.opportunities.length > 0) {
         log.info(`${scanResult.opportunities.length} opportunity(ies) found.`);
@@ -600,11 +700,7 @@ export async function pulse(): Promise<{
             tags: ["auto-generated", opp.type],
           });
           if (task) {
-            const { error: updateError } = await supabase
-              .from("tasks")
-              .update({ notes: opp.dedup_key })
-              .eq("id", task.id);
-            if (updateError) log.error(`update task notes error:`, { error: String(updateError) });
+            await supabase.from("tasks").update({ notes: opp.dedup_key }).eq("id", task.id);
             log.info(`Created: ${opp.title} [${task.id.substring(0, 8)}]`);
             created++;
           }
@@ -620,7 +716,42 @@ export async function pulse(): Promise<{
       state.lastAutonomyScanAt = timestamp;
     }
   } catch (err) {
-    log.error(`Autonomy scan error:`, { error: String(err) });
+    log.error("Autonomy scan error", { error: err });
+  }
+
+  // Daily: Lightweight audit (structure + tests)
+  try {
+    const dayAgo = now - 24 * 60 * 60 * 1000;
+    if (
+      isFeatureEnabled("audit_system") &&
+      (!state.lastAuditAt || new Date(state.lastAuditAt).getTime() < dayAgo)
+    ) {
+      log.info("Running daily lightweight audit...");
+      const auditResult = await runLightweightAudit(PROJECT_DIR);
+      log.info(`Audit score: ${auditResult.score}/100 (${auditResult.gaps.length} gap(s))`);
+
+      // Check for regression (only if we have a previous score)
+      if (state.lastAuditScore !== null && state.lastAuditScore - auditResult.score > 5) {
+        const delta = state.lastAuditScore - auditResult.score;
+        await writeMcpPending({
+          type: "alert",
+          severity: "normal",
+          message: `[Audit] Score structure/tests en regression: ${state.lastAuditScore} -> ${auditResult.score} (${delta} points). ${auditResult.gaps.length} ecart(s) detecte(s).`,
+          data: {
+            previousScore: state.lastAuditScore,
+            currentScore: auditResult.score,
+            delta,
+            gapCount: auditResult.gaps.length,
+          },
+        });
+        log.info(`Audit regression alert sent: ${state.lastAuditScore} -> ${auditResult.score}`);
+      }
+
+      state.lastAuditAt = timestamp;
+      state.lastAuditScore = auditResult.score;
+    }
+  } catch (err) {
+    log.error("Lightweight audit error", { error: err });
   }
 
   // ── Save state and return ─────────────────────────────────
@@ -634,7 +765,7 @@ export async function pulse(): Promise<{
 
 if (import.meta.main) {
   pulse().catch((err) => {
-    log.error("Heartbeat fatal error", { error: String(err) });
+    log.error("Heartbeat fatal error", { error: err });
     process.exit(1);
   });
 }
