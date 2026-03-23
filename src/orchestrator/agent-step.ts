@@ -185,6 +185,7 @@ export function getOrchestrationInstructions(agentId: AgentRole): string {
         "- Respecte l'architecture proposee",
         "- Ecris les tests pour chaque modification",
         "- Fais un resume des fichiers modifies a la fin",
+        "- Respecte les standards du projet (Result type, createLogger, getConfig, barrel, 800 LOC, frontieres) — voir CLAUDE.md",
       ].join("\n");
 
     case "qa":

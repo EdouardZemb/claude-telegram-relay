@@ -274,6 +274,14 @@ function getDevInstructions(command: string): string {
       "- Avant de terminer, executer bun build --no-bundle --target=bun pour verifier les types",
       "- Avant de terminer, executer bun test tests/unit pour verifier les tests unitaires",
       "",
+      "STANDARDS DU PROJET (voir CLAUDE.md pour le detail):",
+      "- Utiliser Result<T, E> de src/result.ts pour les erreurs metier (jamais throw pour la logique metier)",
+      "- Utiliser createLogger de src/logger.ts (jamais console.log/error/warn direct)",
+      "- Utiliser getConfig() de src/config.ts (jamais process.env. direct dans les modules)",
+      "- Convention barrel : tout module deplace dans un sous-repertoire doit garder un barrel au chemin original",
+      "- Seuil 800 LOC par fichier source (hors barrels et tests) — decomposer si depasse",
+      "- Frontieres architecturales : src/*.ts ne doit jamais importer depuis src/commands/",
+      "",
       "Commence maintenant.",
     ].join("\n");
   }
