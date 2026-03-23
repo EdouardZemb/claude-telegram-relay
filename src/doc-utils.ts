@@ -32,17 +32,19 @@ export async function extractModules(srcDir: string): Promise<string[]> {
   const files = await readdir(srcDir);
   const modules = files.filter((f) => f.endsWith(".ts")).filter((f) => !WHITELIST.includes(f));
 
-  // Also include commands/*.ts modules
-  try {
-    const cmdFiles = await readdir(join(srcDir, "commands"));
-    for (const f of cmdFiles) {
-      if (f.endsWith(".ts")) {
-        modules.push(`commands/${f}`);
+  // Also include sub-directory modules (commands/, memory/, orchestrator/, etc.)
+  const subDirs = files.filter((f) => !f.includes("."));
+  for (const subDir of subDirs) {
+    try {
+      const subFiles = await readdir(join(srcDir, subDir));
+      for (const f of subFiles) {
+        if (f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".d.ts")) {
+          modules.push(`${subDir}/${f}`);
+        }
       }
+    } catch {
+      // R6: optional IO → degrade gracefully
     }
-  } catch {
-    // R6: optional IO → degrade gracefully
-    // No commands directory
   }
 
   return modules.sort();

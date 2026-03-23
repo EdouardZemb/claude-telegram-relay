@@ -98,7 +98,7 @@ export function extractImports(
   const results: Array<{ target: string; imports: string[]; isTypeOnly: boolean }> = [];
   const sourceDir = dirname(sourceFile);
 
-  const regex = /^import\s+(type\s+)?(?:\{([^}]+)\}|(\w+))\s+from\s+["']([^"']+)["']/gm;
+  const regex = /^(?:import|export)\s+(type\s+)?(?:\{([^}]+)\}|(\w+))\s+from\s+["']([^"']+)["']/gm;
   let match;
 
   while ((match = regex.exec(content)) !== null) {

@@ -52,7 +52,7 @@ describe("formatOrchestrationResult", () => {
     success: boolean,
     output: string = "test output",
     durationMs: number = 5000,
-    opts?: { structured?: any; retryCount?: number },
+    opts?: { structured?: Record<string, unknown>; retryCount?: number },
   ): AgentStepResult {
     return {
       agentId,
@@ -459,13 +459,13 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("loads orchestrator source for structural tests", async () => {
     const fs = await import("fs");
-    orchestratorSource = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    orchestratorSource = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
     expect(orchestratorSource.length).toBeGreaterThan(0);
   });
 
   it("[V1] promoteWorkingMemory is called when memory_promotion flag is active and blackboard has working_memory", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V1: The orchestrator must check isFeatureEnabled("memory_promotion") AND bbSessionId
     const guardMatch = source.match(
@@ -485,7 +485,7 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("[V2] promoteWorkingMemory is NOT called when flag is inactive", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V2: The guard ensures promotion is skipped when flag is off
     // isFeatureEnabled("memory_promotion") is the first condition in the if-guard
@@ -506,7 +506,7 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("[V3] promoteWorkingMemory is NOT called when useBlackboard is false", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V3: bbSessionId is only set when options.useBlackboard is true
     // The guard `isFeatureEnabled("memory_promotion") && bbSessionId` ensures
@@ -523,7 +523,7 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("[V4] promoteWorkingMemory failure does not block orchestrate() return", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V4: The promotion block is wrapped in try/catch
     // Extract the promotion block and verify it's inside try/catch
@@ -546,7 +546,7 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("[V5] promotion count is reported via onProgress", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V5: onProgress is called with the promoted count
     const progressMatch = source.match(
@@ -563,7 +563,7 @@ describe("Working memory promotion in orchestrate()", () => {
 
   it("[V13] promotion works with InMemoryBlackboard fallback", async () => {
     const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
 
     // V13: When supabase is null or bbFallback exists, reading uses InMemoryBlackboard
     const fallbackRead = source.match(

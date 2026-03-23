@@ -14,10 +14,17 @@ const SRC_DIR = join(import.meta.dir, "../../src");
 const MIGRATED_MODULES = [
   // Pilotes (already migrated)
   "relay.ts",
-  "orchestrator.ts",
+  "orchestrator/pipeline.ts",
+  "orchestrator/agent-step.ts",
+  "orchestrator/format.ts",
   "agent.ts",
   // Vague 1 — Modules critiques haute frequence
-  "memory.ts",
+  "memory/core.ts",
+  "memory/classification.ts",
+  "memory/scoring.ts",
+  "memory/ideas.ts",
+  "memory/graph.ts",
+  "memory/agent-memory.ts",
   "heartbeat.ts",
   "documents.ts",
   "commands/zz-messages.ts",

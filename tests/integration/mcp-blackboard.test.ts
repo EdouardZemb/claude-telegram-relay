@@ -88,7 +88,7 @@ describe("MCP blackboard integration", () => {
     });
 
     it("orchestrator.ts passes mcpRole to spawnClaude", () => {
-      const content = readFileSync(join(PROJECT_ROOT, "src/orchestrator.ts"), "utf-8");
+      const content = readFileSync(join(PROJECT_ROOT, "src/orchestrator/agent-step.ts"), "utf-8");
       expect(content).toContain("mcpRole: agentId");
     });
   });

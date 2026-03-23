@@ -268,7 +268,7 @@ describe("[V7] recordPromptVersion idempotent — meme hash = une seule ligne", 
     const rows = supabase._getTable("prompt_versions");
     // The mock may or may not handle composite onConflict correctly
     // The important thing is the combined_hash values differ
-    const hashes = rows.map((r: any) => r.combined_hash);
+    const hashes = rows.map((r: Record<string, unknown>) => r.combined_hash);
     const _uniqueHashes = new Set(hashes);
     // At least one row exists (mock may upsert over the first with different combined_hash)
     expect(rows.length).toBeGreaterThanOrEqual(1);
@@ -576,7 +576,7 @@ describe("[V15] heartbeat n'appelle PAS runLlmOpsCheck si intervalle non depasse
 describe("[V16] orchestrateur appelle recordPromptVersion avec les bons hashes", () => {
   test("orchestrator.ts imports and calls recordPromptVersion", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const content = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
     expect(content).toContain("recordPromptVersion");
     expect(content).toContain("sha256");
     expect(content).toContain("templateH");
@@ -585,7 +585,7 @@ describe("[V16] orchestrateur appelle recordPromptVersion avec les bons hashes",
 
   test("recordPromptVersion is called with template hash and feedback hash pattern", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const content = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
     // Verify the hash computation pattern
     expect(content).toContain("sha256(yamlContent)");
     expect(content).toContain("sha256(JSON.stringify(feedbackRules))");
@@ -599,7 +599,7 @@ describe("[V16] orchestrateur appelle recordPromptVersion avec les bons hashes",
 describe("[V17] orchestrateur utilise logCostWithSpan avec le bon span_id", () => {
   test("orchestrator.ts uses logCostWithSpan instead of logCost for pipeline steps", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const content = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
     // logCostWithSpan should be present
     expect(content).toContain("logCostWithSpan(");
     expect(content).toContain("supabase,");
@@ -609,7 +609,7 @@ describe("[V17] orchestrateur utilise logCostWithSpan avec le bon span_id", () =
 
   test("logCostWithSpan is imported from llm-ops", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("src/orchestrator.ts", "utf-8");
+    const content = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
     // Verify all needed imports exist (order may vary due to formatter)
     expect(content).toContain("logCostWithSpan");
     expect(content).toContain("buildSpanId");

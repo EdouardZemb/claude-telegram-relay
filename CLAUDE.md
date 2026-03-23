@@ -36,9 +36,19 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `explore-graph.ts` | Zero-LLM fast-path for /explore structural queries via code graph |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
-| `memory.ts` | Intelligent memory: classification, importance scoring, contradiction detection, clustering, health stats, working memory promotion, agent role memory (saveAgentMemory, getAgentMemories, graduateAgentMemory, ROLE_CANONICAL_TAGS) |
+| `memory.ts` | Barrel re-export for memory sub-modules (see `src/memory/`) |
+| `memory/core.ts` | Core memory: processMemoryIntents, getMemoryContext, getRecentMessages, getRelevantContext, archiveOldMemories |
+| `memory/classification.ts` | Message classification, autoRemember, findDuplicateIdea, classifyLinkContent |
+| `memory/scoring.ts` | Importance scoring, temporal decay, conflict resolution, contradiction detection |
+| `memory/ideas.ts` | Ideas CRUD: listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList |
+| `memory/graph.ts` | Memory linking, chains, clustering, health stats, promoteWorkingMemory, buildMemoryChains |
+| `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
-| `orchestrator.ts` | Multi-agent pipeline orchestrator with sequential execution, retry, and working memory promotion |
+| `orchestrator.ts` | Barrel re-export for orchestrator sub-modules (see `src/orchestrator/`) + re-exports from deliberation.ts and pipeline-selection.ts |
+| `orchestrator/types.ts` | Types: AgentRole, AgentStepResult, OrchestratedResult, OrchestrateOptions, AGENT_COMMAND_MAP |
+| `orchestrator/agent-step.ts` | Single agent step: runAgentStep, getOrchestrationInstructions, persistAgentArtifact |
+| `orchestrator/pipeline.ts` | Main orchestrate() function: multi-agent pipeline with blackboard, gates, adversarial, conformance |
+| `orchestrator/format.ts` | Formatting: formatOrchestrationResult, buildOrchestrationSummary, logOrchestrationResult |
 | `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
 | `deliberation.ts` | Deliberation protocol: paired reviewer examines strategic agent output |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
@@ -179,18 +189,21 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    64 TypeScript modules (core logic)
+src/                    75 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
+  memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
+  orchestrator/         4 sub-modules (types, agent-step, pipeline, format)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3609 tests (unit + integration + E2E)
+tests/                  3727 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
 docs/explorations/      Exploration reports (EXPLORE-{name}.md)
+docs/adr/               Architecture Decision Records (ADR-{nnn}.md)
 .claude/agents/         11 specialized agents (dev pipeline)
 .claude/skills/         7 skills (dev pipeline orchestration)
 ```
@@ -218,13 +231,15 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (3609 tests, all must pass before merge)
+- Tests: `bun test` (3727 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
 - Telegram responses: plain text only, no markdown formatting
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
+- Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: agent-schemas.ts (1091), gate-evaluator.ts (937), workflow.ts (848) — deferred to future vagues
 
 ## Setup
 
