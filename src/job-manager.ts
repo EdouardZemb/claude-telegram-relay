@@ -293,12 +293,12 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
       // R14: Parse PRDWF_PREFLIGHT:{prdId}|{verdict}|{resume}
       if (job.result?.startsWith("PRDWF_PREFLIGHT:")) {
         const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
-        const verdict = (parts[1] || "") as "GO" | "PAUSE" | "STOP";
+        const verdict = (parts[1] || "") as "PASS" | "PAUSE" | "SKIPPED";
         const preflightKb = buildPreflightKeyboard(verdict);
         // Copy buttons from preflight keyboard
         for (const row of preflightKb.inline_keyboard) {
           for (const btn of row) {
-            kb.text(btn.text, btn.callback_data || "");
+            kb.text(btn.text, ("callback_data" in btn ? btn.callback_data : "") || "");
           }
           kb.row();
         }

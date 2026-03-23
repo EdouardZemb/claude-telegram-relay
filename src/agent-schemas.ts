@@ -237,7 +237,7 @@ export interface AgentMessage {
 
 // ── JSON Schema Descriptions (for injection into prompts) ────
 
-const SCHEMA_DESCRIPTIONS: Record<AgentRole, string> = {
+const SCHEMA_DESCRIPTIONS: Record<AgentRole | "exploration", string> = {
   analyst: `{
   "role": "analyst",
   "analysis": "resume de l'analyse (2-3 paragraphes)",
@@ -942,6 +942,21 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
         .join("\n");
 
     case "explorer":
+      if ("domain" in output) {
+        // ExplorationPhaseOutput
+        return [
+          `Domaine: ${output.domain}`,
+          output.recommendation ? `Recommandation: ${output.recommendation}` : "",
+          typeof output.effort_estimate === "string"
+            ? `Effort: ${output.effort_estimate}`
+            : output.effort_estimate
+              ? `Effort: ${(output.effort_estimate as { total: string }).total}`
+              : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+      // ExplorerOutput
       return [
         `Etat des lieux: ${output.etat_des_lieux}`,
         output.options.length > 0

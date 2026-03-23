@@ -10,6 +10,7 @@ import { spawn } from "bun";
 import { readFile, writeFile } from "fs/promises";
 import { type Bot, type Context, InputFile } from "grammy";
 import { dirname, join } from "path";
+import { getConfig } from "./config.ts";
 import type { DocumentSearchResult } from "./documents.ts";
 import { createLogger } from "./logger.ts";
 import { getIdea } from "./memory.ts";
@@ -23,17 +24,70 @@ const log = createLogger("bot-context");
 // ============================================================
 
 export const PROJECT_ROOT = dirname(dirname(import.meta.path));
-export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-export const ALLOWED_USER_ID = process.env.TELEGRAM_USER_ID || "";
-export const GROUP_ID = process.env.TELEGRAM_GROUP_ID || "";
-export const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
-export const PROJECT_DIR = process.env.PROJECT_DIR || "";
-export const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
+
+// Config constants derived lazily from getConfig().
+// getConfig() is a lazy singleton — it does not throw at module load time.
+// These getters are evaluated when the exports are accessed.
+export const BOT_TOKEN = (() => {
+  try {
+    return getConfig().telegramBotToken;
+  } catch {
+    return "";
+  }
+})();
+export const ALLOWED_USER_ID = (() => {
+  try {
+    return getConfig().telegramUserId;
+  } catch {
+    return "";
+  }
+})();
+export const GROUP_ID = (() => {
+  try {
+    return getConfig().telegramGroupId;
+  } catch {
+    return "";
+  }
+})();
+export const CLAUDE_PATH = (() => {
+  try {
+    return getConfig().claudePath;
+  } catch {
+    return "claude";
+  }
+})();
+export const PROJECT_DIR = (() => {
+  try {
+    return getConfig().projectDir;
+  } catch {
+    return "";
+  }
+})();
+export const RELAY_DIR = (() => {
+  try {
+    const cfg = getConfig();
+    return cfg.relayDir || join(process.env.HOME || "~", ".claude-relay");
+  } catch {
+    return join(process.env.HOME || "~", ".claude-relay");
+  }
+})();
 export const TEMP_DIR = join(RELAY_DIR, "temp");
 export const UPLOADS_DIR = join(RELAY_DIR, "uploads");
-export const USER_NAME = process.env.USER_NAME || "";
-export const USER_TIMEZONE =
-  process.env.USER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone;
+export const USER_NAME = (() => {
+  try {
+    return getConfig().userName;
+  } catch {
+    return "";
+  }
+})();
+export const USER_TIMEZONE = (() => {
+  try {
+    const cfg = getConfig();
+    return cfg.userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }
+})();
 export const RELAY_START_TIME = Date.now();
 
 const HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000;
@@ -316,10 +370,21 @@ async function saveReminders(): Promise<void> {
 // SUPABASE
 // ============================================================
 
-export const supabase: SupabaseClient | null =
-  process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
-    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
-    : null;
+// Supabase client — lazy init via getConfig() to avoid module-level crash.
+// Falls back to null if required env vars are absent (test environments).
+function _createSupabase(): SupabaseClient | null {
+  try {
+    const cfg = getConfig();
+    if (cfg.supabaseUrl && cfg.supabaseAnonKey) {
+      return createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export const supabase: SupabaseClient | null = _createSupabase();
 
 async function saveMessage(
   role: string,

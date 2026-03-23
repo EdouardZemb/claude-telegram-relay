@@ -716,9 +716,17 @@ export async function orchestrate(
     }
 
     const story = buildStoryFile(task);
+    const storyInput = {
+      acceptanceCriteria: story.acceptanceCriteria.map(
+        (ac) => `Given ${ac.given} When ${ac.when} Then ${ac.then}`,
+      ),
+      implementationSteps: story.implementationSteps.map((s) => `${s.id}: ${s.title}`),
+      testStubs: story.testStubs.map((s) => (typeof s === "string" ? s : String(s))),
+      impactedFiles: story.impactedFiles,
+    };
     protoSpec = await generateProtoSpec(
       task,
-      story,
+      storyInput,
       agentContextCache.get("analyst") || agentContextCache.get("planner") || undefined,
     );
 

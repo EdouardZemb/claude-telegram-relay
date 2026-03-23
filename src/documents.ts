@@ -155,7 +155,8 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   try {
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse(new Uint8Array(buffer));
-    await parser.load();
+    // pdf-parse types mark load() as private but it is needed here
+    await (parser as unknown as { load: () => Promise<void> }).load();
     const result = await parser.getText();
     const text = (typeof result === "string" ? result : (result?.text ?? "")).trim();
     if (text.length > 50) {

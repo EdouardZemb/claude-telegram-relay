@@ -190,7 +190,15 @@ export async function runAutoPipeline(
   ) {
     await progress("Phase 2b: Generation de la proto-spec (spec-lite)...");
     const { generateProtoSpec } = await import("./spec-lite.ts");
-    const protoSpec = await generateProtoSpec(task, story);
+    const storyInput = {
+      acceptanceCriteria: story.acceptanceCriteria.map(
+        (ac) => `Given ${ac.given} When ${ac.when} Then ${ac.then}`,
+      ),
+      implementationSteps: story.implementationSteps.map((s) => `${s.id}: ${s.title}`),
+      testStubs: story.testStubs.map((s) => (typeof s === "string" ? s : String(s))),
+      impactedFiles: story.impactedFiles,
+    };
+    const protoSpec = await generateProtoSpec(task, storyInput);
     const vcCount = protoSpec.v_criteria.length;
     await progress(
       `Proto-spec generee: ${vcCount} V-criteres, ${protoSpec.impacted_files.length} fichiers (${Math.round(protoSpec.duration_ms / 1000)}s)`,

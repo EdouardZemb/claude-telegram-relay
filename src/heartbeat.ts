@@ -24,7 +24,7 @@
  */
 
 import "dotenv/config";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { spawnSync } from "bun";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
@@ -119,7 +119,7 @@ export function getGitDelta(lastSha: string): {
 }
 
 export async function getSprintDelta(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   lastSnapshot: HeartbeatState["lastSprintSnapshot"],
 ): Promise<{ summary: string; snapshot: HeartbeatState["lastSprintSnapshot"]; changed: boolean }> {
   const sprint = await getCurrentSprint(supabase);
@@ -207,7 +207,7 @@ export function getOpenPRs(): { prs: string; hasStale: boolean } {
 }
 
 export async function getStaleTasks(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
 ): Promise<{ tasks: string; hasStale: boolean }> {
   const { data, error } = await supabase
     .from("tasks")
@@ -251,7 +251,7 @@ export interface TriageResult {
 }
 
 export async function collectAndTriage(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   state: HeartbeatState,
 ): Promise<TriageResult> {
   const reasons: string[] = [];
@@ -324,7 +324,7 @@ async function writeMcpPending(notification: {
 
 export async function executeActions(
   decision: HeartbeatDecision,
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   state: HeartbeatState,
 ): Promise<HeartbeatAction[]> {
   const executed: HeartbeatAction[] = [];
@@ -475,7 +475,7 @@ export async function pulse(): Promise<{
     log.info("Supabase not configured, skipping.");
     return { skipped: true, reasons: ["no_supabase"], actions: [] };
   }
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabase = createClient(supabaseUrl, supabaseKey) as unknown as SupabaseClient;
 
   // Collect delta and triage
   const triage = await collectAndTriage(supabase, state);

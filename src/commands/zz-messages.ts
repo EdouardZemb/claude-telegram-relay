@@ -214,7 +214,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       await ctx.editMessageText(`Execution : ${command}`);
       // Dispatch the command through the bot's handler pipeline
       const update = buildSyntheticUpdate(ctx, command);
-      await bctx.bot.handleUpdate(update);
+      await bctx.bot.handleUpdate(update as never);
     } else if (data === "intent_cancel") {
       await ctx.answerCallbackQuery({ text: "Annule." });
       await ctx.editMessageText("Action annulee.");
@@ -276,7 +276,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const clarificationCmd = checkPendingClarification(ctx, input);
     if (clarificationCmd) {
       const update = buildSyntheticUpdate(ctx, clarificationCmd);
-      await bctx.bot.handleUpdate(update);
+      await bctx.bot.handleUpdate(update as never);
       return;
     }
 
@@ -349,7 +349,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
           ? `/${proposal.action} ${proposal.args}`
           : `/${proposal.action}`;
         const update = buildSyntheticUpdate(ctx, cmdStr);
-        await bctx.bot.handleUpdate(update);
+        await bctx.bot.handleUpdate(update as never);
         return;
       }
       if (isReject) {
@@ -363,7 +363,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const contextPromises: [
       Promise<string>,
       Promise<string>,
-      Promise<any[]>,
+      Promise<string>,
       Promise<any>,
       Promise<any>,
       Promise<any[]>,
@@ -373,7 +373,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       getRecentMessages(bctx.supabase),
       bctx.getDynamicProfile(),
       classifyMessage(bctx.supabase, input, "user"),
-      options.includeDocumentSearch && isFeatureEnabled("auto_document_search")
+      options.includeDocumentSearch && isFeatureEnabled("auto_document_search") && bctx.supabase
         ? Promise.race([
             searchDocuments(bctx.supabase, input, userId, { matchCount: 3, matchThreshold: 0.5 }),
             new Promise<never[]>((resolve) => setTimeout(() => resolve([]), 5000)),
@@ -396,7 +396,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       threadOpts: bctx.threadOpts,
       dispatchCommand: async (sourceCtx: Context, command: string) => {
         const update = buildSyntheticUpdate(sourceCtx, command);
-        await bctx.bot.handleUpdate(update);
+        await bctx.bot.handleUpdate(update as never);
       },
     };
 

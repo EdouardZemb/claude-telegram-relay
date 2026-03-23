@@ -107,7 +107,7 @@ export async function triageDescription(
 
   try {
     const { computeDifficultyScore } = await import("./llm-router.ts");
-    // Create a pseudo-task for the scorer
+    // Create a pseudo-task for the scorer (cast to Task — missing fields default gracefully)
     const pseudoTask = {
       id: "triage",
       title: description.substring(0, 200),
@@ -116,6 +116,19 @@ export async function triageDescription(
       priority: 3,
       project: "telegram-relay",
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      sprint: null,
+      tags: [],
+      estimated_hours: null,
+      actual_hours: null,
+      blocked_by: null,
+      notes: null,
+      completed_at: null,
+      acceptance_criteria: null,
+      dev_notes: null,
+      architecture_ref: null,
+      subtasks: [],
+      project_id: null,
     };
     const difficulty = await computeDifficultyScore(pseudoTask, supabase);
     score = difficulty.score;
@@ -326,7 +339,7 @@ export async function decomposePRDIntoTasks(
     id: string;
     title: string;
     priority: number;
-    acceptance_criteria?: string;
+    acceptance_criteria?: string | null;
   }> = [];
   for (const st of subtasks) {
     const task = await addTask(supabase, st.title, {

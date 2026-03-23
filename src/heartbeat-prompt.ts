@@ -20,6 +20,8 @@ export interface HeartbeatState {
   lastArchivalAt: string | null; // when memory archival last ran (hourly)
   lastAutonomyScanAt: string | null; // when autonomy scan last ran (daily)
   lastLlmOpsCheckAt: string | null; // when LLM-Ops check last ran (30min)
+  lastAuditAt: string | null; // when codebase audit last ran
+  lastAuditScore: number | null; // last audit score (for regression detection)
 }
 
 export interface HeartbeatAction {
@@ -224,5 +226,7 @@ export function createDefaultState(): HeartbeatState {
     lastArchivalAt: null,
     lastAutonomyScanAt: null,
     lastLlmOpsCheckAt: null,
+    lastAuditAt: null,
+    lastAuditScore: null,
   };
 }

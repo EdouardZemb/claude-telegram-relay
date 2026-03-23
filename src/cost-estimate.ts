@@ -48,7 +48,7 @@ export function estimatePipelineCost(pipeline: string, taskCount: number): Pipel
 
   for (const agentId of agentIds) {
     const agent = agents.find((a) => a.id === agentId);
-    const budget = agent?.maxBudgetUsd ?? 0.5;
+    const budget = (agent as unknown as { maxBudgetUsd?: number })?.maxBudgetUsd ?? 0.5;
     agentBreakdown.push({ role: agentId, budget });
     costPerTask += budget;
   }

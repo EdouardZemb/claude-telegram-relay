@@ -17,11 +17,7 @@ jobs:
         run: mkdir -p ~/.claude-relay
 
       - name: Type check
-        run: |
-          for f in src/*.ts dashboard/server.ts; do
-            echo "Checking $f..."
-            bun build --no-bundle --target=bun "$f" || exit 1
-          done
+        run: bunx tsc --noEmit
 
       - name: Syntax check setup scripts
         run: |
