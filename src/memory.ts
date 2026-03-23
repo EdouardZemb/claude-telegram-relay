@@ -739,6 +739,8 @@ const CONTRADICTION_THRESHOLD = 0.8;
 const COMPLEMENT_THRESHOLD = 0.75;
 /** Actionability threshold for auto-remember filtering (S36-06) */
 const ACTIONABILITY_THRESHOLD = 5;
+/** Max content length for promoted working memory items (R11) */
+export const PROMOTION_MAX_CHARS = 500;
 
 /** A semantically similar existing memory */
 interface SimilarMemory {
@@ -903,46 +905,60 @@ export async function promoteWorkingMemory(
 
   try {
     let promoted = 0;
-    const items: Array<{ content: string; agent: string }> = [];
+    const items: Array<{
+      content: string;
+      agent: string;
+      promotionType: "decision" | "discovery";
+    }> = [];
 
     // Collect decisions (always promote)
     if (Array.isArray(workingMemory.decisions)) {
       for (const d of workingMemory.decisions) {
-        items.push({ content: `${d.decision} (raison: ${d.reasoning})`, agent: d.agent });
+        items.push({
+          content: `${d.decision} (raison: ${d.reasoning})`,
+          agent: d.agent,
+          promotionType: "decision",
+        });
       }
     }
 
     // Collect discoveries
     if (Array.isArray(workingMemory.discoveries)) {
       for (const d of workingMemory.discoveries) {
-        items.push({ content: d.fact, agent: d.agent });
+        items.push({ content: d.fact, agent: d.agent, promotionType: "discovery" });
       }
     }
 
     // Persist each item with conflict resolution
     for (const item of items) {
-      const resolution = await resolveMemoryConflict(supabase, item.content);
+      // R11: Truncate content to 500 chars BEFORE conflict resolution (F-DA-4)
+      const truncated = item.content.length > PROMOTION_MAX_CHARS;
+      const content = truncated ? item.content.slice(0, PROMOTION_MAX_CHARS) : item.content;
+
+      const resolution = await resolveMemoryConflict(supabase, content);
       if (resolution.action === "skip") continue;
 
       if (resolution.action === "update" || resolution.action === "merge") {
         const ok = await updateMemoryWithRevision(
           supabase,
           resolution.existingId,
-          item.content,
+          content,
           resolution.action,
         );
         if (ok) promoted++;
         continue;
       }
 
-      // Insert new fact
+      // Insert new fact (V1 limitation: all promoted as "fact", promotion_type in metadata)
       const { error } = await supabase.from("memory").insert({
         type: "fact",
-        content: item.content,
+        content,
         metadata: {
           source: "working_memory_promotion",
           pipeline_session_id: sessionId,
           agent: item.agent,
+          promotion_type: item.promotionType,
+          ...(truncated ? { truncated: true } : {}),
         },
       });
       if (!error) promoted++;
@@ -1607,6 +1623,155 @@ export async function buildMemoryChains(
     log.error("buildMemoryChains error", { error: String(error) });
     return "";
   }
+}
+
+// ── Memory Health Stats ─────────────────────────────────────
+
+/** Quantitative health metrics for the memory system */
+export interface MemoryHealthStats {
+  total: number;
+  byType: Record<string, number>;
+  embeddingCoverage: number;
+  avgImportanceScore: number;
+  avgAgeDays: number;
+  recentPromotions: number;
+  linksCount: number;
+  archiveCount: number;
+  topAccessed: Array<{ content: string; accessCount: number }>;
+}
+
+/**
+ * Compute quantitative health metrics for the memory system.
+ * All queries run in parallel for performance (< 2s target).
+ * Returns safe defaults (0) when supabase is null or table is empty (R13).
+ */
+export async function memoryHealthStats(
+  supabase: SupabaseClient | null,
+): Promise<MemoryHealthStats> {
+  const empty: MemoryHealthStats = {
+    total: 0,
+    byType: {},
+    embeddingCoverage: 0,
+    avgImportanceScore: 0,
+    avgAgeDays: 0,
+    recentPromotions: 0,
+    linksCount: 0,
+    archiveCount: 0,
+    topAccessed: [],
+  };
+
+  if (!supabase) return empty;
+
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [
+      allMemories,
+      withEmbedding,
+      linksResult,
+      archiveResult,
+      topAccessedResult,
+      recentPromotionsResult,
+    ] = await Promise.all([
+      // All active memories with type, importance_score, created_at
+      supabase.from("memory").select("type, importance_score, created_at, access_count"),
+      // Count memories with non-null embedding
+      supabase.from("memory").select("id").not("embedding", "is", null),
+      // Total links
+      supabase.from("memory_links").select("id"),
+      // Total archived
+      supabase.from("memory_archive").select("id"),
+      // Top 5 most accessed
+      supabase
+        .from("memory")
+        .select("content, access_count")
+        .order("access_count", { ascending: false })
+        .limit(5),
+      // Recent promotions (7 days, inserts only — R14 limitation)
+      supabase
+        .from("memory")
+        .select("id")
+        .eq("metadata->>source", "working_memory_promotion")
+        .gte("created_at", sevenDaysAgo),
+    ]);
+
+    const memories = allMemories.data || [];
+    const total = memories.length;
+
+    if (total === 0) return empty;
+
+    // By type
+    const byType: Record<string, number> = {};
+    let totalImportance = 0;
+    let totalAgeDays = 0;
+    const now = Date.now();
+
+    for (const m of memories) {
+      byType[m.type] = (byType[m.type] || 0) + 1;
+      totalImportance += m.importance_score ?? 0;
+      const created = new Date(m.created_at).getTime();
+      totalAgeDays += (now - created) / (1000 * 60 * 60 * 24);
+    }
+
+    const embeddingCount = withEmbedding.data?.length || 0;
+
+    return {
+      total,
+      byType,
+      embeddingCoverage: total > 0 ? embeddingCount / total : 0,
+      avgImportanceScore: total > 0 ? Math.round((totalImportance / total) * 10) / 10 : 0,
+      avgAgeDays: total > 0 ? Math.round((totalAgeDays / total) * 10) / 10 : 0,
+      recentPromotions: recentPromotionsResult.data?.length || 0,
+      linksCount: linksResult.data?.length || 0,
+      archiveCount: archiveResult.data?.length || 0,
+      topAccessed: (topAccessedResult.data || [])
+        .filter((r: any) => r.access_count > 0)
+        .map((r: any) => ({
+          content: r.content,
+          accessCount: r.access_count,
+        })),
+    };
+  } catch (error) {
+    log.error("memoryHealthStats error", { error: String(error) });
+    return empty;
+  }
+}
+
+/**
+ * Format memory health stats as plain text for Telegram (no markdown).
+ */
+export function formatMemoryHealth(stats: MemoryHealthStats): string {
+  const lines: string[] = [];
+  lines.push("SANTE MEMOIRE");
+  lines.push(`Total: ${stats.total} memoires actives`);
+
+  if (Object.keys(stats.byType).length > 0) {
+    const types = Object.entries(stats.byType)
+      .map(([t, c]) => `${t}: ${c}`)
+      .join(" | ");
+    lines.push(`  ${types}`);
+  }
+
+  const embPct = Math.round(stats.embeddingCoverage * 100);
+  const embCount = Math.round(stats.embeddingCoverage * stats.total);
+  lines.push(`Embeddings: ${embCount}/${stats.total} (${embPct}%)`);
+  lines.push(`Importance moyenne: ${stats.avgImportanceScore}`);
+  lines.push(`Age moyen: ${stats.avgAgeDays} jours`);
+  lines.push(`Liens semantiques: ${stats.linksCount}`);
+  lines.push(`Archive: ${stats.archiveCount}`);
+  lines.push(`Promotions recentes (7j): ${stats.recentPromotions}`);
+
+  if (stats.topAccessed.length > 0) {
+    const top = stats.topAccessed
+      .map(
+        (t) =>
+          `"${t.content.slice(0, 40)}${t.content.length > 40 ? "..." : ""}" (${t.accessCount}x)`,
+      )
+      .join(", ");
+    lines.push(`Top acces: ${top}`);
+  }
+
+  return lines.join("\n");
 }
 
 // ── Similar Past Tasks (S41-05) ─────────────────────────────

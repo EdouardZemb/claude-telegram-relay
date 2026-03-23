@@ -19,45 +19,59 @@ interface MockFunctionHandlers {
   [name: string]: (opts?: { body?: any }) => any;
 }
 
+/** Resolve column value, supporting JSON path operator ->> (e.g. "metadata->>source") */
+function resolveColumn(row: Row, column: string): any {
+  if (column.includes("->>")) {
+    const [baseCol, jsonKey] = column.split("->>");
+    const base = row[baseCol];
+    if (base && typeof base === "object") return base[jsonKey];
+    return undefined;
+  }
+  return row[column];
+}
+
 function matchFilter(row: Row, filters: Filter[]): boolean {
   for (const f of filters) {
     switch (f.op) {
       case "eq":
-        if (row[f.column] !== f.value) return false;
+        if (resolveColumn(row, f.column) !== f.value) return false;
         break;
       case "neq":
-        if (row[f.column] === f.value) return false;
+        if (resolveColumn(row, f.column) === f.value) return false;
         break;
       case "like": {
         const pattern = String(f.value).replace(/%/g, ".*");
-        if (!new RegExp(`^${pattern}$`).test(String(row[f.column] ?? ""))) return false;
+        if (!new RegExp(`^${pattern}$`).test(String(resolveColumn(row, f.column) ?? "")))
+          return false;
         break;
       }
       case "ilike":
         if (
-          !String(row[f.column] ?? "")
+          !String(resolveColumn(row, f.column) ?? "")
             .toLowerCase()
             .includes(String(f.value).replace(/%/g, "").toLowerCase())
         )
           return false;
         break;
       case "in":
-        if (!Array.isArray(f.value) || !f.value.includes(row[f.column])) return false;
+        if (!Array.isArray(f.value) || !f.value.includes(resolveColumn(row, f.column)))
+          return false;
         break;
       case "not.is":
-        if (row[f.column] === null || row[f.column] === undefined) return false;
+        if (resolveColumn(row, f.column) === null || resolveColumn(row, f.column) === undefined)
+          return false;
         break;
       case "gte":
-        if (row[f.column] < f.value) return false;
+        if (resolveColumn(row, f.column) < f.value) return false;
         break;
       case "lte":
-        if (row[f.column] > f.value) return false;
+        if (resolveColumn(row, f.column) > f.value) return false;
         break;
       case "gt":
-        if (row[f.column] <= f.value) return false;
+        if (resolveColumn(row, f.column) <= f.value) return false;
         break;
       case "lt":
-        if (row[f.column] >= f.value) return false;
+        if (resolveColumn(row, f.column) >= f.value) return false;
         break;
     }
   }

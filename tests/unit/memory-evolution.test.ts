@@ -6,10 +6,13 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { WorkingMemoryData } from "../../src/memory";
+import type { MemoryHealthStats, WorkingMemoryData } from "../../src/memory";
 import {
   autoRemember,
   findSimilarFact,
+  formatMemoryHealth,
+  memoryHealthStats,
+  PROMOTION_MAX_CHARS,
   processMemoryIntents,
   promoteWorkingMemory,
   resolveMemoryConflict,
@@ -661,5 +664,430 @@ describe("promoteWorkingMemory", () => {
 
     const count = await promoteWorkingMemory(supabase, wm, "session");
     expect(count).toBe(0);
+  });
+
+  // V17: Items promoted are truncated to 500 chars before insertion
+  it("[V17] truncates items longer than 500 chars before insertion", async () => {
+    const longDecision = "A".repeat(1000);
+    const wm: WorkingMemoryData = {
+      decisions: [{ agent: "architect", decision: longDecision, reasoning: "B" }],
+    };
+
+    const count = await promoteWorkingMemory(supabase, wm, "session-trunc");
+
+    expect(count).toBe(1);
+    const memory = supabase._getTable("memory");
+    expect(memory.length).toBe(1);
+    expect(memory[0].content.length).toBeLessThanOrEqual(PROMOTION_MAX_CHARS);
+    expect(memory[0].metadata.truncated).toBe(true);
+  });
+
+  it("does not set truncated flag for short items", async () => {
+    const wm: WorkingMemoryData = {
+      decisions: [{ agent: "dev", decision: "Use REST", reasoning: "Simple" }],
+    };
+
+    const count = await promoteWorkingMemory(supabase, wm, "session-short");
+
+    expect(count).toBe(1);
+    const memory = supabase._getTable("memory");
+    expect(memory[0].metadata.truncated).toBeUndefined();
+  });
+
+  // V17 edge: truncation happens BEFORE resolve (F-DA-4)
+  it("truncates content before resolveMemoryConflict (dedup uses truncated text)", async () => {
+    const longText = "X".repeat(600);
+    // Register search that returns a match for the truncated version
+    supabase._registerFunction("search", (opts: any) => {
+      // The search query should be <= 500 chars
+      const query = opts?.body?.query || "";
+      if (query.length <= PROMOTION_MAX_CHARS) {
+        return [{ id: "f1", content: "existing", type: "fact", similarity: 0.9 }];
+      }
+      return [];
+    });
+    supabase._registerRpc("bump_memory_access", () => null);
+
+    const wm: WorkingMemoryData = {
+      decisions: [{ agent: "dev", decision: longText, reasoning: "reason" }],
+    };
+
+    const count = await promoteWorkingMemory(supabase, wm, "session-resolve");
+    // Should be skipped due to dedup on the truncated text
+    expect(count).toBe(0);
+  });
+
+  it("includes promotion_type in metadata for decisions", async () => {
+    const wm: WorkingMemoryData = {
+      decisions: [{ agent: "architect", decision: "Use REST", reasoning: "Simple" }],
+    };
+
+    await promoteWorkingMemory(supabase, wm, "session-type");
+    const memory = supabase._getTable("memory");
+    expect(memory[0].metadata.promotion_type).toBe("decision");
+  });
+
+  it("includes promotion_type in metadata for discoveries", async () => {
+    const wm: WorkingMemoryData = {
+      discoveries: [{ agent: "qa", fact: "Coverage 85%", source: "tests" }],
+    };
+
+    await promoteWorkingMemory(supabase, wm, "session-type2");
+    const memory = supabase._getTable("memory");
+    expect(memory[0].metadata.promotion_type).toBe("discovery");
+  });
+});
+
+// ── memoryHealthStats ──────────────────────────────────────────
+
+describe("memoryHealthStats", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  // V9: Returns defaults when supabase is null
+  it("[V9] returns empty stats when supabase is null", async () => {
+    const stats = await memoryHealthStats(null);
+
+    expect(stats.total).toBe(0);
+    expect(stats.byType).toEqual({});
+    expect(stats.embeddingCoverage).toBe(0);
+    expect(stats.avgImportanceScore).toBe(0);
+    expect(stats.avgAgeDays).toBe(0);
+    expect(stats.recentPromotions).toBe(0);
+    expect(stats.linksCount).toBe(0);
+    expect(stats.archiveCount).toBe(0);
+    expect(stats.topAccessed).toEqual([]);
+  });
+
+  // V16: Returns 0 for avgImportanceScore and avgAgeDays when total=0 (no NaN)
+  it("[V16] returns 0 for averages when memory table is empty (no NaN)", async () => {
+    // Empty store — no memories
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.total).toBe(0);
+    expect(stats.avgImportanceScore).toBe(0);
+    expect(stats.avgAgeDays).toBe(0);
+    expect(Number.isNaN(stats.avgImportanceScore)).toBe(false);
+    expect(Number.isNaN(stats.avgAgeDays)).toBe(false);
+  });
+
+  // V6: Returns total by type
+  it("[V6] returns correct totals by type", async () => {
+    const now = new Date().toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 1,
+        content: "Fact 1",
+      },
+      {
+        id: "2",
+        type: "fact",
+        importance_score: 70,
+        created_at: now,
+        access_count: 0,
+        content: "Fact 2",
+      },
+      {
+        id: "3",
+        type: "goal",
+        importance_score: 80,
+        created_at: now,
+        access_count: 2,
+        content: "Goal 1",
+      },
+      {
+        id: "4",
+        type: "idea",
+        importance_score: 30,
+        created_at: now,
+        access_count: 0,
+        content: "Idea 1",
+      },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.total).toBe(4);
+    expect(stats.byType.fact).toBe(2);
+    expect(stats.byType.goal).toBe(1);
+    expect(stats.byType.idea).toBe(1);
+  });
+
+  // V7: Embedding coverage ratio
+  it("[V7] calculates embedding coverage ratio", async () => {
+    const now = new Date().toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+        embedding: [0.1],
+      },
+      {
+        id: "2",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "B",
+        embedding: [0.2],
+      },
+      {
+        id: "3",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "C",
+        embedding: null,
+      },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    // 2 out of 3 have embeddings
+    expect(stats.embeddingCoverage).toBeCloseTo(2 / 3, 2);
+  });
+
+  // V14: Average importance score and age
+  it("[V14] calculates average importance score and age in days", async () => {
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 40,
+        created_at: twoDaysAgo,
+        access_count: 0,
+        content: "A",
+      },
+      {
+        id: "2",
+        type: "fact",
+        importance_score: 60,
+        created_at: fourDaysAgo,
+        access_count: 0,
+        content: "B",
+      },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.avgImportanceScore).toBe(50); // (40+60)/2
+    expect(stats.avgAgeDays).toBeGreaterThan(2.5);
+    expect(stats.avgAgeDays).toBeLessThan(3.5); // ~3 days avg
+  });
+
+  // V8: Recent promotions count (7 days, inserts only)
+  it("[V8] counts recent promotions within 7 days", async () => {
+    const now = new Date().toISOString();
+    const oldDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+        metadata: { source: "working_memory_promotion" },
+      },
+      {
+        id: "2",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "B",
+        metadata: { source: "working_memory_promotion" },
+      },
+      {
+        id: "3",
+        type: "fact",
+        importance_score: 50,
+        created_at: oldDate,
+        access_count: 0,
+        content: "C",
+        metadata: { source: "working_memory_promotion" },
+      },
+      {
+        id: "4",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "D",
+        metadata: { source: "manual" },
+      },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    // Only 2 recent promotions (within 7 days, source = working_memory_promotion)
+    expect(stats.recentPromotions).toBe(2);
+  });
+
+  it("returns links and archive counts", async () => {
+    const now = new Date().toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+      },
+    ];
+    supabase._store.memory_links = [
+      { id: "l1", source_id: "1", target_id: "2" },
+      { id: "l2", source_id: "2", target_id: "3" },
+    ];
+    supabase._store.memory_archive = [{ id: "a1", archived_at: now }];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.linksCount).toBe(2);
+    expect(stats.archiveCount).toBe(1);
+  });
+
+  it("returns top accessed memories filtered by access_count > 0", async () => {
+    const now = new Date().toISOString();
+    supabase._store.memory = [
+      {
+        id: "1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 10,
+        content: "Most accessed",
+      },
+      {
+        id: "2",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 5,
+        content: "Second",
+      },
+      {
+        id: "3",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "Never accessed",
+      },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.topAccessed.length).toBe(2); // access_count > 0 only
+    expect(stats.topAccessed[0].content).toBe("Most accessed");
+    expect(stats.topAccessed[0].accessCount).toBe(10);
+  });
+});
+
+// ── formatMemoryHealth ──────────────────────────────────────────
+
+describe("formatMemoryHealth", () => {
+  // V10: Produces readable plain text (no markdown)
+  it("[V10] formats stats as plain text without markdown", () => {
+    const stats: MemoryHealthStats = {
+      total: 142,
+      byType: { fact: 98, goal: 12, idea: 23, preference: 9 },
+      embeddingCoverage: 0.92,
+      avgImportanceScore: 47.3,
+      avgAgeDays: 18.2,
+      recentPromotions: 5,
+      linksCount: 87,
+      archiveCount: 34,
+      topAccessed: [
+        { content: "Bun runtime is the default", accessCount: 14 },
+        { content: "Supabase schema uses memory table", accessCount: 11 },
+      ],
+    };
+
+    const text = formatMemoryHealth(stats);
+
+    expect(text).toContain("SANTE MEMOIRE");
+    expect(text).toContain("Total: 142 memoires actives");
+    expect(text).toContain("fact: 98");
+    expect(text).toContain("goal: 12");
+    expect(text).toContain("Embeddings: 131/142 (92%)");
+    expect(text).toContain("Importance moyenne: 47.3");
+    expect(text).toContain("Age moyen: 18.2 jours");
+    expect(text).toContain("Liens semantiques: 87");
+    expect(text).toContain("Archive: 34");
+    expect(text).toContain("Promotions recentes (7j): 5");
+    expect(text).toContain("Top acces:");
+    expect(text).toContain("14x");
+    // No markdown chars
+    expect(text).not.toContain("**");
+    expect(text).not.toContain("##");
+    expect(text).not.toContain("```");
+  });
+
+  it("handles empty stats (total=0)", () => {
+    const stats: MemoryHealthStats = {
+      total: 0,
+      byType: {},
+      embeddingCoverage: 0,
+      avgImportanceScore: 0,
+      avgAgeDays: 0,
+      recentPromotions: 0,
+      linksCount: 0,
+      archiveCount: 0,
+      topAccessed: [],
+    };
+
+    const text = formatMemoryHealth(stats);
+
+    expect(text).toContain("SANTE MEMOIRE");
+    expect(text).toContain("Total: 0 memoires actives");
+    expect(text).not.toContain("Top acces:");
+  });
+
+  it("truncates long content in topAccessed display", () => {
+    const stats: MemoryHealthStats = {
+      total: 10,
+      byType: { fact: 10 },
+      embeddingCoverage: 1,
+      avgImportanceScore: 50,
+      avgAgeDays: 5,
+      recentPromotions: 0,
+      linksCount: 0,
+      archiveCount: 0,
+      topAccessed: [{ content: "A".repeat(100), accessCount: 5 }],
+    };
+
+    const text = formatMemoryHealth(stats);
+
+    expect(text).toContain("...");
+    // The displayed content should be truncated
+    expect(text).toContain("5x");
+  });
+});
+
+// ── V12: Feature flag memory_promotion ────────────────────────────
+
+describe("Feature flag memory_promotion", () => {
+  it("[V12] exists in config/features.json with value false", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+    const featuresPath = path.join(process.cwd(), "config", "features.json");
+    const content = JSON.parse(fs.readFileSync(featuresPath, "utf-8"));
+    expect(content.memory_promotion).toBe(false);
   });
 });

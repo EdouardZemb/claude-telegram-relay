@@ -87,6 +87,7 @@ import { isFeatureEnabled } from "./feature-flags.ts";
 import { getFeedbackRulesForAgent } from "./feedback-loop.ts";
 import { evaluateAndRework, type GateEvaluation, type GateName } from "./gate-evaluator.ts";
 import { buildSpanId, logCostWithSpan, recordPromptVersion, sha256 } from "./llm-ops.ts";
+import { promoteWorkingMemory } from "./memory.ts";
 import {
   classifyAdaptivePipeline,
   classifyPipeline,
@@ -1773,6 +1774,29 @@ export async function orchestrate(
         bbSessionId,
         steps.every((s) => s.success) ? "completed" : "failed",
       );
+    }
+
+    // Working memory promotion (R1, R9): promote decisions/discoveries to permanent memory
+    if (isFeatureEnabled("memory_promotion") && bbSessionId) {
+      try {
+        const wmForPromotion =
+          supabase && !bbFallback
+            ? ((await readSection(supabase, bbSessionId, "working_memory")) as WorkingMemory | null)
+            : (bbFallback?.read(bbSessionId, "working_memory") as WorkingMemory | null);
+
+        if (wmForPromotion) {
+          const promotedCount = await promoteWorkingMemory(supabase, wmForPromotion, bbSessionId);
+          if (promotedCount > 0 && options.onProgress) {
+            await options.onProgress(
+              `Working memory: ${promotedCount} items promus en memoire permanente`,
+            );
+          }
+          log.info("Working memory promotion completed", { promotedCount, sessionId: bbSessionId });
+        }
+      } catch (promoError) {
+        // R9: promotion failure must never block pipeline return
+        log.error("Working memory promotion failed (non-blocking)", { error: String(promoError) });
+      }
     }
   }
 

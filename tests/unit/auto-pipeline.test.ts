@@ -189,3 +189,15 @@ describe("runAutoPipeline export", () => {
     expect(typeof runAutoPipeline).toBe("function");
   });
 });
+
+describe("[V15] auto-pipeline useBlackboard", () => {
+  it("orchestrate call in auto-pipeline includes useBlackboard: true", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/auto-pipeline.ts", "utf-8");
+    // The orchestrate() call for analysis phase must include useBlackboard: true
+    const orchestrateCallMatch = source.match(
+      /orchestrate\(supabase,\s*task,\s*\{[\s\S]*?useBlackboard:\s*true[\s\S]*?\}\)/,
+    );
+    expect(orchestrateCallMatch).not.toBeNull();
+  });
+});

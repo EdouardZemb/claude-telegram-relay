@@ -215,6 +215,7 @@ export async function runAutoPipeline(
       maxRetries,
       modelOverrides: routerDecision?.models,
       cascade,
+      useBlackboard: true,
     });
 
     const analysisOk = analysisResult.steps.filter((s) => s.success).length;

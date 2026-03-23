@@ -13,7 +13,9 @@ import {
   clusterMemories,
   formatClusters,
   formatIdeasList,
+  formatMemoryHealth,
   listIdeas,
+  memoryHealthStats,
   promoteIdea,
   reviewIdea,
 } from "../memory.ts";
@@ -37,6 +39,20 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
     }
     if (!bctx.supabase) {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
+      return;
+    }
+
+    // R12: Dispatch /brain health on exact match "health"
+    const brainInput = (ctx.match || "").toString().trim();
+    if (brainInput === "health") {
+      await ctx.replyWithChatAction("typing");
+      try {
+        const stats = await memoryHealthStats(bctx.supabase);
+        await bctx.sendResponse(ctx, formatMemoryHealth(stats));
+      } catch (error) {
+        log.error("Brain health error", { error: String(error) });
+        await ctx.reply("Erreur lors du calcul des metriques memoire.", bctx.threadOpts(ctx));
+      }
       return;
     }
 
