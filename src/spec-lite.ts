@@ -110,7 +110,7 @@ export function parseProtoSpec(output: string, task: Task, startTime: number): P
     const parsed = JSON.parse(output);
     return normalizeProtoSpec(parsed, startTime);
   } catch {
-    // Try to extract JSON from mixed output
+    // R5: parse failure → fallback
   }
 
   const jsonMatch = output.match(/\{[\s\S]*\}/);
@@ -119,7 +119,7 @@ export function parseProtoSpec(output: string, task: Task, startTime: number): P
       const parsed = JSON.parse(jsonMatch[0]);
       return normalizeProtoSpec(parsed, startTime);
     } catch {
-      // Fall through
+      // R5: parse failure → fallback
     }
   }
 

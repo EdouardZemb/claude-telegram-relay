@@ -88,7 +88,8 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
       complexityHint = `Code complexity: ${maxScore.toFixed(1)}/10 (${affected.length} module(s) affected: ${affected.map((a) => a.replace("src/", "")).join(", ")})`;
     }
   } catch {
-    // Best-effort
+    // R8: business error → log.warn
+    log.warn("selectPipeline: code-graph unavailable for complexity hint");
   }
 
   // Exploration score hint for RESEARCH recommendation
@@ -100,7 +101,8 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
         explorationHint = `Exploration score: ${explorationResult.score} (>= 0.5 suggests RESEARCH pipeline). Keywords: ${explorationResult.components.keywordSignal > 0 ? "yes" : "no"}, graph complexity: ${explorationResult.components.graphComplexity >= 0 ? explorationResult.components.graphComplexity.toFixed(2) : "N/A"}`;
       }
     } catch {
-      // Best-effort
+      // R8: business error → log.warn
+      log.warn("selectPipeline: computeExplorationScore unavailable");
     }
   }
 
@@ -161,7 +163,7 @@ export function parseRouterResponse(output: string): RouterDecision | null {
     const parsed = JSON.parse(output) as Record<string, unknown>;
     return normalizeDecision(parsed);
   } catch {
-    // Try extracting JSON from output
+    // R5: parse failure → fallback
   }
 
   const jsonMatch = output.match(/\{[\s\S]*\}/);
@@ -170,7 +172,7 @@ export function parseRouterResponse(output: string): RouterDecision | null {
       const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
       return normalizeDecision(parsed);
     } catch {
-      // Fall through
+      // R5: parse failure → fallback
     }
   }
 
@@ -424,6 +426,7 @@ export async function computeDifficultyScore(
     graphScore = result.score;
     affectedModules = result.modules;
   } catch {
+    // R7: optional feature → skip
     // EC-003: graph unavailable
   }
 
@@ -439,6 +442,7 @@ export async function computeDifficultyScore(
     similarCount = similar.length;
     histScore = computeHistoricalScore(similar);
   } catch {
+    // R7: optional feature → skip
     // EC-003: history unavailable
   }
 

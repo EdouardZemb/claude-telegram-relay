@@ -6,8 +6,54 @@
  */
 
 import { Composer, type Context } from "grammy";
+import { z } from "zod";
 import type { BotContext } from "../bot-context.ts";
 import { enqueue } from "../notification-queue.ts";
+import { err, ok, type Result } from "../result.ts";
+
+// R10: Zod schema for /task command — validate extracted fields (not raw string)
+// Note: --hours excluded per adversarial F-DA-2 — addTask does not accept estimated_hours in opts
+export const TaskCommandSchema = z.object({
+  title: z.string().min(1, "Le titre est requis"),
+  desc: z.string().optional(),
+  priority: z.coerce
+    .number()
+    .int()
+    .min(1, "La priorite doit etre entre 1 et 5")
+    .max(5, "La priorite doit etre entre 1 et 5")
+    .optional(),
+});
+
+type TaskCommandArgs = z.infer<typeof TaskCommandSchema>;
+
+/**
+ * Parse /task input string into structured args via Zod validation.
+ * Returns Result<TaskCommandArgs, z.ZodError>.
+ */
+export function parseTaskCommand(input: string): Result<TaskCommandArgs, z.ZodError> {
+  // Extract --desc <value>
+  const descMatch = input.match(/--desc\s+([^-][^\s-]*(?:\s+[^-][^\s-]*)*?)(?=\s+--|$)/);
+  const desc = descMatch?.[1]?.trim();
+
+  // Extract --priority <n>
+  const priorityMatch = input.match(/--priority\s+(\S+)/);
+  const priorityRaw = priorityMatch?.[1];
+
+  // Title is input with flags stripped
+  const title = input
+    .replace(/--desc\s+[^-][^\s-]*(?:\s+[^-][^\s-]*)*/g, "")
+    .replace(/--priority\s+\S+/g, "")
+    .trim();
+
+  const raw: Record<string, unknown> = { title };
+  if (desc !== undefined) raw.desc = desc;
+  if (priorityRaw !== undefined) raw.priority = priorityRaw;
+
+  const parsed = TaskCommandSchema.safeParse(raw);
+  if (!parsed.success) return err(parsed.error);
+  return ok(parsed.data);
+}
+
 import { resolveProjectContext } from "../projects.ts";
 import {
   addTask,
@@ -35,7 +81,20 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     }
     const input = ctx.match?.trim();
     if (!input) {
-      await ctx.reply("Usage: /task titre de la tache", bctx.threadOpts(ctx));
+      await ctx.reply(
+        "Usage: /task <titre> [--desc <description>] [--priority <1-5>]",
+        bctx.threadOpts(ctx),
+      );
+      return;
+    }
+    // R10: Validate input via Zod schema before calling addTask
+    const parsed = parseTaskCommand(input);
+    if (!parsed.ok) {
+      const msg = parsed.error.issues[0]?.message || "Parametres invalides";
+      await ctx.reply(
+        `Erreur: ${msg}\nUsage: /task <titre> [--desc <description>] [--priority <1-5>]`,
+        bctx.threadOpts(ctx),
+      );
       return;
     }
     // Resolve project context
@@ -44,9 +103,11 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       ctx.message?.message_thread_id,
     );
     const projectSlug = currentProject?.slug || "telegram-relay";
-    const task = await addTask(bctx.supabase, input, {
+    const task = await addTask(bctx.supabase, parsed.value.title, {
       project: projectSlug,
       project_id: currentProject?.id,
+      ...(parsed.value.desc !== undefined && { description: parsed.value.desc }),
+      ...(parsed.value.priority !== undefined && { priority: parsed.value.priority }),
     });
     if (task) {
       await ctx.reply(

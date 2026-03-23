@@ -785,7 +785,9 @@ export async function logWorkflowAudit(
   let configSnapshot: WorkflowConfig | null = null;
   try {
     configSnapshot = loadWorkflowConfig();
-  } catch {}
+  } catch {
+    log.warn("loadWorkflowConfig catch in logWorkflowTransition"); // R8: business error → log.warn
+  }
 
   const { error } = await supabase.from("workflow_audit").insert({
     author: entry.author,

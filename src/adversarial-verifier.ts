@@ -131,7 +131,7 @@ export function parseDriftReport(output: string): DriftReport {
     const parsed = JSON.parse(output);
     return normalizeDriftReport(parsed);
   } catch {
-    // Try to extract JSON from the output
+    // R5: parse failure → fallback
   }
 
   const jsonMatch = output.match(/\{[\s\S]*\}/);
@@ -140,7 +140,7 @@ export function parseDriftReport(output: string): DriftReport {
       const parsed = JSON.parse(jsonMatch[0]);
       return normalizeDriftReport(parsed);
     } catch {
-      // Fall through
+      // R5: parse failure → fallback
     }
   }
 

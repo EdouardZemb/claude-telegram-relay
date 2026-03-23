@@ -6,6 +6,7 @@
  */
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
+import { z } from "zod";
 import { executeTask } from "../agent.ts";
 import type { AdversarialResult, ImpactAnalysisResult } from "../agent-schemas.ts";
 import { formatPipelineResult, runAutoPipeline } from "../auto-pipeline.ts";
@@ -33,6 +34,38 @@ import { WorkflowTracker } from "../workflow.ts";
 const log = createLogger("execution");
 // F-DA-1: Map of session keys -> resolve callbacks for adversarial challenge pause/resume
 const challengeResolvers = new Map<string, (shouldContinue: boolean) => void>();
+
+// R11: Zod schema for /exec — idPrefix must be non-empty hex, min 4 chars, no leading/trailing dashes
+// F-EC-2 fix: regex enforces at least 1 alphanumeric char, no pure-dash strings
+export const ExecCommandSchema = z.object({
+  idPrefix: z
+    .string()
+    .min(4, "ID trop court (minimum 4 caracteres)")
+    .max(36, "ID trop long (maximum 36 caracteres)")
+    .regex(
+      /^[a-f0-9][a-f0-9-]{2,34}[a-f0-9]$|^[a-f0-9]{4,36}$/,
+      "Format ID invalide (caracteres hexadecimaux attendus)",
+    ),
+});
+
+// R12: Zod schema for /orchestrate — pipelines in lowercase, flags with defaults
+// F-DA-1 fix: VALID_PIPELINES uses lowercase only, aligned with execution.ts:356-361
+export const VALID_PIPELINES = ["full", "quick", "review"] as const;
+export const OrchestrateCommandSchema = z.object({
+  idPrefix: z
+    .string()
+    .min(4, "ID trop court (minimum 4 caracteres)")
+    .max(36, "ID trop long (maximum 36 caracteres)")
+    .regex(
+      /^[a-f0-9][a-f0-9-]{2,34}[a-f0-9]$|^[a-f0-9]{4,36}$/,
+      "Format ID invalide (caracteres hexadecimaux attendus)",
+    ),
+  pipeline: z.enum(VALID_PIPELINES).optional(),
+  useBlackboard: z.boolean().default(false),
+  skipChallenge: z.boolean().default(false),
+  useResume: z.boolean().default(false),
+  resumeSessionId: z.string().optional(),
+});
 
 export default function execution(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -79,14 +112,22 @@ export default function execution(bctx: BotContext): Composer<Context> {
       await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
       return;
     }
-    const idPrefix = ctx.match?.trim();
-    if (!idPrefix) {
+    const idPrefixRaw = ctx.match?.trim();
+    if (!idPrefixRaw) {
       await ctx.reply(
         "Usage: /exec <id> (premiers caracteres de l'ID de la tache)",
         bctx.threadOpts(ctx),
       );
       return;
     }
+    // R11: Validate idPrefix via Zod schema
+    const execParsed = ExecCommandSchema.safeParse({ idPrefix: idPrefixRaw });
+    if (!execParsed.success) {
+      const msg = execParsed.error.issues[0]?.message || "Format ID invalide";
+      await ctx.reply(`Erreur: ${msg}\nUsage: /exec <id>`, bctx.threadOpts(ctx));
+      return;
+    }
+    const idPrefix = execParsed.data.idPrefix;
 
     const { data: allExecTasks } = await bctx.supabase
       .from("tasks")
@@ -261,7 +302,9 @@ export default function execution(bctx: BotContext): Composer<Context> {
         heartbeatCount++;
         try {
           await ctx.reply(`Agent en cours... (${heartbeatCount * 2} min)`, bctx.threadOpts(ctx));
-        } catch {}
+        } catch {
+          // R7: optional feature → skip
+        }
       }, 120_000);
 
       try {
@@ -306,10 +349,10 @@ export default function execution(bctx: BotContext): Composer<Context> {
       .replace(/--skip-challenge/g, "")
       .trim();
     const parts = cleanArgs.split(/\s+/);
-    const idPrefix = parts[0];
+    const rawIdPrefix = parts[0];
     const pipelineArg = parts[1] || "full";
 
-    if (!idPrefix) {
+    if (!rawIdPrefix) {
       await ctx.reply(
         "Usage: /orchestrate <id> [pipeline] [--blackboard] [--resume] [--skip-challenge]\n\n" +
           "Pipelines disponibles:\n" +
@@ -325,6 +368,31 @@ export default function execution(bctx: BotContext): Composer<Context> {
       );
       return;
     }
+
+    // R12: Validate idPrefix and known pipeline names via Zod schema
+    // Custom pipelines (comma-separated agent IDs) bypass pipeline enum validation
+    const isCustomPipeline = pipelineArg.includes(",");
+    const orchestrateParsed = OrchestrateCommandSchema.safeParse({
+      idPrefix: rawIdPrefix,
+      pipeline: isCustomPipeline
+        ? undefined
+        : (VALID_PIPELINES as readonly string[]).includes(pipelineArg)
+          ? pipelineArg
+          : undefined,
+      useBlackboard,
+      skipChallenge,
+      useResume,
+      resumeSessionId: explicitResumeId,
+    });
+    if (!orchestrateParsed.success) {
+      const msg = orchestrateParsed.error.issues[0]?.message || "Parametres invalides";
+      await ctx.reply(
+        `Erreur: ${msg}\nUsage: /orchestrate <id> [full|quick|review] [--blackboard]`,
+        bctx.threadOpts(ctx),
+      );
+      return;
+    }
+    const idPrefix = orchestrateParsed.data.idPrefix;
 
     // Find task
     const { data: allOrchTasks } = await bctx.supabase

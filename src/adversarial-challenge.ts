@@ -130,7 +130,7 @@ export function parseAdversarialResult(output: string, startTime: number): Adver
       findings = normalizeFindings(parsed.findings);
     }
   } catch {
-    // Try to extract JSON from mixed output
+    // R5: parse failure → fallback
     const jsonMatch = output.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
@@ -139,7 +139,7 @@ export function parseAdversarialResult(output: string, startTime: number): Adver
           findings = normalizeFindings(parsed.findings);
         }
       } catch {
-        // Fall through — 0 findings
+        // R5: parse failure → fallback
       }
     }
   }
@@ -217,6 +217,7 @@ export async function runImpactAnalysis(
   try {
     graph = getGraph();
   } catch {
+    // R8: business error → log.warn
     // V21: Graph unavailable
     log.warn("adversarial-challenge: code-graph not available");
     return {
@@ -346,11 +347,13 @@ async function spawnImpactAgent(
     const parsed = JSON.parse(result.stdout);
     return parsed;
   } catch {
+    // R5: parse failure → fallback
     const jsonMatch = result.stdout.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[0]);
       } catch {
+        // R5: parse failure → fallback
         return {};
       }
     }

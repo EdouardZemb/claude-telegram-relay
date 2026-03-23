@@ -186,6 +186,7 @@ export async function getActivePromptVersion(
       createdAt: row.created_at,
     };
   } catch {
+    // R7: optional feature → skip
     return null;
   }
 }

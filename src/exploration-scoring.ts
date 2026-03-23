@@ -9,8 +9,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type CodeGraph, estimateComplexity, findAffectedModules, getGraph } from "./code-graph.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { createLogger } from "./logger.ts";
 import { findSimilarPastTasks } from "./memory.ts";
 import type { Task } from "./tasks.ts";
+
+const log = createLogger("exploration-scoring");
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -179,7 +182,8 @@ export async function computeExplorationScore(
     graphScore = result.score;
     affectedModules = result.modules;
   } catch {
-    // Graph unavailable
+    // R8: business error → log.warn
+    log.warn("computeExplorationScore: code-graph unavailable");
   }
 
   // Component 2: Keyword signal (30%) — always available
@@ -193,7 +197,8 @@ export async function computeExplorationScore(
     similarCount = similar.length;
     noSimilarScore = computeNoSimilarTasksScore(similarCount);
   } catch {
-    // Database unavailable
+    // R8: business error → log.warn
+    log.warn("computeExplorationScore: findSimilarPastTasks unavailable");
   }
 
   // Dynamic weighting: only available components contribute

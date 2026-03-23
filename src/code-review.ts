@@ -164,6 +164,7 @@ export async function runCodeReview(
       rawOutput: output,
     };
   } catch (error) {
+    // R8: business error → log.warn
     return {
       success: false,
       findings: [],

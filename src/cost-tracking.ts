@@ -268,6 +268,7 @@ export async function getTotalCost(
       executions: data.length,
     };
   } catch {
+    // R6: optional IO → degrade gracefully
     return { totalTokens: 0, totalCostUsd: 0, executions: 0 };
   }
 }
@@ -304,6 +305,7 @@ export async function getHistoricalSprintAverage(
     const total = sprints.reduce((sum, [, cost]) => sum + cost, 0);
     return Math.round((total / sprints.length) * 10000) / 10000;
   } catch {
+    // R6: optional IO → degrade gracefully
     return null;
   }
 }

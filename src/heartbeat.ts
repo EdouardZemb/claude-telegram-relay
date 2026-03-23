@@ -75,6 +75,7 @@ export async function loadState(): Promise<HeartbeatState> {
     const content = await readFile(STATE_FILE, "utf-8");
     return JSON.parse(content);
   } catch {
+    // R6: optional IO → degrade gracefully
     return createDefaultState();
   }
 }
@@ -101,6 +102,7 @@ function gh(...args: string[]): string {
     if (result.exitCode !== 0) return "";
     return new TextDecoder().decode(result.stdout).trim();
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 }
@@ -172,6 +174,7 @@ export function getCIStatus(): { status: string; hasFailed: boolean } {
     const hasFailed = parsed.some((r) => r.conclusion === "failure");
     return { status: lines.join("\n"), hasFailed };
   } catch {
+    // R6: optional IO → degrade gracefully
     return { status: runs, hasFailed: false };
   }
 }
@@ -202,6 +205,7 @@ export function getOpenPRs(): { prs: string; hasStale: boolean } {
 
     return { prs: lines.join("\n"), hasStale };
   } catch {
+    // R6: optional IO → degrade gracefully
     return { prs: prs, hasStale: false };
   }
 }
@@ -311,6 +315,7 @@ async function writeMcpPending(notification: {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) pending = parsed;
   } catch {
+    // R6: optional IO → degrade gracefully
     // File doesn't exist or parse error — start fresh
   }
 
@@ -431,6 +436,7 @@ export async function runLightweightAudit(projectDir: string): Promise<Lightweig
     try {
       actualTestCount = await countTests(testsDir);
     } catch {
+      // R6: optional IO → degrade gracefully
       actualTestCount = claudeMdTestCount; // fallback: assume no drift
     }
   }
@@ -552,6 +558,7 @@ export async function pulse(): Promise<{
               parsed = wrapper;
             }
           } catch {
+            // R5: parse failure → fallback
             const jsonMatch = raw.match(/\{[\s\S]*"observations"[\s\S]*\}/);
             if (jsonMatch) {
               parsed = JSON.parse(jsonMatch[0]);

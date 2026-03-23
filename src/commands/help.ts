@@ -167,7 +167,10 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
           const mem = Math.round((app.monit?.memory || 0) / 1024 / 1024);
           parts.push(`  ${app.name}: ${status} (${mem}MB, ${restarts} restarts)`);
         }
-      } catch {}
+      } catch {
+        // R8: business error → log.warn
+        log.warn("status: pm2 list unavailable");
+      }
 
       // Message count today
       if (supabase) {
@@ -244,7 +247,8 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
           }
         }
       } catch {
-        // Best-effort monitoring
+        // R8: business error → log.warn
+        log.warn("monitor: agent events unavailable");
       }
     }
 
@@ -254,7 +258,8 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         const llmOpsSnapshot = await getLlmOpsSnapshot(supabase);
         parts.push("", formatLlmOpsSnapshot(llmOpsSnapshot));
       } catch {
-        // Best-effort LLM-Ops monitoring
+        // R8: business error → log.warn
+        log.warn("monitor: llm-ops snapshot unavailable");
       }
     }
 
@@ -269,7 +274,8 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         parts.push("", formatGraphStatsForMonitor(graph));
       }
     } catch {
-      // Best-effort
+      // R8: business error → log.warn
+      log.warn("monitor: code-graph stats unavailable");
     }
 
     await ctx.reply(parts.join("\n"), threadOpts(ctx));

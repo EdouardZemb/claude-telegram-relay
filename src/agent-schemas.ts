@@ -696,6 +696,7 @@ export function parseAgentOutput(rawOutput: string, role: AgentRole): Structured
       return { ...direct, role } as StructuredAgentOutput;
     }
   } catch {
+    // R5: parse failure → fallback
     // Not direct JSON, fall through to marker-based parsing
   }
 
@@ -708,6 +709,7 @@ export function parseAgentOutput(rawOutput: string, role: AgentRole): Structured
         return { ...parsed, role } as StructuredAgentOutput;
       }
     } catch {
+      // R5: parse failure → fallback
       // Fall through to fallback
     }
   }
@@ -720,7 +722,9 @@ export function parseAgentOutput(rawOutput: string, role: AgentRole): Structured
       if (validateAgentOutput(parsed, role)) {
         return { ...parsed, role } as StructuredAgentOutput;
       }
-    } catch {}
+    } catch {
+      // R5: parse failure → fallback
+    }
   }
 
   return null;
@@ -1006,6 +1010,7 @@ export function parseExplorationPhaseOutput(rawOutput: string): ExplorationPhase
       return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
     }
   } catch {
+    // R5: parse failure → fallback
     // Not direct JSON
   }
 
@@ -1018,6 +1023,7 @@ export function parseExplorationPhaseOutput(rawOutput: string): ExplorationPhase
         return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
       }
     } catch {
+      // R5: parse failure → fallback
       // Fall through
     }
   }
@@ -1031,6 +1037,7 @@ export function parseExplorationPhaseOutput(rawOutput: string): ExplorationPhase
         return { ...parsed, role: "explorer" } as ExplorationPhaseOutput;
       }
     } catch {
+      // R5: parse failure → fallback
       // Fall through
     }
   }

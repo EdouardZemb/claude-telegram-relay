@@ -68,6 +68,7 @@ export async function loadQueue(): Promise<void> {
     const content = await readFile(QUEUE_FILE, "utf-8");
     queue = JSON.parse(content);
   } catch {
+    // R6: optional IO → degrade gracefully
     queue = [];
   }
 }
@@ -330,6 +331,7 @@ export async function consumeMcpPending(): Promise<void> {
     await writeFile(MCP_PENDING_FILE, "[]");
     await saveQueue();
   } catch {
+    // R6: optional IO → degrade gracefully
     // File doesn't exist or parse error — normal when no MCP pending
   }
 }

@@ -112,7 +112,7 @@ async function loadSessions(): Promise<void> {
       }
     }
   } catch {
-    // File doesn't exist or parse error — start fresh
+    // R6: optional IO → degrade gracefully
   }
   persistLoaded = true;
 }

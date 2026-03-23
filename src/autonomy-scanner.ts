@@ -54,6 +54,7 @@ export async function scanMissingTests(projectRoot: string): Promise<Opportunity
     srcFiles = (await readdir(srcDir)).filter((f) => f.endsWith(".ts"));
     testFiles = (await readdir(testDir)).filter((f) => f.endsWith(".test.ts"));
   } catch {
+    // R6: optional IO → degrade gracefully
     return opportunities;
   }
 
@@ -90,6 +91,7 @@ export async function scanTodoMarkers(projectRoot: string): Promise<Opportunity[
   try {
     srcFiles = (await readdir(srcDir)).filter((f) => f.endsWith(".ts"));
   } catch {
+    // R6: optional IO → degrade gracefully
     return opportunities;
   }
 
@@ -99,6 +101,7 @@ export async function scanTodoMarkers(projectRoot: string): Promise<Opportunity[
     try {
       content = await Bun.file(filePath).text();
     } catch {
+      // R6: optional IO → degrade gracefully
       continue;
     }
 

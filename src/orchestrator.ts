@@ -285,6 +285,7 @@ export async function runAgentStep(
       costUsd: usage.costUsd,
     };
   } catch (error) {
+    // R8: business error → log.warn
     return {
       agentId,
       agentName,
@@ -557,7 +558,7 @@ export async function orchestrate(
         4000, // token budget
       );
     } catch {
-      // Sharding not available, proceed without
+      // R7: optional feature → skip
     }
   }
 
@@ -678,7 +679,7 @@ export async function orchestrate(
         if (res.success) bbVersion = res.newVersion;
       }
     } catch {
-      // Template not available, proceed without
+      // R7: optional feature → skip
     }
 
     if (options.onProgress) {
@@ -773,7 +774,7 @@ export async function orchestrate(
         protoSpec = specSection.proto_spec as ProtoSpec;
       }
     } catch {
-      // No proto_spec on resume — proceed without
+      // R7: optional feature → skip
     }
   }
 
@@ -823,7 +824,7 @@ export async function orchestrate(
             agentContextCache.set(agentId, refreshedCtx);
           }
         } catch {
-          // R6: On error, preserve existing cache
+          // R6: optional IO → degrade gracefully
         }
       }
 
@@ -949,7 +950,7 @@ export async function orchestrate(
             }
           }
         } catch {
-          // Conflict detection is best-effort
+          // R7: optional feature → skip
         }
       }
 
@@ -973,7 +974,7 @@ export async function orchestrate(
             }
           }
         } catch {
-          // Clarification check is best-effort
+          // R7: optional feature → skip
         }
       }
 
@@ -1093,7 +1094,7 @@ export async function orchestrate(
             }
           }
         } catch {
-          // Best-effort exploration report storage
+          // R7: optional feature → skip
         }
       }
 
@@ -1540,7 +1541,7 @@ export async function orchestrate(
                 agentContextCache.set(agentId, refreshedCtx);
               }
             } catch {
-              // Preserve existing cache
+              // R6: optional IO → degrade gracefully
             }
           }
 

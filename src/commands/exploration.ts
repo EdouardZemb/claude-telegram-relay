@@ -20,7 +20,10 @@ import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
+import { createLogger } from "../logger.ts";
 import { resolveProjectContext } from "../projects.ts";
+
+const log = createLogger("exploration");
 
 // ── Web Research Detection ───────────────────────────────────
 
@@ -115,7 +118,8 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         return;
       }
     } catch {
-      // Graph unavailable — fall through to LLM
+      // R8: business error → log.warn
+      log.warn("explore: code-graph unavailable, falling through to LLM");
     }
 
     const explorer = getAgent("explorer");

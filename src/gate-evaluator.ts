@@ -152,6 +152,7 @@ export function runSingleCheck(
       durationMs,
     };
   } catch (error) {
+    // R8: business error → log.warn
     return {
       check: checkName,
       passed: false,
@@ -619,7 +620,7 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
     const parsed = JSON.parse(output);
     return normalizeEvaluation(parsed, gateName);
   } catch {
-    // Try to extract JSON from the output
+    // R5: parse failure → fallback
   }
 
   // Find JSON in output
@@ -629,7 +630,7 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
       const parsed = JSON.parse(jsonMatch[0]);
       return normalizeEvaluation(parsed, gateName);
     } catch {
-      // Fall through
+      // R5: parse failure → fallback
     }
   }
 

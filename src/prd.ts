@@ -192,7 +192,7 @@ export async function generatePRD(
           contentStart = i + 1;
           break;
         } catch {
-          // Not valid JSON, skip
+          // R5: parse failure → fallback
         }
       }
     }

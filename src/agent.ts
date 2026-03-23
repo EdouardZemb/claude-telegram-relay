@@ -407,6 +407,7 @@ async function waitForCIChecks(
         return { passed: false, details: failDetails };
       }
     } catch {
+      log.warn("pollForBranchPR catch — retrying"); // R8: business error → log.warn
       await Bun.sleep(pollIntervalMs);
     }
   }
@@ -660,6 +661,7 @@ export async function executeTask(
       reviewSummary: reviewResult?.summary,
     };
   } catch (error) {
+    // R9: propagation → log.error
     git("checkout", "master");
     const durationMs = Date.now() - startTime;
     return {

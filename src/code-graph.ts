@@ -199,6 +199,7 @@ export function indexCodebase(rootDir?: string): CodeGraph {
     try {
       content = readFileSync(absPath, "utf-8");
     } catch {
+      // R6: optional IO → degrade gracefully
       continue;
     }
 
@@ -223,7 +224,7 @@ export function indexCodebase(rootDir?: string): CodeGraph {
     const { execSync } = require("child_process");
     commitHash = execSync("git rev-parse --short HEAD", { cwd: PROJECT_ROOT }).toString().trim();
   } catch {
-    // Not in a git repo or git not available
+    // R6: optional IO → degrade gracefully
   }
 
   return {
@@ -261,6 +262,7 @@ export function loadGraph(path?: string): CodeGraph | null {
     graphCache = JSON.parse(content);
     return graphCache;
   } catch {
+    // R6: optional IO → degrade gracefully
     return null;
   }
 }

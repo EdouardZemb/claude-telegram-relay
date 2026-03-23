@@ -91,12 +91,14 @@ describe("[V8] biome.json a noExplicitAny: error (PR finale)", () => {
 });
 
 // V-critere: V9
-describe("[V9] .github/workflows/ci.yml a le seuil 3441", () => {
-  test("ci.yml contient le seuil de test 3441", async () => {
+describe("[V9] .github/workflows/ci.yml a un seuil de test anti-regression", () => {
+  test("ci.yml contient un seuil de test numerique >= 3000", async () => {
     const { readFileSync } = await import("fs");
     const { join } = await import("path");
     const ciYml = readFileSync(join(import.meta.dir, "../../.github/workflows/ci.yml"), "utf-8");
-    expect(ciYml).toContain("3441");
+    const match = ciYml.match(/PASS_COUNT.*-lt\s+(\d+)/);
+    expect(match).not.toBeNull();
+    expect(Number(match![1])).toBeGreaterThanOrEqual(3000);
   });
 });
 

@@ -8,11 +8,13 @@
  */
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
+import { z } from "zod";
 import { decomposeTask } from "../agent.ts";
 import type { BotContext } from "../bot-context.ts";
 import { getSession } from "../conversation-session.ts";
 import { shardDocument } from "../document-sharding.ts";
 import { isJobManagerEnabled, launch as launchJob, sendProgressMessage } from "../job-manager.ts";
+import { createLogger } from "../logger.ts";
 import {
   formatPRDDetail,
   formatPRDList,
@@ -53,6 +55,22 @@ import { resolveProjectContext } from "../projects.ts";
 import { buildStoryFile, enrichTaskWithStory } from "../story-files.ts";
 import { addTask, getCurrentSprint } from "../tasks.ts";
 import { WorkflowTracker } from "../workflow.ts";
+
+const log = createLogger("planning");
+
+// R13: Zod schema for /prd — validates extracted fields (not raw string)
+// F-SS-2 fix: flat object schema instead of discriminatedUnion (simpler, aligned with config.ts pattern)
+// F-DA-2 fix: validates extracted action/id/description, not the raw input string
+export const PrdCommandSchema = z.object({
+  action: z.enum(["list", "view", "create", "approve", "reject"], {
+    errorMap: () => ({ message: "Action invalide. Actions: list, view, create, approve, reject" }),
+  }),
+  id: z
+    .string()
+    .regex(/^[a-f0-9]{4,8}$/, "Format ID invalide (hexadecimal 4-8 chars)")
+    .optional(),
+  description: z.string().min(1, "La description ne peut pas etre vide").optional(),
+});
 
 export default function planningCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -215,6 +233,12 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
 
     // /prd without args or /prd list → list PRDs for current project
     if (!input || /^(list|lister)$/i.test(input)) {
+      // R13: Validate extracted action via PrdCommandSchema
+      const prdListParsed = PrdCommandSchema.safeParse({ action: "list" });
+      if (!prdListParsed.success) {
+        await ctx.reply("Erreur de validation interne (list).", bctx.threadOpts(ctx));
+        return;
+      }
       const prds = await getPRDs(bctx.supabase, { project: projectSlug });
       if (prds.length === 0) {
         await ctx.reply(
@@ -239,6 +263,13 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       ? input
       : input.match(/\b([a-f0-9]{4,8})\b/)?.[1];
     if (hexIdMatch) {
+      // R13: Validate extracted action + id via PrdCommandSchema
+      const prdViewParsed = PrdCommandSchema.safeParse({ action: "view", id: hexIdMatch });
+      if (!prdViewParsed.success) {
+        const msg = prdViewParsed.error.issues[0]?.message || "Parametres invalides";
+        await ctx.reply(`Erreur: ${msg}`, bctx.threadOpts(ctx));
+        return;
+      }
       const prd = await getPRD(bctx.supabase, hexIdMatch);
       if (!prd) {
         await ctx.reply(`Aucun PRD trouve avec l'ID "${hexIdMatch}".`, bctx.threadOpts(ctx));
@@ -289,6 +320,13 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
     }
 
     // /prd <description> → generate new PRD
+    // R13: Validate extracted action + description via PrdCommandSchema
+    const prdCreateParsed = PrdCommandSchema.safeParse({ action: "create", description: input });
+    if (!prdCreateParsed.success) {
+      const msg = prdCreateParsed.error.issues[0]?.message || "Parametres invalides";
+      await ctx.reply(`Erreur: ${msg}\nUsage: /prd <description>`, bctx.threadOpts(ctx));
+      return;
+    }
     const prdCreateFn = async (): Promise<string> => {
       const generated = await generatePRD(input!, projectSlug);
       if (!generated) {
@@ -619,6 +657,8 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
               : `Erreur lors du merge de la PR #${prNumber}. Vérifie sur GitHub.`,
           );
         } catch {
+          // R8: business error → log.warn
+          log.warn("prdwf_merge_pr catch", { prNumber });
           await ctx.editMessageText(`Erreur lors du merge de la PR #${prNumber}.`);
         }
         return;

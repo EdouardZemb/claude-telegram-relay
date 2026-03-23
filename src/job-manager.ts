@@ -126,6 +126,7 @@ async function loadJobs(): Promise<void> {
       registry.set(job.id, job);
     }
   } catch {
+    // R6: optional IO → degrade gracefully
     // File doesn't exist or parse error — start fresh
   }
   loaded = true;

@@ -424,7 +424,7 @@ export async function getRelevantContext(
       data.map((m: { role: string; content: string }) => `[${m.role}]: ${m.content}`).join("\n")
     );
   } catch {
-    // Search not available yet (Edge Functions not deployed) — that's fine
+    // R7: optional feature → skip
     return "";
   }
 }
@@ -449,6 +449,7 @@ export async function classifyMessage(
     if (error || !data) return null;
     return data as ThoughtClassification;
   } catch {
+    // R7: optional feature → skip
     return null;
   }
 }
@@ -609,7 +610,7 @@ export async function findDuplicateIdea(
     const match = (data as MemorySearchResult[]).find((m) => m.type === "idea");
     return match ? match.content : null;
   } catch {
-    // Search not available — skip deduplication, allow insert
+    // R7: optional feature → skip
     return null;
   }
 }
@@ -779,6 +780,7 @@ export async function findSimilarFact(
       similarity: match.similarity,
     };
   } catch {
+    // R7: optional feature → skip
     return null;
   }
 }
@@ -1017,6 +1019,7 @@ export async function findContradiction(
     );
     return match ? { id: match.id, content: match.content, similarity: match.similarity } : null;
   } catch {
+    // R7: optional feature → skip
     return null;
   }
 }
@@ -1103,6 +1106,8 @@ export async function getIdea(supabase: SupabaseClient | null, id: string): Prom
     if (error) return null;
     return data as Idea;
   } catch {
+    // R8: business error → log.warn
+    log.warn("getIdeaByPrefix catch", { id });
     return null;
   }
 }
@@ -1126,6 +1131,8 @@ export async function reviewIdea(supabase: SupabaseClient | null, id: string): P
     }
     return true;
   } catch {
+    // R8: business error → log.warn
+    log.warn("reviewIdea catch", { id });
     return false;
   }
 }
@@ -1155,6 +1162,8 @@ export async function promoteIdea(
     }
     return data?.content || null;
   } catch {
+    // R8: business error → log.warn
+    log.warn("promoteIdea catch", { id });
     return null;
   }
 }
@@ -1178,6 +1187,8 @@ export async function archiveIdea(supabase: SupabaseClient | null, id: string): 
     }
     return true;
   } catch {
+    // R8: business error → log.warn
+    log.warn("archiveIdea catch", { id });
     return false;
   }
 }

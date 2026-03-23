@@ -41,6 +41,7 @@ export async function extractModules(srcDir: string): Promise<string[]> {
       }
     }
   } catch {
+    // R6: optional IO → degrade gracefully
     // No commands directory
   }
 
@@ -77,6 +78,7 @@ export async function extractCommands(relayPath: string): Promise<string[]> {
       }
     }
   } catch {
+    // R6: optional IO → degrade gracefully
     // No commands directory — that's fine (backward compatible)
   }
 

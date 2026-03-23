@@ -83,6 +83,7 @@ export async function emitAgentEvent(
       getInMemoryEvents(sessionId).push(event);
     }
   } catch {
+    // R7: optional feature → skip
     getInMemoryEvents(sessionId).push(event);
   }
 }
@@ -207,7 +208,7 @@ export async function captureAgentFailure(
   try {
     await emitAgentEvent(supabase, sessionId, role, "failure_captured", payload);
   } catch {
-    // Fire-and-forget: never propagate errors
+    // R7: optional feature → skip
     // emitAgentEvent already has its own fallback, but guard against unexpected failures
     try {
       getInMemoryEvents(sessionId).push({
@@ -218,7 +219,7 @@ export async function captureAgentFailure(
         created_at: new Date().toISOString(),
       });
     } catch {
-      // Last resort: log to console
+      // R7: optional feature → skip
       log.error("captureAgentFailure: failed to store event", { sessionId, role });
     }
   }

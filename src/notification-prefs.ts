@@ -60,6 +60,7 @@ export async function loadPrefs(): Promise<NotificationPrefs> {
     cachedPrefs = merged;
     return merged;
   } catch {
+    // R6: optional IO → degrade gracefully
     cachedPrefs = getDefaultPrefs();
     return cachedPrefs;
   }

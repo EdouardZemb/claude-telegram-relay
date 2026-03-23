@@ -135,6 +135,7 @@ export async function triageDescription(
     score = difficulty.score;
     pipeline = difficulty.pipeline;
   } catch {
+    // R6: optional IO → degrade gracefully
     // Fallback: estimate from text length
     const len = description.length;
     if (len < 50) {

@@ -92,6 +92,7 @@ export async function getHistoricalAverage(
     const total = sprints.reduce((sum, [, cost]) => sum + cost, 0);
     return Math.round((total / sprints.length) * 10000) / 10000;
   } catch {
+    // R7: optional feature → skip
     return null;
   }
 }

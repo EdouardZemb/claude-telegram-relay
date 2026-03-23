@@ -121,6 +121,7 @@ export async function buildAgentContext(
             .join("\n---\n");
         }
       } catch {
+        // R6: optional IO → degrade gracefully
         // Best-effort
       }
     }
@@ -273,6 +274,7 @@ async function _fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
 
     return parts.join("\n\n");
   } catch {
+    // R7: optional feature → skip
     return "";
   }
 }
@@ -307,6 +309,7 @@ async function fetchSprintContext(supabase: SupabaseClient, sprintId?: string): 
       `En cours: ${data.in_progress} | Review: ${data.review} | Backlog: ${data.backlog}`,
     ].join("\n");
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 }
@@ -334,6 +337,7 @@ async function fetchRecentTasks(supabase: SupabaseClient, projectId?: string): P
       })
       .join("\n");
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 }
@@ -346,6 +350,7 @@ function loadProfile(): Promise<string> {
     const lines = content.split("\n").filter((l) => l.startsWith("- ") || l.startsWith("## "));
     return Promise.resolve(lines.join("\n"));
   } catch {
+    // R6: optional IO → degrade gracefully
     return Promise.resolve("");
   }
 }
@@ -393,6 +398,7 @@ export async function fetchTrustContext(role: AgentRole | string): Promise<strin
 
     return lines.join("\n");
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 }
@@ -426,6 +432,7 @@ export async function fetchSprintMetrics(
 
     return lines.join("\n");
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 }
@@ -444,6 +451,7 @@ export async function fetchDocumentContext(
   try {
     return await buildTaskContext(supabase, taskTitle, projectId, 1500);
   } catch {
+    // R7: optional feature → skip
     return "";
   }
 }
@@ -472,6 +480,7 @@ export async function fetchSimilarTasksContext(
       })
       .join("\n");
   } catch {
+    // R7: optional feature → skip
     return "";
   }
 }

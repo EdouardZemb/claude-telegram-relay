@@ -32,6 +32,7 @@ export const BOT_TOKEN = (() => {
   try {
     return getConfig().telegramBotToken;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 })();
@@ -39,6 +40,7 @@ export const ALLOWED_USER_ID = (() => {
   try {
     return getConfig().telegramUserId;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 })();
@@ -46,6 +48,7 @@ export const GROUP_ID = (() => {
   try {
     return getConfig().telegramGroupId;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 })();
@@ -53,6 +56,7 @@ export const CLAUDE_PATH = (() => {
   try {
     return getConfig().claudePath;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "claude";
   }
 })();
@@ -60,6 +64,7 @@ export const PROJECT_DIR = (() => {
   try {
     return getConfig().projectDir;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 })();
@@ -68,6 +73,7 @@ export const RELAY_DIR = (() => {
     const cfg = getConfig();
     return cfg.relayDir || join(process.env.HOME || "~", ".claude-relay");
   } catch {
+    // R6: optional IO → degrade gracefully
     return join(process.env.HOME || "~", ".claude-relay");
   }
 })();
@@ -77,6 +83,7 @@ export const USER_NAME = (() => {
   try {
     return getConfig().userName;
   } catch {
+    // R6: optional IO → degrade gracefully
     return "";
   }
 })();
@@ -85,6 +92,7 @@ export const USER_TIMEZONE = (() => {
     const cfg = getConfig();
     return cfg.userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
+    // R6: optional IO → degrade gracefully
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
   }
 })();
@@ -179,6 +187,7 @@ async function loadSession(): Promise<SessionState> {
     const content = await readFile(SESSION_FILE, "utf-8");
     return JSON.parse(content);
   } catch {
+    // R6: optional IO → degrade gracefully
     return { sessionId: null, lastActivity: new Date().toISOString() };
   }
 }
@@ -358,6 +367,7 @@ async function loadReminders(): Promise<void> {
     const content = await readFile(REMINDERS_FILE, "utf-8");
     reminders = JSON.parse(content);
   } catch {
+    // R6: optional IO → degrade gracefully
     reminders = [];
   }
 }
@@ -380,6 +390,7 @@ function _createSupabase(): SupabaseClient | null {
     }
     return null;
   } catch {
+    // R6: optional IO → degrade gracefully
     return null;
   }
 }
@@ -468,7 +479,7 @@ let profileContext = "";
 try {
   profileContext = await readFile(join(PROJECT_ROOT, "config", "profile.md"), "utf-8");
 } catch {
-  // No profile yet
+  // R6: optional IO → degrade gracefully
 }
 
 let dynamicProfileCache = "";
@@ -510,7 +521,7 @@ async function getDynamicProfile(): Promise<string> {
       parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
     dynamicProfileLastRefresh = Date.now();
   } catch {
-    // Silent fail
+    // R7: optional feature → skip
   }
   return dynamicProfileCache;
 }
@@ -796,7 +807,9 @@ export async function createBotContext(bot: Bot): Promise<BotContext> {
     reloadProfile: async () => {
       try {
         profileContext = await readFile(join(PROJECT_ROOT, "config", "profile.md"), "utf-8");
-      } catch {}
+      } catch {
+        // R6: optional IO → degrade gracefully
+      }
     },
     findIdeaByPrefix,
   };

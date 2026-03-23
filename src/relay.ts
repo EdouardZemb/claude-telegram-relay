@@ -58,7 +58,7 @@ async function removePidFile(): Promise<void> {
     if (content.trim() === process.pid.toString()) {
       await unlink(LOCK_FILE).catch(() => {});
     }
-  } catch {}
+  } catch {} // R6: optional IO → degrade gracefully
 }
 
 // ============================================================
@@ -113,7 +113,7 @@ export async function createBot(token: string): Promise<Bot> {
         const errorMsg = `Erreur critique du bot:\n${String(err.error || err).substring(0, 500)}`;
         await bot.api.sendMessage(parseInt(ALLOWED_USER_ID, 10), errorMsg);
       } catch {
-        // Can't notify — just log
+        // R7: optional feature → skip
       }
     }
   });
@@ -157,7 +157,7 @@ if (import.meta.main) {
     log.info(`${signal} received, shutting down gracefully...`);
     try {
       mainBot?.stop();
-    } catch {}
+    } catch {} // R6: optional IO → degrade gracefully
     await removePidFile();
     process.exit(0);
   }
@@ -169,7 +169,7 @@ if (import.meta.main) {
       if (content === process.pid.toString()) {
         fs.unlinkSync(LOCK_FILE);
       }
-    } catch {}
+    } catch {} // R6: optional IO → degrade gracefully
   });
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
@@ -210,7 +210,7 @@ if (import.meta.main) {
           parseInt(ALLOWED_USER_ID, 10),
           `Exception non geree dans le relay:\n${String(error).substring(0, 500)}\n\nLe bot va redemarrer via PM2.`,
         );
-      } catch {}
+      } catch {} // R7: optional feature → skip
     }
     process.exit(1);
   });
@@ -223,7 +223,7 @@ if (import.meta.main) {
           parseInt(ALLOWED_USER_ID, 10),
           `Rejection non geree:\n${String(reason).substring(0, 500)}`,
         );
-      } catch {}
+      } catch {} // R7: optional feature → skip
     }
   });
 

@@ -19,6 +19,7 @@ export function loadFeatures(): Record<string, boolean> {
     const raw = readFileSync(FLAGS_FILE, "utf-8");
     return JSON.parse(raw);
   } catch {
+    // R6: optional IO → degrade gracefully
     return {};
   }
 }

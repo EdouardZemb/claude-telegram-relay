@@ -192,7 +192,7 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
           try {
             await ctx.answerCallbackQuery({ text: "Erreur lors de l'affichage du PRD." });
           } catch {
-            /* already answered */
+            // R7: optional feature → skip
           }
         }
       }
