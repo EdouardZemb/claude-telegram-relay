@@ -30,11 +30,11 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
-| `agent-context.ts` | Supabase context assembly for agents with token budgets per role |
+| `agent-context.ts` | Supabase context assembly for agents with token budgets per role (ROLE_MEMORY_SHARE, planner/explorer budgets) |
 | `code-graph.ts` | Codebase knowledge graph: regex indexer, dependency queries, impact radius |
 | `explore-graph.ts` | Zero-LLM fast-path for /explore structural queries via code graph |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
-| `memory.ts` | Intelligent memory: classification, importance scoring, contradiction detection, clustering, health stats, working memory promotion |
+| `memory.ts` | Intelligent memory: classification, importance scoring, contradiction detection, clustering, health stats, working memory promotion, agent role memory (saveAgentMemory, getAgentMemories, graduateAgentMemory, ROLE_CANONICAL_TAGS) |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
 | `orchestrator.ts` | Multi-agent pipeline orchestrator with sequential execution, retry, and working memory promotion |
 | `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
@@ -133,7 +133,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`, `prompt_versions`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`, `prompt_versions`, `agent_memory`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `match_documents`, `archive_old_memories`, `bump_memory_access`
 
@@ -184,7 +184,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3343 tests (unit + integration + E2E)
+tests/                  3405 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -216,7 +216,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (3343 tests, all must pass before merge)
+- Tests: `bun test` (3405 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

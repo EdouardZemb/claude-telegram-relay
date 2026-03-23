@@ -1150,3 +1150,118 @@ CREATE TABLE IF NOT EXISTS audit_results (
 );
 
 COMMENT ON TABLE audit_results IS 'Codebase audit results with per-axis scores and findings. Populated by heartbeat audit engine.';
+
+-- ============================================================
+-- AGENT MEMORY TABLE (Role-specific persistent memory, V1)
+-- Spec: SPEC-memoire-hybride-agents-bmad option D
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_memory (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  agent_role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tags TEXT[] DEFAULT '{}',
+  importance_score NUMERIC DEFAULT 50,
+  last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
+  access_count INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}',
+  embedding VECTOR(1536)
+);
+
+COMMENT ON TABLE agent_memory IS 'Role-specific persistent memory for BMad agents. Each role accumulates its own patterns (architectural decisions, bug patterns, planning insights). V1: flat format without inter-memory links.';
+COMMENT ON COLUMN agent_memory.agent_role IS 'BMad agent role: analyst, pm, architect, dev, qa, sm, planner, explorer';
+COMMENT ON COLUMN agent_memory.tags IS 'Canonical role tags (ROLE_CANONICAL_TAGS). Determined statically, no LLM call.';
+COMMENT ON COLUMN agent_memory.importance_score IS 'Importance score 0-100, same decay formula as memory table (half-life 70 days).';
+
+CREATE INDEX IF NOT EXISTS idx_agent_memory_role ON agent_memory(agent_role);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_role_importance ON agent_memory(agent_role, importance_score DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_created_at ON agent_memory(created_at DESC);
+
+-- Auto-update updated_at on agent_memory
+CREATE OR REPLACE FUNCTION update_agent_memory_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+CREATE TRIGGER agent_memory_updated_at
+  BEFORE UPDATE ON agent_memory
+  FOR EACH ROW
+  EXECUTE FUNCTION update_agent_memory_updated_at();
+
+-- RLS: full access (consistent with memory table policy)
+ALTER TABLE agent_memory ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON agent_memory FOR ALL USING (true);
+
+-- ── get_agent_memories RPC ──────────────────────────────────
+
+-- Fetch role-specific memories ordered by importance DESC
+CREATE OR REPLACE FUNCTION get_agent_memories(
+  p_role TEXT,
+  p_limit INT DEFAULT 15
+)
+RETURNS TABLE(
+  id UUID,
+  content TEXT,
+  agent_role TEXT,
+  tags TEXT[],
+  importance_score NUMERIC,
+  created_at TIMESTAMPTZ,
+  last_accessed_at TIMESTAMPTZ,
+  access_count INTEGER,
+  metadata JSONB
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    am.id,
+    am.content,
+    am.agent_role,
+    am.tags,
+    am.importance_score,
+    am.created_at,
+    am.last_accessed_at,
+    am.access_count,
+    am.metadata
+  FROM public.agent_memory am
+  WHERE am.agent_role = p_role
+  ORDER BY am.importance_score DESC, am.created_at DESC
+  LIMIT p_limit;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+-- ── Embed trigger on agent_memory (V2: for future semantic search) ──
+
+-- Reuse the existing embed Edge Function to generate embeddings asynchronously.
+-- Note: The auto_link trigger is NOT replicated (V2 scope) — memory_links FK
+-- points exclusively to memory(id), incompatible with agent_memory UUIDs.
+-- (See spec R14, adversarial F-DA-3/F-EC-1/F-SS-1)
+CREATE OR REPLACE FUNCTION auto_embed_agent_memory()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM
+    net.http_post(
+      url := current_setting('app.supabase_url', true) || '/functions/v1/embed',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || current_setting('app.supabase_service_key', true)
+      ),
+      body := jsonb_build_object(
+        'record', jsonb_build_object('id', NEW.id::text, 'content', NEW.content, 'embedding', NEW.embedding),
+        'table', 'agent_memory'
+      )
+    );
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Best-effort: embedding failure must not block insertion
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = '';
+
+CREATE TRIGGER agent_memory_auto_embed
+  AFTER INSERT ON agent_memory
+  FOR EACH ROW
+  EXECUTE FUNCTION auto_embed_agent_memory();

@@ -26,6 +26,7 @@ const CHARS_PER_TOKEN = 4;
  * Token budget per agent role.
  * S40: Increased by ~30% to accommodate trust scores, metrics, and doc shards.
  * Analyst/PM need more context (strategic), Dev needs less (tactical).
+ * SPEC-memoire-hybride: added planner(3000) and explorer(3000) (F-SS-2 fix).
  */
 const ROLE_TOKEN_BUDGETS: Record<string, number> = {
   analyst: 4000,
@@ -34,7 +35,17 @@ const ROLE_TOKEN_BUDGETS: Record<string, number> = {
   dev: 2000,
   qa: 2500,
   sm: 2000,
+  planner: 3000,
+  explorer: 3000,
 };
+
+/**
+ * Share of char budget allocated to MEMOIRE ROLE section.
+ * Fixed at 0.10 (without exploration) / 0.08 (with exploration).
+ * V7: must be in range [0.08, 0.12].
+ */
+export const ROLE_MEMORY_SHARE = 0.1;
+export const ROLE_MEMORY_SHARE_WITH_EXPLORATION = 0.08;
 
 export function getTokenBudget(role: AgentRole | string): number {
   return ROLE_TOKEN_BUDGETS[role] ?? 2500;
@@ -116,76 +127,84 @@ export async function buildAgentContext(
 
     // Priority-based truncation with role-aware weights
     // S41: Rebalanced shares to include similar tasks section
+    // SPEC-memoire-hybride: Rebalanced to accommodate MEMOIRE ROLE section (spec 6.5)
     const sections: Array<{ label: string; content: string; share: number }> = [];
 
-    // Shares rebalanced to accommodate exploration report (12% when present)
+    // Shares rebalanced to accommodate exploration report and MEMOIRE ROLE (spec 6.5)
+    // Without exploration total: 0.20+0.08+0.11+0.08+0.06+0.08+0.08+0.07+0.08+0.06+0.10 = 1.00
+    // With exploration total: 0.18+0.10+0.07+0.09+0.07+0.05+0.06+0.07+0.05+0.06+0.05+0.08 = 0.93
     const hasExploration = !!options.explorationReport;
     if (memoryCtx)
       sections.push({
         label: "CONTEXTE MEMOIRE",
         content: memoryCtx,
-        share: hasExploration ? 0.21 : 0.23,
+        share: hasExploration ? 0.18 : 0.2,
       });
     if (options.explorationReport)
       sections.push({
         label: "RAPPORT EXPLORATION",
         content: options.explorationReport,
-        share: 0.12,
+        share: 0.1,
       });
     if (sprintCtx)
       sections.push({
         label: "SPRINT ACTUEL",
         content: sprintCtx,
-        share: hasExploration ? 0.08 : 0.1,
+        share: hasExploration ? 0.07 : 0.08,
       });
     if (tasksCtx)
       sections.push({
         label: "TACHES RECENTES",
         content: tasksCtx,
-        share: hasExploration ? 0.11 : 0.13,
+        share: hasExploration ? 0.09 : 0.11,
       });
     if (graphCtx)
       sections.push({
         label: "GRAPHE CODE",
         content: graphCtx,
-        share: hasExploration ? 0.08 : 0.1,
+        share: hasExploration ? 0.07 : 0.08,
       });
     if (trustCtx)
       sections.push({
         label: "CONFIANCE AGENTS",
         content: trustCtx,
-        share: hasExploration ? 0.06 : 0.07,
+        share: hasExploration ? 0.05 : 0.06,
       });
     if (metricsCtx)
       sections.push({
         label: "METRIQUES SPRINT",
         content: metricsCtx,
-        share: hasExploration ? 0.07 : 0.09,
+        share: hasExploration ? 0.06 : 0.08,
       });
     if (docCtx)
       sections.push({
         label: "DOCUMENTS PROJET",
         content: docCtx,
-        share: hasExploration ? 0.08 : 0.1,
+        share: hasExploration ? 0.07 : 0.08,
       });
     if (profileCtx)
       sections.push({
         label: "PROFIL UTILISATEUR",
         content: profileCtx,
-        share: hasExploration ? 0.06 : 0.08,
+        share: hasExploration ? 0.05 : 0.07,
       });
     if (similarCtx)
       sections.push({
         label: "TACHES SIMILAIRES",
         content: similarCtx,
-        share: hasExploration ? 0.07 : 0.1,
+        share: hasExploration ? 0.06 : 0.08,
       });
     if (options.conversationContext)
       sections.push({
         label: "CONTEXTE CONVERSATION",
         content: options.conversationContext,
-        share: hasExploration ? 0.06 : 0.08,
+        share: hasExploration ? 0.05 : 0.06,
       });
+
+    // SPEC-memoire-hybride V4/V7: MEMOIRE ROLE content is already injected into memoryCtx
+    // by buildMemoryChains() when agent_role_memory flag is enabled.
+    // The shares above (CONTEXTE MEMOIRE: 0.20) already account for the role memory content.
+    // The rebalanced shares in spec 6.5 ensure the total remains <= 1.0 after adding role memory.
 
     if (sections.length === 0) return "";
 

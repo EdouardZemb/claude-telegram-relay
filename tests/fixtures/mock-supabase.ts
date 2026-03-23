@@ -96,7 +96,7 @@ class MockQueryBuilder {
   private _updateData: Row | null = null;
   private _upsertData: Row | null = null;
   private _upsertConflict: string | null = null;
-  private _mode: "select" | "insert" | "update" | "upsert" = "select";
+  private _mode: "select" | "insert" | "update" | "upsert" | "delete" = "select";
   private _orFilters: string | null = null;
 
   constructor(store: MockStore, table: string) {
@@ -131,6 +131,11 @@ class MockQueryBuilder {
     this._upsertData = data;
     this._upsertConflict = opts?.onConflict ?? null;
     this._mode = "upsert";
+    return this;
+  }
+
+  delete() {
+    this._mode = "delete";
     return this;
   }
 
@@ -272,6 +277,16 @@ class MockQueryBuilder {
           this.store[this.table] = rows;
           return { data: this._single ? row : [row], error: null };
         }
+      }
+      case "delete": {
+        const _before = rows.length;
+        const remaining = rows.filter((r) => !matchFilter(r, this.filters));
+        const deleted = rows.filter((r) => matchFilter(r, this.filters));
+        this.store[this.table] = remaining;
+        if (this._selectCalled) {
+          return { data: this._single ? (deleted[0] ?? null) : deleted, error: null };
+        }
+        return { data: null, error: null };
       }
       default: {
         let filtered = this._applyFilters(rows);

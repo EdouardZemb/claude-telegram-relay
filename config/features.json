@@ -9,5 +9,6 @@
   "spec_phase_lite": false,
   "adversarial_challenge": false,
   "prd_maturation_phases": false,
-  "memory_promotion": false
+  "memory_promotion": false,
+  "agent_role_memory": false
 }
