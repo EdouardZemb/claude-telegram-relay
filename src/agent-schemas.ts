@@ -755,42 +755,39 @@ function findJsonObjects(text: string): string[] {
  * Validate that a parsed object matches the expected schema for a role.
  * Checks for required fields — lenient validation (missing optional fields are OK).
  */
-export function validateAgentOutput(obj: any, role: AgentRole): boolean {
+export function validateAgentOutput(obj: unknown, role: AgentRole): boolean {
   if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
 
   switch (role) {
     case "analyst":
       return (
-        typeof obj.analysis === "string" &&
-        Array.isArray(obj.risks) &&
-        Array.isArray(obj.recommendations)
+        typeof o.analysis === "string" && Array.isArray(o.risks) && Array.isArray(o.recommendations)
       );
     case "pm":
-      return Array.isArray(obj.subtasks) && Array.isArray(obj.priorities);
+      return Array.isArray(o.subtasks) && Array.isArray(o.priorities);
     case "architect":
-      return typeof obj.design === "string" && Array.isArray(obj.files_impacted);
+      return typeof o.design === "string" && Array.isArray(o.files_impacted);
     case "dev":
-      return Array.isArray(obj.files_modified) && typeof obj.summary === "string";
+      return Array.isArray(o.files_modified) && typeof o.summary === "string";
     case "qa":
       return (
-        typeof obj.score === "number" &&
-        Array.isArray(obj.findings) &&
-        typeof obj.summary === "string"
+        typeof o.score === "number" && Array.isArray(o.findings) && typeof o.summary === "string"
       );
     case "sm":
-      return typeof obj.summary === "string" && Array.isArray(obj.next_steps);
+      return typeof o.summary === "string" && Array.isArray(o.next_steps);
     case "explorer":
       return (
-        typeof obj.etat_des_lieux === "string" &&
-        Array.isArray(obj.options) &&
-        Array.isArray(obj.recommandations)
+        typeof o.etat_des_lieux === "string" &&
+        Array.isArray(o.options) &&
+        Array.isArray(o.recommandations)
       );
     case "planner":
       return (
-        typeof obj.feasibility === "string" &&
-        typeof obj.analysis === "string" &&
-        Array.isArray(obj.subtasks) &&
-        Array.isArray(obj.priorities)
+        typeof o.feasibility === "string" &&
+        typeof o.analysis === "string" &&
+        Array.isArray(o.subtasks) &&
+        Array.isArray(o.priorities)
       );
     default:
       return false;
@@ -982,16 +979,17 @@ export function formatStructuredOutput(output: StructuredAgentOutput): string {
  * Validate that an object is a valid ExplorationPhaseOutput.
  * Checks required fields: domain, findings, alternatives, recommendation, confidence.
  */
-export function validateExplorationPhaseOutput(obj: any): obj is ExplorationPhaseOutput {
+export function validateExplorationPhaseOutput(obj: unknown): obj is ExplorationPhaseOutput {
   if (!obj || typeof obj !== "object") return false;
+  const o = obj as Record<string, unknown>;
   return (
-    typeof obj.domain === "string" &&
-    Array.isArray(obj.findings) &&
-    Array.isArray(obj.alternatives) &&
-    typeof obj.recommendation === "string" &&
-    typeof obj.confidence === "number" &&
-    obj.confidence >= 0 &&
-    obj.confidence <= 1
+    typeof o.domain === "string" &&
+    Array.isArray(o.findings) &&
+    Array.isArray(o.alternatives) &&
+    typeof o.recommendation === "string" &&
+    typeof o.confidence === "number" &&
+    o.confidence >= 0 &&
+    o.confidence <= 1
   );
 }
 

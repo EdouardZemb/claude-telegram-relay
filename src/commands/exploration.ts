@@ -153,7 +153,9 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         projectName: currentProject?.slug || "telegram-relay",
       });
 
-      const outputInstructions = buildStructuredOutputInstructions("explorer" as any);
+      const outputInstructions = buildStructuredOutputInstructions(
+        "explorer" as import("../orchestrator.ts").AgentRole,
+      );
 
       const fullPrompt = [
         taskPrompt,
@@ -180,7 +182,7 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         jsonSchema: jsonSchema || undefined,
         model,
         fallbackModel: explorer.fallbackModel,
-        effort: effort as any,
+        effort: effort as "low" | "medium" | "high" | "max",
         mcpRole: "explorer",
       });
 
@@ -188,7 +190,10 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
         throw new Error(result.stderr || "Pas de reponse de l'agent.");
       }
 
-      const parsed = parseAgentOutput(result.stdout, "explorer" as any);
+      const parsed = parseAgentOutput(
+        result.stdout,
+        "explorer" as import("../orchestrator.ts").AgentRole,
+      );
       if (parsed) {
         return `EXPLORATION: ${query}\n\n${formatStructuredOutput(parsed)}`;
       }
@@ -214,11 +219,9 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
       try {
         const resultMsg = await exploreFn();
         await bctx.sendResponse(ctx, resultMsg);
-      } catch (error: any) {
-        await ctx.reply(
-          `Exploration echouee:\n${(error.message || "").substring(0, 2000)}`,
-          bctx.threadOpts(ctx),
-        );
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        await ctx.reply(`Exploration echouee:\n${msg.substring(0, 2000)}`, bctx.threadOpts(ctx));
       }
     }
   });

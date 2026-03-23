@@ -93,7 +93,7 @@ export async function checkReworkRate(
 
   if (!logs || logs.length < 5) return alerts; // Not enough data
 
-  const reworkCount = logs.filter((l: any) => l.had_rework).length;
+  const reworkCount = logs.filter((l: { had_rework: boolean | null }) => l.had_rework).length;
   const reworkRate = (reworkCount / logs.length) * 100;
 
   if (reworkRate > config.reworkThresholdPercent) {
@@ -130,12 +130,12 @@ export async function checkSprintPace(
   if (!tasks || tasks.length === 0) return alerts;
 
   const total = tasks.length;
-  const done = tasks.filter((t: any) => t.status === "done").length;
+  const done = tasks.filter((t: { status: string }) => t.status === "done").length;
   const completionRate = done / total;
 
   // Estimate sprint progress based on earliest task creation
-  const firstTask = tasks.reduce((earliest: any, t: any) =>
-    new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest,
+  const firstTask = tasks.reduce((earliest, t) =>
+    new Date(String(t.created_at)) < new Date(String(earliest.created_at)) ? t : earliest,
   );
 
   const sprintAgeMs = Date.now() - new Date(firstTask.created_at).getTime();
@@ -185,8 +185,8 @@ export async function checkReviewScoreDrop(
   if (!reviews || reviews.length < windowSize) return alerts;
 
   const scores = reviews
-    .map((r: any) => r.metadata?.score)
-    .filter((s: any) => typeof s === "number");
+    .map((r: { metadata?: { score?: unknown } | null }) => r.metadata?.score)
+    .filter((s): s is number => typeof s === "number");
 
   if (scores.length < windowSize) return alerts;
 

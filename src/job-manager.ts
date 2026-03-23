@@ -206,9 +206,9 @@ export async function launch(
           ? result.substring(0, maxLen)
           : String(result).substring(0, maxLen);
       job.completedAt = new Date().toISOString();
-    } catch (error: any) {
+    } catch (error: unknown) {
       job.status = "failed";
-      job.error = (error?.message || String(error)).substring(0, 500);
+      job.error = (error instanceof Error ? error.message : String(error)).substring(0, 500);
       job.completedAt = new Date().toISOString();
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);

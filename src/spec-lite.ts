@@ -130,7 +130,7 @@ export function parseProtoSpec(output: string, task: Task, startTime: number): P
 /**
  * Normalize a parsed object into a valid ProtoSpec.
  */
-function normalizeProtoSpec(obj: any, startTime: number): ProtoSpec {
+function normalizeProtoSpec(obj: Record<string, unknown>, startTime: number): ProtoSpec {
   const objective =
     typeof obj.objective === "string" && obj.objective.length > 0
       ? obj.objective
@@ -139,17 +139,28 @@ function normalizeProtoSpec(obj: any, startTime: number): ProtoSpec {
   let vCriteria: ProtoSpec["v_criteria"] = [];
   if (Array.isArray(obj.v_criteria)) {
     vCriteria = obj.v_criteria
-      .filter((c: any) => c && typeof c.id === "string" && typeof c.description === "string")
-      .map((c: any) => ({
-        id: c.id,
-        description: c.description,
-        level: ["unit", "integration", "E2E"].includes(c.level) ? c.level : "unit",
-      }))
+      .filter(
+        (c: unknown) =>
+          c !== null &&
+          typeof c === "object" &&
+          typeof (c as Record<string, unknown>).id === "string" &&
+          typeof (c as Record<string, unknown>).description === "string",
+      )
+      .map((c: unknown) => {
+        const item = c as Record<string, unknown>;
+        return {
+          id: item.id as string,
+          description: item.description as string,
+          level: ["unit", "integration", "E2E"].includes(String(item.level))
+            ? (item.level as "unit" | "integration" | "E2E")
+            : "unit",
+        };
+      })
       .slice(0, 5); // Max 5
   }
 
   const impactedFiles: string[] = Array.isArray(obj.impacted_files)
-    ? obj.impacted_files.filter((f: any) => typeof f === "string")
+    ? obj.impacted_files.filter((f: unknown) => typeof f === "string")
     : [];
 
   return {

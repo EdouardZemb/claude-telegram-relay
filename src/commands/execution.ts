@@ -7,6 +7,7 @@
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import { executeTask } from "../agent.ts";
+import type { AdversarialResult, ImpactAnalysisResult } from "../agent-schemas.ts";
 import { formatPipelineResult, runAutoPipeline } from "../auto-pipeline.ts";
 import type { BotContext } from "../bot-context.ts";
 import { buildConversationContext, getSession, hasActiveSession } from "../conversation-session.ts";
@@ -269,9 +270,10 @@ export default function execution(bctx: BotContext): Composer<Context> {
         });
         clearInterval(heartbeat);
         await bctx.sendResponse(ctx, resultMsg);
-      } catch (error: any) {
+      } catch (error: unknown) {
         clearInterval(heartbeat);
-        await bctx.sendResponse(ctx, error.message || "Erreur inconnue");
+        const msg = error instanceof Error ? error.message : String(error);
+        await bctx.sendResponse(ctx, msg || "Erreur inconnue");
       }
     }
   });
@@ -409,8 +411,8 @@ export default function execution(bctx: BotContext): Composer<Context> {
 
       // F-DA-1: Build adversarial pause callback with inline buttons
       const onAdversarialPause = async (
-        adversarialResult: any,
-        impactResult: any,
+        adversarialResult: AdversarialResult,
+        impactResult: ImpactAnalysisResult | null,
       ): Promise<boolean> => {
         return new Promise<boolean>((resolve) => {
           const sessionKey = `challenge_${task.id.substring(0, 8)}_${Date.now()}`;
@@ -429,7 +431,9 @@ export default function execution(bctx: BotContext): Composer<Context> {
               ...bctx.threadOpts(ctx),
               reply_markup: keyboard,
             })
-            .catch((err: any) => log.error("challenge pause reply error", { error: String(err) }));
+            .catch((err: unknown) =>
+              log.error("challenge pause reply error", { error: String(err) }),
+            );
 
           // Store the resolve callback for the callback handler
           challengeResolvers.set(sessionKey, resolve);

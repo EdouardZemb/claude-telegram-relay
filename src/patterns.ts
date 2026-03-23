@@ -11,7 +11,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { loadWorkflowConfig } from "./workflow";
+import { loadWorkflowConfig, type SprintMetrics } from "./workflow";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -147,16 +147,16 @@ export async function analyzePatterns(
 
   // ── Pattern 5: Trend analysis ──────────────────────────────
   if (metrics.length >= minSprints) {
-    const completionRates = metrics
-      .filter((m: any) => m.tasks_planned > 0)
-      .map((m: any) => ({
+    const completionRates = (metrics as SprintMetrics[])
+      .filter((m) => m.tasks_planned > 0)
+      .map((m) => ({
         sprint: m.sprint_id,
         rate: m.tasks_completed / m.tasks_planned,
       }));
 
     if (completionRates.length >= 2) {
       const recent = completionRates.slice(-3);
-      const trend = computeTrend(recent.map((r: any) => r.rate));
+      const trend = computeTrend(recent.map((r) => r.rate));
 
       if (trend > 0.05) {
         patterns.push({
@@ -189,7 +189,14 @@ export async function analyzePatterns(
 
 // ── Suggestion Generator ─────────────────────────────────────
 
-function generateSuggestions(patterns: DetectedPattern[], retros: any[]): WorkflowSuggestion[] {
+interface RetroActionRow {
+  actions_accepted?: Array<{ action: string; priority: string }> | null;
+}
+
+function generateSuggestions(
+  patterns: DetectedPattern[],
+  retros: RetroActionRow[],
+): WorkflowSuggestion[] {
   const suggestions: WorkflowSuggestion[] = [];
   const config = loadWorkflowConfig();
 
@@ -262,7 +269,7 @@ function generateSuggestions(patterns: DetectedPattern[], retros: any[]): Workfl
 
   // Deduplicate suggestions that were already proposed in past retros
   const pastActions = new Set(
-    retros.flatMap((r: any) => (r.actions_accepted ?? []).map((a: any) => a.action)),
+    retros.flatMap((r) => (r.actions_accepted ?? []).map((a) => a.action)),
   );
 
   return suggestions.filter((s) => !pastActions.has(s.action));
@@ -270,7 +277,16 @@ function generateSuggestions(patterns: DetectedPattern[], retros: any[]): Workfl
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function computeStepDurations(logs: any[]): Record<string, number[]> {
+interface WorkflowLogRecord {
+  duration_seconds?: number | null;
+  step_from: string;
+  step_to: string;
+  checkpoint_result?: string | null;
+  sprint_id?: string | null;
+  had_rework?: boolean | null;
+}
+
+function computeStepDurations(logs: WorkflowLogRecord[]): Record<string, number[]> {
   const durations: Record<string, number[]> = {};
   for (const log of logs) {
     if (log.duration_seconds && log.step_from !== log.step_to) {
@@ -282,7 +298,7 @@ function computeStepDurations(logs: any[]): Record<string, number[]> {
 }
 
 function computeCheckpointStats(
-  logs: any[],
+  logs: WorkflowLogRecord[],
 ): Record<
   string,
   { total: number; pass: number; fail: number; corrected: number; skipped: number }
@@ -298,13 +314,15 @@ function computeCheckpointStats(
     stats[step].total++;
     const result = log.checkpoint_result as string;
     if (result in stats[step]) {
-      (stats[step] as any)[result]++;
+      (stats[step] as Record<string, number>)[result]++;
     }
   }
   return stats;
 }
 
-function computeSprintRework(logs: any[]): Record<string, { total: number; reworkCount: number }> {
+function computeSprintRework(
+  logs: WorkflowLogRecord[],
+): Record<string, { total: number; reworkCount: number }> {
   const sprints: Record<string, { total: number; reworkCount: number }> = {};
   for (const log of logs) {
     if (!log.sprint_id) continue;

@@ -381,12 +381,13 @@ describe("[V8] bot-context.ts derives BOT_TOKEN from config, not process.env dir
 // V9 — biome.json has noExplicitAny: "warn" (not "off")
 // ============================================================
 
-// V-critere: V9
-describe("[V9] biome.json has noExplicitAny: 'warn'", () => {
-  test("linter.rules.suspicious.noExplicitAny is 'warn'", () => {
+// V-critere: V9 (updated: vague-2 sets noExplicitAny to "error")
+describe("[V9] biome.json has noExplicitAny configured", () => {
+  test("linter.rules.suspicious.noExplicitAny is 'warn' or 'error'", () => {
     const content = readFileSync("biome.json", "utf-8");
     const config = JSON.parse(content);
-    expect(config.linter.rules.suspicious.noExplicitAny).toBe("warn");
+    const value = config.linter.rules.suspicious.noExplicitAny;
+    expect(["warn", "error"]).toContain(value);
   });
 
   test("linter.rules.suspicious.noImplicitAnyLet is 'warn'", () => {

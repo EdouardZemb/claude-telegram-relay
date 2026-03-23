@@ -1760,8 +1760,8 @@ export async function memoryHealthStats(
       linksCount: linksResult.data?.length || 0,
       archiveCount: archiveResult.data?.length || 0,
       topAccessed: (topAccessedResult.data || [])
-        .filter((r: any) => r.access_count > 0)
-        .map((r: any) => ({
+        .filter((r: { access_count: number; content: string }) => r.access_count > 0)
+        .map((r: { access_count: number; content: string }) => ({
           content: r.content,
           accessCount: r.access_count,
         })),

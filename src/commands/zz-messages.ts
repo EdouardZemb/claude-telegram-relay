@@ -28,7 +28,7 @@ import {
   formatSessionForIntent,
   getSession,
 } from "../conversation-session.ts";
-import type { DocumentCreateInput } from "../documents.ts";
+import type { DocumentCreateInput, DocumentSearchResult } from "../documents.ts";
 import { checkDuplicate, computeFileHash, createDocument, searchDocuments } from "../documents.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
@@ -40,6 +40,7 @@ import {
   getRecentMessages,
   getRelevantContext,
   processMemoryIntents,
+  type ThoughtClassification,
 } from "../memory.ts";
 import { formatPRDDetail, getPRD } from "../prd.ts";
 import {
@@ -364,9 +365,9 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       Promise<string>,
       Promise<string>,
       Promise<string>,
-      Promise<any>,
-      Promise<any>,
-      Promise<any[]>,
+      Promise<string>,
+      Promise<ThoughtClassification | null>,
+      Promise<DocumentSearchResult[]>,
     ] = [
       getRelevantContext(bctx.supabase, input),
       getMemoryContext(bctx.supabase),

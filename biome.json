@@ -20,7 +20,7 @@
     "rules": {
       "recommended": true,
       "suspicious": {
-        "noExplicitAny": "warn",
+        "noExplicitAny": "error",
         "noAssignInExpressions": "off",
         "noImplicitAnyLet": "warn",
         "noThenProperty": "off",

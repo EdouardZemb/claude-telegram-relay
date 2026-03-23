@@ -158,7 +158,7 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
 export function parseRouterResponse(output: string): RouterDecision | null {
   // Try direct parse
   try {
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(output) as Record<string, unknown>;
     return normalizeDecision(parsed);
   } catch {
     // Try extracting JSON from output
@@ -167,7 +167,7 @@ export function parseRouterResponse(output: string): RouterDecision | null {
   const jsonMatch = output.match(/\{[\s\S]*\}/);
   if (jsonMatch) {
     try {
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
       return normalizeDecision(parsed);
     } catch {
       // Fall through
@@ -177,15 +177,20 @@ export function parseRouterResponse(output: string): RouterDecision | null {
   return null;
 }
 
-function normalizeDecision(obj: any): RouterDecision | null {
+function normalizeDecision(obj: Record<string, unknown>): RouterDecision | null {
   const validPipelines = ["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"];
-  const pipeline = validPipelines.includes(obj.pipeline) ? obj.pipeline : null;
+  const pipelineVal = typeof obj.pipeline === "string" ? obj.pipeline : null;
+  const pipeline =
+    pipelineVal && validPipelines.includes(pipelineVal)
+      ? (pipelineVal as RouterDecision["pipeline"])
+      : null;
   if (!pipeline) return null;
 
   // EC-005: Validate model names, fallback unknown models to Sonnet
   const validModels = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
   const models: Partial<Record<AgentRole, string>> = {};
-  if (obj.models && typeof obj.models === "object") {
+  if (obj.models && typeof obj.models === "object" && !Array.isArray(obj.models)) {
+    const modelsObj = obj.models as Record<string, unknown>;
     const validRoles: AgentRole[] = [
       "analyst",
       "pm",
@@ -197,10 +202,9 @@ function normalizeDecision(obj: any): RouterDecision | null {
       "explorer",
     ];
     for (const role of validRoles) {
-      if (obj.models[role]) {
-        models[role] = validModels.includes(obj.models[role])
-          ? obj.models[role]
-          : "claude-sonnet-4-6"; // EC-005: fallback
+      const modelVal = modelsObj[role];
+      if (typeof modelVal === "string" && modelVal) {
+        models[role] = validModels.includes(modelVal) ? modelVal : "claude-sonnet-4-6"; // EC-005: fallback
       }
     }
   }

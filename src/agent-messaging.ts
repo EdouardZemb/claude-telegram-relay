@@ -75,7 +75,7 @@ export async function sendAgentMessage(
     supabase,
     sessionId,
     "messages" as SectionName,
-    section,
+    section as unknown as Record<string, unknown>,
     message.from,
     expectedVersion,
   );
@@ -152,7 +152,7 @@ export async function resolveQuestion(
     supabase,
     sessionId,
     "messages" as SectionName,
-    section,
+    section as unknown as Record<string, unknown>,
     responseMessage.from,
     expectedVersion,
   );

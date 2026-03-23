@@ -184,8 +184,11 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
       try {
         const resultMsg = await planFn();
         await bctx.sendResponse(ctx, resultMsg);
-      } catch (error: any) {
-        await ctx.reply(error.message || "Erreur lors de la decomposition.", bctx.threadOpts(ctx));
+      } catch (error: unknown) {
+        await ctx.reply(
+          error instanceof Error ? error.message : "Erreur lors de la decomposition.",
+          bctx.threadOpts(ctx),
+        );
       }
     }
   });
@@ -344,9 +347,9 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         await ctx.reply(
-          error.message || "Erreur lors de la generation du PRD.",
+          error instanceof Error ? error.message : "Erreur lors de la generation du PRD.",
           bctx.threadOpts(ctx),
         );
       }
@@ -449,8 +452,11 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
               session.activePrdId = prd.id;
               session.prdWorkflowStep = "generation";
             }
-          } catch (error: any) {
-            await ctx.reply(error.message || "Erreur lors de la generation.", bctx.threadOpts(ctx));
+          } catch (error: unknown) {
+            await ctx.reply(
+              error instanceof Error ? error.message : "Erreur lors de la generation.",
+              bctx.threadOpts(ctx),
+            );
           }
         }
         clearPendingDescription(ck);
@@ -576,7 +582,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             return `BATCH_COMPLETE:${ok}/${tasks.length}:failed=${failedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
           };
           const taskList = tasks
-            .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+            .map(
+              (t: { title: string; id: string }, i: number) =>
+                `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`,
+            )
             .join("\n");
           const jobId = await launchJob("autopipeline-batch", capturedChatId, launchFn, {
             messageThreadId: capturedThreadId,
@@ -671,7 +680,10 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             return `BATCH_COMPLETE:${ok}/${tasks.length}:failed=${failedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
           };
           const taskList = tasks
-            .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+            .map(
+              (t: { title: string; id: string }, i: number) =>
+                `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`,
+            )
             .join("\n");
           const jobId = await launchJob("autopipeline-batch", capturedChatId, launchFn, {
             messageThreadId: capturedThreadId,

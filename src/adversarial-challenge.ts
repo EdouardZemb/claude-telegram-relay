@@ -164,14 +164,15 @@ export function parseAdversarialResult(output: string, startTime: number): Adver
 /**
  * Normalize findings array: validate fields, cap at 10.
  */
-function normalizeFindings(raw: any[]): AdversarialResult["findings"] {
+function normalizeFindings(raw: unknown[]): AdversarialResult["findings"] {
   return raw
-    .filter((f: any) => f && typeof f === "object")
-    .map((f: any, i: number) => ({
+    .filter((f): f is Record<string, unknown> => f !== null && typeof f === "object")
+    .map((f: Record<string, unknown>, i: number) => ({
       id: typeof f.id === "string" ? f.id : `F-DA-${i + 1}`,
-      severity: ["BLOQUANT", "MAJEUR", "MINEUR"].includes(f.severity)
-        ? (f.severity as "BLOQUANT" | "MAJEUR" | "MINEUR")
-        : "MINEUR",
+      severity:
+        typeof f.severity === "string" && ["BLOQUANT", "MAJEUR", "MINEUR"].includes(f.severity)
+          ? (f.severity as "BLOQUANT" | "MAJEUR" | "MINEUR")
+          : "MINEUR",
       title: typeof f.title === "string" ? f.title : "Finding sans titre",
       description: typeof f.description === "string" ? f.description : "",
       source: typeof f.source === "string" ? f.source : "",

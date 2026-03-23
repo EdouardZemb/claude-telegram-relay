@@ -228,9 +228,12 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
       try {
         const resultMsg = await rollbackFn();
         await ctx.reply(resultMsg, bctx.threadOpts(ctx));
-      } catch (error: any) {
+      } catch (error: unknown) {
         log.error("Rollback error", { error: String(error) });
-        await ctx.reply(error.message || "Erreur lors du rollback.", bctx.threadOpts(ctx));
+        await ctx.reply(
+          error instanceof Error ? error.message : "Erreur lors du rollback.",
+          bctx.threadOpts(ctx),
+        );
       }
     }
   });

@@ -68,16 +68,27 @@ export async function loadFeedbackRules(supabase: SupabaseClient): Promise<Feedb
     return feedbackRules; // return cached
   }
 
-  feedbackRules = (data || []).map((row: any) => ({
-    id: row.id,
-    agentId: row.agent_id,
-    pattern: row.pattern,
-    instruction: row.instruction,
-    occurrences: row.occurrences,
-    sprints: row.sprints || [],
-    active: row.active,
-    createdAt: row.created_at,
-  }));
+  feedbackRules = (data || []).map(
+    (row: {
+      id: string;
+      agent_id: string;
+      pattern: string;
+      instruction: string;
+      occurrences: number;
+      sprints?: string[];
+      active: boolean;
+      created_at: string;
+    }) => ({
+      id: row.id,
+      agentId: row.agent_id as AgentRole,
+      pattern: row.pattern,
+      instruction: row.instruction,
+      occurrences: row.occurrences,
+      sprints: row.sprints || [],
+      active: row.active,
+      createdAt: row.created_at,
+    }),
+  );
 
   return feedbackRules;
 }

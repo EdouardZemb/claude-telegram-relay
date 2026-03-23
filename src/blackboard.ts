@@ -36,13 +36,13 @@ export interface WorkingMemory {
 }
 
 export interface BlackboardSections {
-  spec: any | null;
-  plan: any | null;
-  tasks: any | null;
-  implementation: any | null;
-  verification: any | null;
+  spec: Record<string, unknown> | null;
+  plan: Record<string, unknown> | null;
+  tasks: Record<string, unknown> | null;
+  implementation: Record<string, unknown> | null;
+  verification: Record<string, unknown> | null;
   working_memory: WorkingMemory | null;
-  messages: any | null;
+  messages: Record<string, unknown> | null;
 }
 
 export interface BlackboardRow {
@@ -143,7 +143,7 @@ export async function readSection(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName,
-): Promise<any | null> {
+): Promise<Record<string, unknown> | WorkingMemory | null> {
   const { data, error } = await supabase
     .from("blackboard")
     .select("sections")
@@ -171,7 +171,7 @@ export async function writeSection(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName,
-  data: any,
+  data: Record<string, unknown>,
   role: string,
   expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
@@ -186,8 +186,8 @@ export async function writeSection(
   }
 
   // Handle large data (EC-002)
-  let sectionData = data;
-  let overflow: any = null;
+  let sectionData: Record<string, unknown> = data;
+  let overflow: Record<string, unknown> | null = null;
   const serialized = JSON.stringify(data);
   if (serialized.length > MAX_SECTION_SIZE) {
     log.warn(
@@ -198,13 +198,11 @@ export async function writeSection(
     sectionData = {
       _truncated: true,
       _original_size: serialized.length,
-      ...(typeof data === "object" && data !== null
-        ? Object.fromEntries(
-            Object.entries(data)
-              .filter(([_, v]) => typeof v !== "string" || (v as string).length < 2000)
-              .slice(0, 20),
-          )
-        : {}),
+      ...Object.fromEntries(
+        Object.entries(data)
+          .filter(([_, v]) => typeof v !== "string" || (v as string).length < 2000)
+          .slice(0, 20),
+      ),
     };
   }
 
@@ -240,7 +238,12 @@ export async function writeSection(
   }
 
   const currentSections = (current.sections || {}) as BlackboardSections;
-  const currentHistory = (current.history || []) as any[];
+  const currentHistory = (current.history || []) as Array<{
+    version: number;
+    section: SectionName;
+    timestamp: string;
+    role: string;
+  }>;
 
   // Update the section
   const updatedSections = {
@@ -251,7 +254,7 @@ export async function writeSection(
   // Add overflow if needed
   if (overflow) {
     updatedSections.verification = {
-      ...((updatedSections.verification as any) || {}),
+      ...(updatedSections.verification || {}),
       [`${section}_overflow`]: overflow,
     };
   }
@@ -519,7 +522,7 @@ export class InMemoryBlackboard {
     return row;
   }
 
-  read(sessionId: string, section: SectionName): any | null {
+  read(sessionId: string, section: SectionName): Record<string, unknown> | WorkingMemory | null {
     const row = this.sessions.get(sessionId);
     if (!row) return null;
     return row.sections[section] ?? null;
@@ -528,7 +531,7 @@ export class InMemoryBlackboard {
   write(
     sessionId: string,
     section: SectionName,
-    data: any,
+    data: Record<string, unknown>,
     role: string,
     expectedVersion: number,
   ): { success: boolean; newVersion: number; error?: string } {
@@ -548,7 +551,7 @@ export class InMemoryBlackboard {
       return { success: false, newVersion: row.version, error: "Version conflict" };
     }
 
-    row.sections[section] = data;
+    (row.sections as unknown as Record<string, unknown>)[section] = data;
     row.version = expectedVersion + 1;
     row.updated_at = new Date().toISOString();
     row.history.push({
@@ -575,7 +578,7 @@ export async function writeSectionWithRetry(
   supabase: SupabaseClient,
   sessionId: string,
   section: SectionName,
-  data: any,
+  data: Record<string, unknown>,
   role: string,
   expectedVersion: number,
   maxRetries: number = 3,
@@ -608,22 +611,35 @@ export async function writeSectionWithRetry(
 export async function mergeImplementationSection(
   supabase: SupabaseClient,
   sessionId: string,
-  agentResults: Array<{ structured?: any; output?: string }>,
+  agentResults: Array<{ structured?: Record<string, unknown>; output?: string }>,
   expectedVersion: number,
 ): Promise<{ success: boolean; newVersion: number; error?: string }> {
-  const existing = (await readSection(supabase, sessionId, "implementation")) || {};
+  const existingRaw = (await readSection(supabase, sessionId, "implementation")) || {};
+  const existing = existingRaw as Record<string, unknown>;
 
   const merged = {
-    files_modified: [...(existing.files_modified || [])],
-    tests_added: [...(existing.tests_added || [])],
-    summaries: [...(existing.summaries || [])],
+    files_modified: [...(Array.isArray(existing.files_modified) ? existing.files_modified : [])],
+    tests_added: [...(Array.isArray(existing.tests_added) ? existing.tests_added : [])],
+    summaries: [...(Array.isArray(existing.summaries) ? existing.summaries : [])],
   };
 
   for (const result of agentResults) {
     const data = result.structured || {};
-    merged.files_modified.push(...(data.files_modified || data.files || []));
-    merged.tests_added.push(...(data.tests_added || data.tests || []));
-    merged.summaries.push(data.summary || (result.output || "").substring(0, 1000));
+    const filesModified = Array.isArray(data.files_modified)
+      ? data.files_modified
+      : Array.isArray(data.files)
+        ? data.files
+        : [];
+    const testsAdded = Array.isArray(data.tests_added)
+      ? data.tests_added
+      : Array.isArray(data.tests)
+        ? data.tests
+        : [];
+    const summary =
+      typeof data.summary === "string" ? data.summary : (result.output || "").substring(0, 1000);
+    merged.files_modified.push(...filesModified);
+    merged.tests_added.push(...testsAdded);
+    merged.summaries.push(summary);
   }
 
   return writeSectionWithRetry(

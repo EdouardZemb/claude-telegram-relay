@@ -251,7 +251,7 @@ async function _fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
         "Faits cles:\n" +
           factsResult.data
             .slice(0, 10)
-            .map((f: any) => `- ${f.content}`)
+            .map((f: { content: string }) => `- ${f.content}`)
             .join("\n"),
       );
     }
@@ -261,7 +261,7 @@ async function _fetchMemoryContext(supabase: SupabaseClient): Promise<string> {
         "Objectifs actifs:\n" +
           goalsResult.data
             .slice(0, 5)
-            .map((g: any) => {
+            .map((g: { content: string; deadline?: string | null }) => {
               const deadline = g.deadline
                 ? ` (echeance: ${new Date(g.deadline).toLocaleDateString("fr-FR")})`
                 : "";
@@ -328,7 +328,7 @@ async function fetchRecentTasks(supabase: SupabaseClient, projectId?: string): P
     if (error || !data?.length) return "";
 
     return data
-      .map((t: any) => {
+      .map((t: { status: string; priority: number; title: string }) => {
         const icon = t.status === "done" ? "[x]" : t.status === "in_progress" ? "[>]" : "[ ]";
         return `${icon} P${t.priority} ${t.title}`;
       })

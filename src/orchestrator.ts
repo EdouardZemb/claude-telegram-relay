@@ -219,7 +219,7 @@ export async function runAgentStep(
     projectName: task.project,
     sprintId: task.sprint || undefined,
     subtasks:
-      task.subtasks?.map((st: any) => ({
+      task.subtasks?.map((st: { title: string; done?: boolean }) => ({
         title: st.title,
         done: st.done,
       })) || undefined,
@@ -385,7 +385,7 @@ async function persistAgentArtifact(
   agentId: AgentRole,
   output: string,
 ): Promise<void> {
-  const updates: Record<string, any> = {};
+  const updates: Record<string, string> = {};
 
   switch (agentId) {
     case "pm":
@@ -769,8 +769,8 @@ export async function orchestrate(
         supabase && !bbFallback
           ? await readSection(supabase, bbSessionId, "spec")
           : bbFallback?.read(bbSessionId, "spec");
-      if (specSection?.proto_spec) {
-        protoSpec = specSection.proto_spec;
+      if (specSection && "proto_spec" in specSection && specSection.proto_spec) {
+        protoSpec = specSection.proto_spec as ProtoSpec;
       }
     } catch {
       // No proto_spec on resume — proceed without
@@ -1108,7 +1108,9 @@ export async function orchestrate(
         };
         const section = sectionMap[agentId];
         if (section) {
-          const sectionData = result!.structured || { raw: result!.output.substring(0, 30000) };
+          const sectionData = (result!.structured || {
+            raw: result!.output.substring(0, 30000),
+          }) as Record<string, unknown>;
           if (supabase && !bbFallback) {
             const res = await writeSection(
               supabase,
@@ -1166,9 +1168,9 @@ export async function orchestrate(
                   options.cascade,
                 );
                 if (reworkResult.success) {
-                  const newData = reworkResult.structured || {
+                  const newData = (reworkResult.structured || {
                     raw: reworkResult.output.substring(0, 30000),
-                  };
+                  }) as Record<string, unknown>;
                   // Update blackboard with reworked output
                   if (supabase && !bbFallback) {
                     const res = await writeSection(
@@ -1196,7 +1198,9 @@ export async function orchestrate(
                   };
                   return newData;
                 }
-                return reworkResult.structured || { raw: reworkResult.output.substring(0, 30000) };
+                return (reworkResult.structured || {
+                  raw: reworkResult.output.substring(0, 30000),
+                }) as Record<string, unknown>;
               },
               {
                 maxIterations: 2,
@@ -1389,7 +1393,9 @@ export async function orchestrate(
             await options.onProgress("P3: Conformance check (V-criteres vs implementation)...");
           }
 
-          const devOutput = result!.structured || { raw: result!.output.substring(0, 30000) };
+          const devOutput = (result!.structured || {
+            raw: result!.output.substring(0, 30000),
+          }) as Record<string, unknown>;
           const conformanceReport = await checkConformance(
             protoSpec,
             devOutput,
@@ -1469,7 +1475,7 @@ export async function orchestrate(
         const yaml = loadAgentYaml(agentId);
         const yamlContent = yaml ? JSON.stringify(yaml) : "";
         const templateH = sha256(yamlContent);
-        const feedbackRules = getFeedbackRulesForAgent(agentId as any);
+        const feedbackRules = getFeedbackRulesForAgent(agentId as AgentRole);
         const feedbackH = sha256(JSON.stringify(feedbackRules));
         recordPromptVersion(supabase, agentId, templateH, feedbackH).catch((err) =>
           log.error(`recordPromptVersion error: ${err}`),
@@ -1733,14 +1739,17 @@ export async function orchestrate(
         await options.onProgress("Adversarial verification en cours...");
       }
 
-      let spec: any = null;
-      let impl: any = null;
+      let spec: Record<string, unknown> | null = null;
+      let impl: Record<string, unknown> | null = null;
       if (supabase && !bbFallback) {
-        spec = await readSection(supabase, bbSessionId, "spec");
-        impl = await readSection(supabase, bbSessionId, "implementation");
+        spec = (await readSection(supabase, bbSessionId, "spec")) as Record<string, unknown> | null;
+        impl = (await readSection(supabase, bbSessionId, "implementation")) as Record<
+          string,
+          unknown
+        > | null;
       } else if (bbFallback) {
-        spec = bbFallback.read(bbSessionId, "spec");
-        impl = bbFallback.read(bbSessionId, "implementation");
+        spec = bbFallback.read(bbSessionId, "spec") as Record<string, unknown> | null;
+        impl = bbFallback.read(bbSessionId, "implementation") as Record<string, unknown> | null;
       }
 
       driftReport = await verifySpecVsImplementation(spec, impl, pipelineTypeLabel);
@@ -1757,7 +1766,7 @@ export async function orchestrate(
     }
 
     // Traceability report
-    let sections: any = null;
+    let sections: import("./blackboard.ts").BlackboardSections | null = null;
     if (supabase && !bbFallback) {
       const bb = await getFullBlackboard(supabase, bbSessionId);
       if (bb) sections = bb.sections;

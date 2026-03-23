@@ -49,8 +49,8 @@ jobs:
             echo "ERROR: $FAIL_COUNT tests failed"
             exit 1
           fi
-          if [ "$PASS_COUNT" -lt 600 ]; then
-            echo "WARNING: Expected at least 600 tests, got $PASS_COUNT"
+          if [ "$PASS_COUNT" -lt 3441 ]; then
+            echo "WARNING: Expected at least 3441 tests, got $PASS_COUNT"
             exit 1
           fi
 

@@ -22,6 +22,7 @@ import {
 import { shardDocument } from "./document-sharding.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { enqueue } from "./notification-queue.ts";
+import type { AgentRole } from "./orchestrator.ts";
 import { explainPipelineChoice, type PipelineType } from "./pipeline-selection.ts";
 import {
   generatePRD,
@@ -160,7 +161,7 @@ export async function triageDescription(
     RESEARCH_PIPELINE,
     REVIEW_PIPELINE,
   } = await import("./pipeline-selection.ts");
-  const pipelineMap: Record<string, any[]> = {
+  const pipelineMap: Record<string, AgentRole[]> = {
     SOLO: SOLO_PIPELINE,
     LIGHT: LIGHT_PIPELINE,
     DEFAULT: DEFAULT_PIPELINE,
@@ -259,7 +260,7 @@ export async function generateAndSavePRD(
  * Get the current revision count for a PRD.
  */
 export function getRevisionCount(prd: PRD): number {
-  return (prd.metadata as any)?.revision_count ?? 0;
+  return (prd.metadata?.revision_count as number | undefined) ?? 0;
 }
 
 /**

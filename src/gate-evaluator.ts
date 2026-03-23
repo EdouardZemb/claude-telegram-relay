@@ -320,7 +320,9 @@ interface ExplorationCompletenessResult {
  * Checks: >= 2 findings, recommendation present, confidence >= 0.6.
  * Returns a structured result with rubric dimensions.
  */
-export function evaluateExplorationCompleteness(sectionData: any): ExplorationCompletenessResult {
+export function evaluateExplorationCompleteness(
+  sectionData: Record<string, unknown>,
+): ExplorationCompletenessResult {
   const issues: EvaluationIssue[] = [];
   const rubric: RubricDimension[] = [];
 
@@ -345,10 +347,12 @@ export function evaluateExplorationCompleteness(sectionData: any): ExplorationCo
     });
   }
 
-  // Depth: check for sources in findings
-  const findingsWithSources = findings.filter(
-    (f: any) => Array.isArray(f?.sources) && f.sources.length > 0,
-  );
+  // Depth: check for sources in findings (sources must be a non-empty array)
+  const findingsWithSources = findings.filter((f: unknown) => {
+    if (typeof f !== "object" || f === null) return false;
+    const sources = (f as Record<string, unknown>).sources;
+    return Array.isArray(sources) && sources.length > 0;
+  });
   const depthScore =
     findingsWithSources.length >= findings.length * 0.5
       ? 20
@@ -415,7 +419,7 @@ export async function evaluateGate(
   _supabase: SupabaseClient | null,
   _sessionId: string,
   gateName: GateName,
-  sectionData: any,
+  sectionData: Record<string, unknown>,
   /** S34: Working directory for deterministic checks (or S35 options) */
   cwdOrOptions?: string | EvaluateGateOptions,
 ): Promise<GateEvaluation> {
@@ -644,7 +648,7 @@ export function parseEvaluationOutput(output: string, gateName: string): GateEva
   };
 }
 
-function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
+function normalizeEvaluation(obj: Record<string, unknown>, gateName: string): GateEvaluation {
   // S34: Parse rubric dimensions if present
   const rubric = parseRubricFromOutput(obj, gateName as GateName);
 
@@ -658,11 +662,16 @@ function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
 
   const pass = obj.pass !== undefined ? Boolean(obj.pass) : score >= 60;
   const issues = Array.isArray(obj.issues)
-    ? obj.issues.map((i: any) => ({
-        severity: ["critical", "major", "minor"].includes(i.severity) ? i.severity : "minor",
-        description: String(i.description || ""),
-        suggestion: String(i.suggestion || ""),
-      }))
+    ? obj.issues.map((i: unknown) => {
+        const issue = i as Record<string, unknown>;
+        return {
+          severity: (["critical", "major", "minor"].includes(String(issue.severity))
+            ? issue.severity
+            : "minor") as "critical" | "major" | "minor",
+          description: String(issue.description || ""),
+          suggestion: String(issue.suggestion || ""),
+        };
+      })
     : [];
 
   // S34 AC-009: Flag critical weaknesses (dimension below 10)
@@ -685,14 +694,18 @@ function normalizeEvaluation(obj: any, gateName: string): GateEvaluation {
  * Parse rubric dimensions from the LLM evaluation output.
  * S34 FR-002: Extracts 4 dimension scores.
  */
-export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimension[] | undefined {
+export function parseRubricFromOutput(
+  obj: Record<string, unknown>,
+  gateName: GateName,
+): RubricDimension[] | undefined {
   if (!obj.rubric || typeof obj.rubric !== "object") return undefined;
+  const rubricObj = obj.rubric as Record<string, Record<string, unknown>>;
 
   const dimensions = getRubricDimensions(gateName);
   const rubric: RubricDimension[] = [];
 
   for (const dim of dimensions) {
-    const dimData = obj.rubric[dim];
+    const dimData = rubricObj[dim];
     if (!dimData) continue;
 
     const score =
@@ -715,7 +728,7 @@ export function parseRubricFromOutput(obj: any, gateName: GateName): RubricDimen
 export interface EvaluateAndReworkOptions {
   maxIterations?: number;
   /** Override evaluator for testing */
-  customEvaluator?: (data: any) => Promise<GateEvaluation>;
+  customEvaluator?: (data: Record<string, unknown>) => Promise<GateEvaluation>;
   /** S35: Task ID for persistence */
   taskId?: string;
   /** S35: Sprint ID for persistence */
@@ -741,11 +754,11 @@ export async function evaluateAndRework(
   sessionId: string,
   agentRole: string,
   gateName: GateName,
-  sectionData: any,
-  runAgent: (feedback: string) => Promise<any>,
+  sectionData: Record<string, unknown>,
+  runAgent: (feedback: string) => Promise<Record<string, unknown>>,
   maxIterationsOrOpts?: number | EvaluateAndReworkOptions,
   /** Override evaluator for testing (legacy compat) */
-  customEvaluator?: (data: any) => Promise<GateEvaluation>,
+  customEvaluator?: (data: Record<string, unknown>) => Promise<GateEvaluation>,
 ): Promise<EvaluateReworkResult> {
   // S35: Normalize options (backward compatible)
   const opts: EvaluateAndReworkOptions =

@@ -62,6 +62,10 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     await collectSprintMetrics(bctx.supabase, sprintId);
     const metrics = await getSprintMetrics(bctx.supabase, sprintId);
+    if (!metrics) {
+      await ctx.reply("Aucune metrique disponible pour ce sprint.", bctx.threadOpts(ctx));
+      return;
+    }
     await bctx.sendResponse(ctx, formatMetrics(metrics));
   });
 
@@ -115,7 +119,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       `Sprint: ${sprintId}`,
       `Metriques: ${JSON.stringify(retroData.metrics)}`,
       `Stats workflow: ${JSON.stringify(retroData.workflowStats)}`,
-      `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t: any) => ({ title: t.title, status: t.status, priority: t.priority })))}`,
+      `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t) => ({ title: (t as { title?: unknown }).title, status: (t as { status?: unknown }).status, priority: (t as { priority?: unknown }).priority })))}`,
       patternAnalysis.patterns.length > 0
         ? `Patterns detectes automatiquement: ${JSON.stringify(patternAnalysis.patterns.map((p) => p.description))}`
         : "",

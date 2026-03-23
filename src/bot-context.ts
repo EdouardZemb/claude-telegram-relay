@@ -167,7 +167,7 @@ export interface BotContext {
   reloadProfile: () => Promise<void>;
 
   // Idea helper
-  findIdeaByPrefix: (prefix: string) => Promise<any>;
+  findIdeaByPrefix: (prefix: string) => Promise<import("./memory.ts").Idea | null>;
 }
 
 // ============================================================
@@ -416,10 +416,11 @@ const session = await loadSession();
 
 const TOPIC_NAMES: Record<number, string> = {};
 
+type MsgWithThread = { message_thread_id?: number };
 function getThreadId(ctx: Context): number | undefined {
   return (
-    (ctx.message as any)?.message_thread_id ||
-    (ctx.callbackQuery?.message as any)?.message_thread_id
+    (ctx.message as MsgWithThread)?.message_thread_id ||
+    (ctx.callbackQuery?.message as MsgWithThread)?.message_thread_id
   );
 }
 
@@ -431,7 +432,9 @@ function threadOpts(ctx: Context): { message_thread_id?: number } {
 function getTopicName(ctx: Context): string | undefined {
   const threadId = getThreadId(ctx);
   if (!threadId) return undefined;
-  const topicCreated = (ctx.message as any)?.reply_to_message?.forum_topic_created;
+  const topicCreated = (
+    ctx.message as { reply_to_message?: { forum_topic_created?: { name?: string } } } | undefined
+  )?.reply_to_message?.forum_topic_created;
   if (topicCreated?.name) {
     TOPIC_NAMES[threadId] = topicCreated.name;
   }
@@ -487,7 +490,7 @@ async function getDynamicProfile(): Promise<string> {
       parts.push(
         `Types de taches frequents: ${insights.taskPreferences.topTaskTypes
           .slice(0, 3)
-          .map((t: any) => t.type)
+          .map((t: { type: string }) => t.type)
           .join(", ")}`,
       );
     }
@@ -741,7 +744,7 @@ async function sendVoiceResponse(ctx: Context, response: string): Promise<void> 
 // IDEA HELPER
 // ============================================================
 
-async function findIdeaByPrefix(prefix: string): Promise<any> {
+async function findIdeaByPrefix(prefix: string): Promise<import("./memory.ts").Idea | null> {
   if (!supabase) return null;
   const exact = await getIdea(supabase, prefix);
   if (exact) return exact;

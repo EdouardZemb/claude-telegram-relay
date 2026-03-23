@@ -117,7 +117,15 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         .join(", ");
 
       // Recent auto-classified facts
-      const autoFacts = recent.filter((r: any) => r.metadata?.auto_classified).slice(0, 5);
+      interface MemoryRow {
+        content: string;
+        metadata?: { auto_classified?: boolean; thought_type?: string; topics?: string[] } | null;
+        idea_status?: string | null;
+        deadline?: string | null;
+      }
+      const autoFacts = (recent as MemoryRow[])
+        .filter((r) => r.metadata?.auto_classified)
+        .slice(0, 5);
 
       // Fetch memory clusters (S41-03): connected components clustering
       const clusters = await clusterMemories(bctx.supabase!);
@@ -141,14 +149,16 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         topTopics ? `Topics frequents: ${topTopics}` : "",
         "",
         `FACTS RECENTS (10 derniers):`,
-        ...facts.slice(0, 10).map((f: any) => `- ${f.content}`),
+        ...facts.slice(0, 10).map((f: MemoryRow) => `- ${f.content}`),
         "",
         `GOALS ACTIFS:`,
-        ...goals.map((g: any) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`),
+        ...goals.map(
+          (g: MemoryRow) => `- ${g.content}${g.deadline ? ` (deadline: ${g.deadline})` : ""}`,
+        ),
         "",
         clusters.length > 0 ? clusterText : "",
         autoFacts.length > 0 ? `FAITS AUTO-DETECTES RECENTS:` : "",
-        ...autoFacts.map((f: any) => `- [${f.metadata?.thought_type}] ${f.content}`),
+        ...autoFacts.map((f: MemoryRow) => `- [${f.metadata?.thought_type}] ${f.content}`),
         "",
         `IDEES (${allIdeas.length} total: ${
           Object.entries(ideaStatusCounts)
@@ -158,7 +168,7 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
         ...(activeIdeas.length > 0
           ? [
               `IDEES ACTIVES (new + reviewed):`,
-              ...activeIdeas.slice(0, 10).map((idea: any) => {
+              ...activeIdeas.slice(0, 10).map((idea: MemoryRow) => {
                 const status = idea.idea_status || "new";
                 const topics = idea.metadata?.topics?.join(", ") || "";
                 return `- [${status}] ${idea.content}${topics ? ` (${topics})` : ""}`;

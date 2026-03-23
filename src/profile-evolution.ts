@@ -74,14 +74,19 @@ export async function analyzeProfile(supabase: SupabaseClient): Promise<ProfileI
   const allTasks = tasks ?? [];
 
   // Communication style
-  const userMessages = msgs.filter((m: any) => m.role === "user");
+  interface MsgRow {
+    role: string;
+    content: string | null;
+    created_at: string;
+  }
+  const userMessages = (msgs as MsgRow[]).filter((m) => m.role === "user");
   const avgLen =
     userMessages.length > 0
-      ? userMessages.reduce((sum: number, m: any) => sum + (m.content?.length ?? 0), 0) /
+      ? userMessages.reduce((sum: number, m: MsgRow) => sum + (m.content?.length ?? 0), 0) /
         userMessages.length
       : 0;
 
-  const frenchIndicators = userMessages.filter((m: any) =>
+  const frenchIndicators = userMessages.filter((m: MsgRow) =>
     /\b(je|tu|nous|vous|est|sont|les|des|une|sur|dans|pour|avec|pas|que)\b/i.test(m.content ?? ""),
   ).length;
   const language = frenchIndicators > userMessages.length * 0.3 ? "francais" : "english";
@@ -124,10 +129,20 @@ export async function analyzeProfile(supabase: SupabaseClient): Promise<ProfileI
     .slice(0, 5)
     .map(([type, count]) => ({ type, count }));
 
-  const sprints = new Set(allTasks.filter((t: any) => t.sprint).map((t: any) => t.sprint));
+  interface TaskRow {
+    title: string;
+    status: string;
+    priority: number | null;
+    sprint: string | null;
+    tags: string[];
+    created_at: string;
+  }
+  const sprints = new Set((allTasks as TaskRow[]).filter((t) => t.sprint).map((t) => t.sprint));
   const avgTasksPerSprint = sprints.size > 0 ? Math.round(allTasks.length / sprints.size) : 0;
 
-  const priorities = allTasks.map((t: any) => t.priority).filter((p: any) => p != null);
+  const priorities = (allTasks as TaskRow[])
+    .map((t) => t.priority)
+    .filter((p): p is number => p != null);
   const preferredPriority =
     priorities.length > 0
       ? Math.round(priorities.reduce((a: number, b: number) => a + b, 0) / priorities.length)

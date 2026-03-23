@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { estimateComplexity, findAffectedModules, loadGraph } from "./code-graph.ts";
+import type { Task } from "./tasks.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -110,13 +111,13 @@ export async function analyzeBacklog(
 
   // Sprint health
   const total = tasks.length;
-  const done = tasks.filter((t: any) => t.status === "done").length;
-  const inProgress = tasks.filter((t: any) => t.status === "in_progress").length;
-  const backlog = tasks.filter((t: any) => t.status === "backlog").length;
+  const done = tasks.filter((t: Task) => t.status === "done").length;
+  const inProgress = tasks.filter((t: Task) => t.status === "in_progress").length;
+  const backlog = tasks.filter((t: Task) => t.status === "backlog").length;
   const completionRate = total > 0 ? Math.round((done / total) * 100) : 0;
 
   // Estimate days left based on velocity
-  const firstTask = tasks.reduce((earliest: any, t: any) =>
+  const firstTask = tasks.reduce((earliest: Task, t: Task) =>
     new Date(t.created_at) < new Date(earliest.created_at) ? t : earliest,
   );
   const sprintAgeDays =
@@ -147,7 +148,7 @@ export async function analyzeBacklog(
 
 // ── Pattern Detectors ────────────────────────────────────────
 
-function detectStuckPatterns(tasks: any[]): PlannerRecommendation[] {
+function detectStuckPatterns(tasks: Task[]): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
   const now = Date.now();
 
@@ -171,9 +172,9 @@ function detectStuckPatterns(tasks: any[]): PlannerRecommendation[] {
   return recs;
 }
 
-function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
+function detectGroupableTasks(tasks: Task[]): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
-  const backlogTasks = tasks.filter((t: any) => t.status === "backlog");
+  const backlogTasks = tasks.filter((t: Task) => t.status === "backlog");
 
   // Group by common words in title
   const wordGroups: Record<string, string[]> = {};
@@ -193,7 +194,7 @@ function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
       const uniqueIds = [...new Set(ids)];
       if (uniqueIds.length >= 2) {
         const titles = uniqueIds.map(
-          (id) => backlogTasks.find((t: any) => t.id === id)?.title || id.substring(0, 8),
+          (id) => backlogTasks.find((t: Task) => t.id === id)?.title || id.substring(0, 8),
         );
         recs.push({
           type: "group",
@@ -210,10 +211,10 @@ function detectGroupableTasks(tasks: any[]): PlannerRecommendation[] {
   return deduplicateGroups(recs);
 }
 
-function analyzePacing(tasks: any[], _sprintId?: string): PlannerRecommendation[] {
+function analyzePacing(tasks: Task[], _sprintId?: string): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
   const total = tasks.length;
-  const done = tasks.filter((t: any) => t.status === "done").length;
+  const done = tasks.filter((t: Task) => t.status === "done").length;
   const remaining = total - done;
 
   if (remaining > 8) {
@@ -222,20 +223,20 @@ function analyzePacing(tasks: any[], _sprintId?: string): PlannerRecommendation[
       title: "Backlog charge",
       description: `${remaining} taches restantes. Envisager de reporter les P3 au prochain sprint.`,
       taskIds: tasks
-        .filter((t: any) => t.status === "backlog" && t.priority >= 3)
-        .map((t: any) => t.id),
+        .filter((t: Task) => t.status === "backlog" && t.priority >= 3)
+        .map((t: Task) => t.id),
       confidence: remaining > 12 ? 0.8 : 0.5,
     });
   }
 
   // Check for too many in_progress at once
-  const inProgress = tasks.filter((t: any) => t.status === "in_progress");
+  const inProgress = tasks.filter((t: Task) => t.status === "in_progress");
   if (inProgress.length > 2) {
     recs.push({
       type: "pace",
       title: "Trop de taches en parallele",
       description: `${inProgress.length} taches en cours simultanement. Recommande: finir les taches en cours avant d'en commencer de nouvelles.`,
-      taskIds: inProgress.map((t: any) => t.id),
+      taskIds: inProgress.map((t: Task) => t.id),
       confidence: 0.7,
     });
   }
@@ -243,19 +244,21 @@ function analyzePacing(tasks: any[], _sprintId?: string): PlannerRecommendation[
   return recs;
 }
 
-function detectPriorityInversions(tasks: any[]): PlannerRecommendation[] {
+function detectPriorityInversions(tasks: Task[]): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
 
   // Find P2/P3 tasks started before P1 tasks
-  const p1Backlog = tasks.filter((t: any) => t.priority === 1 && t.status === "backlog");
-  const lowPrioInProgress = tasks.filter((t: any) => t.priority >= 2 && t.status === "in_progress");
+  const p1Backlog = tasks.filter((t: Task) => t.priority === 1 && t.status === "backlog");
+  const lowPrioInProgress = tasks.filter(
+    (t: Task) => t.priority >= 2 && t.status === "in_progress",
+  );
 
   if (p1Backlog.length > 0 && lowPrioInProgress.length > 0) {
     recs.push({
       type: "reorder",
       title: "Inversion de priorite",
       description: `${p1Backlog.length} tache(s) P1 en attente alors que ${lowPrioInProgress.length} tache(s) P2+ sont en cours. Recommande: prioriser les P1.`,
-      taskIds: [...p1Backlog.map((t: any) => t.id), ...lowPrioInProgress.map((t: any) => t.id)],
+      taskIds: [...p1Backlog.map((t: Task) => t.id), ...lowPrioInProgress.map((t: Task) => t.id)],
       confidence: 0.85,
     });
   }
@@ -263,7 +266,7 @@ function detectPriorityInversions(tasks: any[]): PlannerRecommendation[] {
   return recs;
 }
 
-function detectSplittableTasks(tasks: any[]): PlannerRecommendation[] {
+function detectSplittableTasks(tasks: Task[]): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
 
   for (const task of tasks) {
@@ -284,12 +287,12 @@ function detectSplittableTasks(tasks: any[]): PlannerRecommendation[] {
 /**
  * S42: Recommend pipeline per task based on code graph complexity and history.
  */
-function recommendPipelines(tasks: any[], _supabase: SupabaseClient): PlannerRecommendation[] {
+function recommendPipelines(tasks: Task[], _supabase: SupabaseClient): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
   const graph = loadGraph();
   if (!graph) return recs;
 
-  const backlogTasks = tasks.filter((t: any) => t.status === "backlog");
+  const backlogTasks = tasks.filter((t: Task) => t.status === "backlog");
 
   for (const task of backlogTasks) {
     const affected = findAffectedModules(graph, task.title);
@@ -330,20 +333,20 @@ function recommendPipelines(tasks: any[], _supabase: SupabaseClient): PlannerRec
 /**
  * S42: Auto-defer P4/P5 tasks if sprint is overloaded.
  */
-function detectDeferrableTasks(tasks: any[]): PlannerRecommendation[] {
+function detectDeferrableTasks(tasks: Task[]): PlannerRecommendation[] {
   const recs: PlannerRecommendation[] = [];
-  const remaining = tasks.filter((t: any) => t.status !== "done" && t.status !== "cancelled");
-  const inProgress = tasks.filter((t: any) => t.status === "in_progress");
+  const remaining = tasks.filter((t: Task) => t.status !== "done" && t.status !== "cancelled");
+  const inProgress = tasks.filter((t: Task) => t.status === "in_progress");
 
   // If sprint is overloaded (>10 remaining, >2 in_progress), defer P4/P5
   if (remaining.length > 10 || inProgress.length > 3) {
-    const lowPrio = remaining.filter((t: any) => t.priority >= 4 && t.status === "backlog");
+    const lowPrio = remaining.filter((t: Task) => t.priority >= 4 && t.status === "backlog");
     if (lowPrio.length > 0) {
       recs.push({
         type: "defer",
         title: `Differer ${lowPrio.length} tache(s) P4/P5`,
         description: `Sprint charge (${remaining.length} restantes, ${inProgress.length} en cours). Recommande: differer ${lowPrio.length} tache(s) P4+ au prochain sprint.`,
-        taskIds: lowPrio.map((t: any) => t.id),
+        taskIds: lowPrio.map((t: Task) => t.id),
         confidence: remaining.length > 12 ? 0.85 : 0.6,
       });
     }

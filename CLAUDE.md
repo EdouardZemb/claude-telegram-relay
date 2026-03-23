@@ -185,7 +185,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3447 tests (unit + integration + E2E)
+tests/                  3516 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -217,7 +217,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (3447 tests, all must pass before merge)
+- Tests: `bun test` (3516 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

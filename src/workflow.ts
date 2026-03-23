@@ -67,6 +67,56 @@ export interface WorkflowLogEntry {
   agent_notes?: string;
 }
 
+/** Row from sprint_metrics table — all fields from db/schema.sql */
+export interface SprintMetrics {
+  id: string;
+  sprint_id: string;
+  tasks_planned: number;
+  tasks_completed: number;
+  completion_rate: number;
+  avg_delivery_hours: number | null;
+  first_pass_rate: number | null;
+  incidents_count: number;
+  rework_count: number;
+  retro_actions_proposed: number;
+  retro_actions_accepted: number;
+  sprint_started_at: string | null;
+  sprint_ended_at: string | null;
+  total_tokens: number;
+  total_cost_usd: number;
+  agent_executions: number;
+  project_id: string | null;
+  created_at: string;
+}
+
+/** Row from retros table — all fields from db/schema.sql */
+export interface RetroRow {
+  id: string;
+  sprint_id: string;
+  what_worked: string[];
+  what_didnt: string[];
+  patterns_detected: string[];
+  actions_proposed: Array<{ action: string; priority: string }>;
+  actions_accepted: Array<{ action: string; priority: string }>;
+  raw_analysis: string | null;
+  validated_at: string | null;
+  project_id: string | null;
+  created_at: string;
+}
+
+/** Row from workflow_logs table */
+export interface WorkflowLogRow {
+  id: string;
+  task_id: string | null;
+  sprint_id: string | null;
+  step_from: string;
+  step_to: string;
+  had_rework: boolean | null;
+  duration_seconds: number | null;
+  checkpoint_result: string | null;
+  created_at: string;
+}
+
 // ── Load Config ──────────────────────────────────────────────
 
 const CONFIG_PATH = join(
@@ -321,14 +371,16 @@ export async function collectSprintMetrics(
   }
 
   const planned = tasks.length;
-  const completed = tasks.filter((t: any) => t.status === "done").length;
+  const completed = tasks.filter((t: { status: string }) => t.status === "done").length;
 
   // Avg delivery time (hours from created to completed)
   const deliveryTimes = tasks
-    .filter((t: any) => t.status === "done" && t.completed_at)
-    .map((t: any) => {
+    .filter(
+      (t: { status: string; completed_at: string | null }) => t.status === "done" && t.completed_at,
+    )
+    .map((t: { created_at: string; completed_at: string | null }) => {
       const created = new Date(t.created_at).getTime();
-      const done = new Date(t.completed_at).getTime();
+      const done = new Date(t.completed_at!).getTime();
       return (done - created) / (1000 * 60 * 60);
     });
   const avgDeliveryHours =
@@ -342,18 +394,21 @@ export async function collectSprintMetrics(
     .select("had_rework, checkpoint_result")
     .eq("sprint_id", sprintId);
 
-  const reworkCount = logs?.filter((l: any) => l.had_rework).length ?? 0;
+  const reworkCount = logs?.filter((l: { had_rework: boolean | null }) => l.had_rework).length ?? 0;
 
   // First pass rate: tasks that went through review without rework
-  const taskIds = tasks.map((t: any) => t.id);
+  const taskIds = tasks.map((t: { id: string }) => t.id);
   const { data: reviewLogs } = await supabase
     .from("workflow_logs")
     .select("task_id, had_rework")
     .eq("step_to", "review")
     .in("task_id", taskIds.length > 0 ? taskIds : ["none"]);
 
-  const reviewedTasks = new Set(reviewLogs?.map((l: any) => l.task_id) ?? []);
-  const firstPassTasks = reviewLogs?.filter((l: any) => !l.had_rework) ?? [];
+  const reviewedTasks = new Set(
+    reviewLogs?.map((l: { task_id: string | null }) => l.task_id) ?? [],
+  );
+  const firstPassTasks =
+    reviewLogs?.filter((l: { had_rework: boolean | null }) => !l.had_rework) ?? [];
   const firstPassRate =
     reviewedTasks.size > 0 ? (firstPassTasks.length / reviewedTasks.size) * 100 : null;
 
@@ -399,7 +454,7 @@ export async function collectSprintMetrics(
 export async function getSprintMetrics(
   supabase: SupabaseClient,
   sprintId: string,
-): Promise<any | null> {
+): Promise<SprintMetrics | null> {
   const { data, error } = await supabase
     .from("sprint_metrics")
     .select("*")
@@ -410,7 +465,7 @@ export async function getSprintMetrics(
   return data;
 }
 
-export async function getAllSprintMetrics(supabase: SupabaseClient): Promise<any[]> {
+export async function getAllSprintMetrics(supabase: SupabaseClient): Promise<SprintMetrics[]> {
   const { data, error } = await supabase
     .from("sprint_metrics")
     .select("*")
@@ -422,7 +477,7 @@ export async function getAllSprintMetrics(supabase: SupabaseClient): Promise<any
 
 // ── Formatting ───────────────────────────────────────────────
 
-export function formatMetrics(metrics: any): string {
+export function formatMetrics(metrics: SprintMetrics): string {
   if (!metrics) return "Pas de metriques disponibles pour ce sprint.";
 
   const lines = [
@@ -461,7 +516,7 @@ export function formatMetrics(metrics: any): string {
   return lines.join("\n");
 }
 
-export function formatMetricsComparison(metricsList: any[]): string {
+export function formatMetricsComparison(metricsList: SprintMetrics[]): string {
   if (metricsList.length === 0) return "Pas de metriques disponibles.";
 
   const lines = ["Evolution des sprints", ""];
@@ -480,14 +535,14 @@ export async function generateRetroData(
   supabase: SupabaseClient,
   sprintId: string,
 ): Promise<{
-  metrics: any;
+  metrics: SprintMetrics | null;
   workflowStats: {
     totalTransitions: number;
     reworkCount: number;
     avgStepDuration: Record<string, number>;
     checkpointResults: Record<string, number>;
   };
-  tasks: any[];
+  tasks: Record<string, unknown>[];
 } | null> {
   const metrics = await getSprintMetrics(supabase, sprintId);
 
@@ -503,7 +558,7 @@ export async function generateRetroData(
 
   // Compute workflow stats
   const totalTransitions = logs?.length ?? 0;
-  const reworkCount = logs?.filter((l: any) => l.had_rework).length ?? 0;
+  const reworkCount = logs?.filter((l: { had_rework: boolean | null }) => l.had_rework).length ?? 0;
 
   // Avg duration per step
   const stepDurations: Record<string, number[]> = {};
@@ -584,7 +639,10 @@ export async function acceptRetroActions(
   return true;
 }
 
-export async function getRetro(supabase: SupabaseClient, sprintId: string): Promise<any | null> {
+export async function getRetro(
+  supabase: SupabaseClient,
+  sprintId: string,
+): Promise<RetroRow | null> {
   const { data, error } = await supabase
     .from("retros")
     .select("*")
@@ -595,7 +653,7 @@ export async function getRetro(supabase: SupabaseClient, sprintId: string): Prom
   return data;
 }
 
-export function formatRetro(retro: any): string {
+export function formatRetro(retro: RetroRow | null): string {
   if (!retro) return "Pas de retro disponible pour ce sprint.";
 
   const lines = [`Retro Sprint ${retro.sprint_id}`, ""];
@@ -621,7 +679,9 @@ export function formatRetro(retro: any): string {
   if (retro.actions_proposed?.length > 0) {
     lines.push("Actions proposees :");
     for (const action of retro.actions_proposed) {
-      const status = retro.actions_accepted?.some((a: any) => a.action === action.action)
+      const status = retro.actions_accepted?.some(
+        (a: { action: string }) => a.action === action.action,
+      )
         ? "[OK]"
         : "[ ]";
       lines.push(`  ${status} ${action.action} (${action.priority})`);
@@ -640,7 +700,7 @@ export function formatRetro(retro: any): string {
  */
 export function applyWorkflowSuggestions(
   suggestions: Array<{ action: string; target_step?: string; suggested_change?: string }>,
-  opts?: { author?: string; reason?: string; supabase?: any },
+  opts?: { author?: string; reason?: string; supabase?: SupabaseClient },
 ): string[] {
   const configPath = join(
     process.env.PROJECT_DIR || join(import.meta.dir, ".."),
@@ -717,7 +777,10 @@ export interface WorkflowAuditEntry {
 /**
  * Log a workflow configuration change to the audit trail.
  */
-export async function logWorkflowAudit(supabase: any, entry: WorkflowAuditEntry): Promise<void> {
+export async function logWorkflowAudit(
+  supabase: SupabaseClient,
+  entry: WorkflowAuditEntry,
+): Promise<void> {
   // Capture current config as snapshot
   let configSnapshot: WorkflowConfig | null = null;
   try {
@@ -742,7 +805,7 @@ export async function logWorkflowAudit(supabase: any, entry: WorkflowAuditEntry)
  * Get recent audit entries for display.
  */
 export async function getWorkflowAuditHistory(
-  supabase: any,
+  supabase: SupabaseClient,
   limit: number = 10,
 ): Promise<WorkflowAuditEntry[]> {
   const { data, error } = await supabase
@@ -752,12 +815,12 @@ export async function getWorkflowAuditHistory(
     .limit(limit);
 
   if (error) return [];
-  return (data || []).map((row: any) => ({
-    author: row.author,
-    action: row.action,
-    reason: row.reason,
-    changes: row.changes || [],
-    configVersion: row.config_version,
+  return (data || []).map((row: Record<string, unknown>) => ({
+    author: typeof row.author === "string" ? row.author : String(row.author ?? ""),
+    action: typeof row.action === "string" ? row.action : String(row.action ?? ""),
+    reason: typeof row.reason === "string" ? row.reason : undefined,
+    changes: Array.isArray(row.changes) ? (row.changes as WorkflowAuditEntry["changes"]) : [],
+    configVersion: typeof row.config_version === "number" ? row.config_version : undefined,
   }));
 }
 

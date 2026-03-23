@@ -42,8 +42,8 @@ const VERIFIER_TIMEOUT = 180_000; // 3 minutes
  * Skips on QUICK pipeline (EC-006).
  */
 export async function verifySpecVsImplementation(
-  spec: any,
-  implementation: any,
+  spec: Record<string, unknown> | null,
+  implementation: Record<string, unknown> | null,
   pipelineType?: string,
 ): Promise<DriftReport | null> {
   // EC-006: Skip on QUICK pipeline
@@ -151,29 +151,34 @@ export function parseDriftReport(output: string): DriftReport {
   };
 }
 
-function normalizeDriftReport(obj: any): DriftReport {
+function normalizeDriftReport(obj: Record<string, unknown>): DriftReport {
   const coverage =
     typeof obj.coverage_score === "number" ? Math.min(100, Math.max(0, obj.coverage_score)) : 50;
 
   const driftItems: DriftItem[] = Array.isArray(obj.drift_items)
-    ? obj.drift_items.map((item: any) => ({
-        fr_id: String(item.fr_id || "unknown"),
-        status: ["implemented", "missing", "partial", "divergent"].includes(item.status)
-          ? item.status
-          : "partial",
-        details: String(item.details || ""),
-      }))
+    ? obj.drift_items.map((item: unknown) => {
+        const i = item as Record<string, unknown>;
+        return {
+          fr_id: String(i.fr_id || "unknown"),
+          status: ["implemented", "missing", "partial", "divergent"].includes(String(i.status))
+            ? (i.status as DriftItem["status"])
+            : "partial",
+          details: String(i.details || ""),
+        };
+      })
     : [];
 
-  const verdict = ["pass", "fail", "warning"].includes(obj.overall_verdict)
-    ? obj.overall_verdict
-    : coverage >= 80
-      ? "pass"
-      : coverage >= 50
-        ? "warning"
-        : "fail";
+  const verdictStr =
+    typeof obj.overall_verdict === "string" &&
+    ["pass", "fail", "warning"].includes(obj.overall_verdict)
+      ? (obj.overall_verdict as DriftReport["overall_verdict"])
+      : coverage >= 80
+        ? ("pass" as const)
+        : coverage >= 50
+          ? ("warning" as const)
+          : ("fail" as const);
 
-  return { coverage_score: coverage, drift_items: driftItems, overall_verdict: verdict };
+  return { coverage_score: coverage, drift_items: driftItems, overall_verdict: verdictStr };
 }
 
 // ── P3: Conformance Check (V-criteria) ───────────────────────
@@ -191,7 +196,7 @@ export async function checkConformance(
     objective: string;
     v_criteria: Array<{ id: string; description: string; level: string }>;
   },
-  devOutput: any,
+  devOutput: Record<string, unknown> | string | null,
   pipelineType?: string,
 ): Promise<DriftReport | null> {
   // Skip on QUICK pipeline

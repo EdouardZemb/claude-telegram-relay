@@ -129,9 +129,12 @@ export async function countTests(testsDir: string): Promise<number> {
     });
     const passMatch = result.match(/(\d+) pass/);
     return passMatch ? parseInt(passMatch[1], 10) : 0;
-  } catch (e: any) {
+  } catch (e: unknown) {
     // bun test exits non-zero if tests fail, but output still has counts
-    const output = e.stdout || e.stderr || "";
+    const output =
+      (e as { stdout?: string; stderr?: string })?.stdout ||
+      (e as { stdout?: string; stderr?: string })?.stderr ||
+      "";
     const passMatch = output.match(/(\d+) pass/);
     return passMatch ? parseInt(passMatch[1], 10) : 0;
   }

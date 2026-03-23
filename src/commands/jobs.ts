@@ -17,7 +17,7 @@ import {
 } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
 import { formatPRDDetail, getPRD } from "../prd.ts";
-import { getBacklog, getCurrentSprint, updateTaskStatus } from "../tasks.ts";
+import { getBacklog, getCurrentSprint, type Task, updateTaskStatus } from "../tasks.ts";
 
 const log = createLogger("jobs");
 export default function jobsCommands(bctx: BotContext): Composer<Context> {
@@ -143,7 +143,7 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
         const lines = backlog
           .slice(0, 10)
           .map(
-            (t: any, i: number) =>
+            (t: { priority: number; title: string; id: string; status: string }, i: number) =>
               `${i + 1}. P${t.priority} ${t.title} [${t.id.substring(0, 8)}] (${t.status})`,
           );
         const text = `Backlog (${backlog.length} taches):\n\n${lines.join("\n")}`;
@@ -222,14 +222,14 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
         return;
       }
 
-      const failedTasks: any[] = [];
+      const failedTasks: Task[] = [];
       for (const shortId of batch.failedIds) {
         const { data: matches } = await bctx.supabase
           .from("tasks")
           .select("*")
           .ilike("id", `${shortId}%`)
           .limit(1);
-        if (matches?.[0]) failedTasks.push(matches[0]);
+        if (matches?.[0]) failedTasks.push(matches[0] as unknown as Task);
       }
 
       if (failedTasks.length === 0) {
@@ -251,11 +251,13 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
           autoPipeline: true,
           onProgress,
         });
-        const ok = results.filter((r: any) => r.success).length;
+        const ok = results.filter((r: { success: boolean }) => r.success).length;
         const newFailedIds = results
-          .filter((r: any) => !r.success)
-          .map((r: any) => r.task.id.substring(0, 8));
-        const lines = results.map((r: any) => formatPipelineResult(r));
+          .filter((r: { success: boolean }) => !r.success)
+          .map((r: { task: { id: string } }) => r.task.id.substring(0, 8));
+        const lines = results.map((r: Parameters<typeof formatPipelineResult>[0]) =>
+          formatPipelineResult(r),
+        );
         return `BATCH_COMPLETE:${ok}/${results.length}:failed=${newFailedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
       };
 
@@ -266,7 +268,7 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
       try {
         const taskList = failedTasks
-          .map((t: any, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
+          .map((t: Task, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
           .join("\n");
         await ctx.reply(
           `Relance de ${failedTasks.length} taches echouees (job: ${jobId})\n\n${taskList}`,

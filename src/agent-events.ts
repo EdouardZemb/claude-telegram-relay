@@ -30,7 +30,7 @@ export interface AgentEvent {
   session_id: string;
   agent_role: string;
   event_type: AgentEventType;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
   created_at?: string;
 }
 
@@ -56,7 +56,7 @@ export async function emitAgentEvent(
   sessionId: string,
   role: string,
   eventType: AgentEventType,
-  payload: Record<string, any> = {},
+  payload: Record<string, unknown> = {},
 ): Promise<void> {
   const event: AgentEvent = {
     session_id: sessionId,
@@ -159,9 +159,9 @@ export function formatAgentTimeline(events: AgentEvent[]): string {
           second: "2-digit",
         })
       : "??:??:??";
-    const payloadStr = event.payload.duration_ms
-      ? ` (${Math.round(event.payload.duration_ms / 1000)}s)`
-      : "";
+    const durationMs =
+      typeof event.payload.duration_ms === "number" ? event.payload.duration_ms : null;
+    const payloadStr = durationMs ? ` (${Math.round(durationMs / 1000)}s)` : "";
     lines.push(`  ${time} ${event.agent_role} ${event.event_type}${payloadStr}`);
   }
   return lines.join("\n");

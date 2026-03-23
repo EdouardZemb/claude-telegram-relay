@@ -40,7 +40,7 @@ const CONFIRMATION_TTL_MS = 60_000; // 1 minute
 
 function confirmationKey(ctx: Context): string {
   const chatId = ctx.chat?.id || 0;
-  const threadId = (ctx.message as any)?.message_thread_id || 0;
+  const threadId = (ctx.message as { message_thread_id?: number })?.message_thread_id || 0;
   return `${chatId}:${threadId}`;
 }
 
@@ -267,7 +267,8 @@ export function handleConfirmationCallback(ctx: Context, data: string): string |
   if (data.startsWith("intent_confirm:")) {
     // Retrieve the pending from callbackQuery context
     const chatId = ctx.callbackQuery?.message?.chat?.id || 0;
-    const threadId = (ctx.callbackQuery?.message as any)?.message_thread_id || 0;
+    const threadId =
+      (ctx.callbackQuery?.message as { message_thread_id?: number })?.message_thread_id || 0;
     const key = `${chatId}:${threadId}`;
     const pending = pendingConfirmations.get(key);
 
@@ -337,9 +338,10 @@ export function buildSyntheticUpdate(ctx: Context, command: string): Record<stri
   // Handle both message and callback query contexts
   const chat = ctx.chat || ctx.callbackQuery?.message?.chat;
   const from = ctx.from || ctx.callbackQuery?.from;
+  type MsgWithThread = { message_thread_id?: number };
   const threadId =
-    (ctx.message as any)?.message_thread_id ||
-    (ctx.callbackQuery?.message as any)?.message_thread_id;
+    (ctx.message as MsgWithThread)?.message_thread_id ||
+    (ctx.callbackQuery?.message as MsgWithThread)?.message_thread_id;
 
   _syntheticUpdateCounter++;
   const update: Record<string, unknown> = {

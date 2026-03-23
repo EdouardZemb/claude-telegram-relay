@@ -5,6 +5,7 @@
  * orchestrator.ts to improve modularity.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AgentRole } from "./orchestrator.ts";
 import type { Task } from "./tasks.ts";
 
@@ -157,7 +158,7 @@ export function selectPipeline(task: Task, explicitPipeline?: AgentRole[]): Agen
 export async function selectAdaptivePipeline(
   task: Task,
   explicitPipeline?: AgentRole[],
-  supabase?: any,
+  supabase?: SupabaseClient,
 ): Promise<AgentRole[]> {
   if (explicitPipeline) return explicitPipeline;
 
@@ -280,7 +281,7 @@ export async function selectPipelineWithExploration(
   task: Task,
   explorationScore: number,
   explicitPipeline?: AgentRole[],
-  supabase?: any,
+  supabase?: SupabaseClient,
 ): Promise<AgentRole[]> {
   if (explicitPipeline) return explicitPipeline;
 
@@ -293,7 +294,10 @@ export async function selectPipelineWithExploration(
   return selectAdaptivePipeline(task, undefined, supabase);
 }
 
-export async function classifyAdaptivePipeline(task: Task, supabase?: any): Promise<PipelineType> {
+export async function classifyAdaptivePipeline(
+  task: Task,
+  supabase?: SupabaseClient,
+): Promise<PipelineType> {
   const text = `${task.title} ${task.description || ""}`.toLowerCase();
 
   // Keyword rules still apply for research/review
