@@ -10,5 +10,5 @@
   "adversarial_challenge": false,
   "prd_maturation_phases": false,
   "memory_promotion": false,
-  "agent_role_memory": false
+  "agent_role_memory": true
 }

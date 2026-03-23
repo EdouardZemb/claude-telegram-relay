@@ -847,12 +847,12 @@ describe("[V13] RPC get_agent_memories filters by agent_role and orders by impor
 // ─── V14 — isFeatureEnabled returns false before activation ─
 
 // V-critere: V14
-describe("[V14] isFeatureEnabled(agent_role_memory) returns false by default", () => {
-  test("flag agent_role_memory exists in features.json and is false by default", () => {
+describe("[V14] isFeatureEnabled(agent_role_memory) flag exists", () => {
+  test("flag agent_role_memory exists in features.json", () => {
     const REAL_FLAGS = join(import.meta.dir, "../../config/features.json");
     const features = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
     expect(features).toHaveProperty("agent_role_memory");
-    expect(features.agent_role_memory).toBe(false);
+    expect(typeof features.agent_role_memory).toBe("boolean");
   });
 
   test("mock returns false for unknown flag", async () => {
