@@ -628,6 +628,16 @@ function buildPrompt(
       "\n[DONE: search text for completed goal]",
   );
 
+  // SDD CONVERGENCE instruction — always present (F-DA-1 correction).
+  // Behavioral guidance: no side-effect if no SDD pipeline is active.
+  // Positioned after MEMORY MANAGEMENT, before VOICE CAPABILITIES (F-DA-2).
+  parts.push(
+    "\nSDD CONVERGENCE: When the conversation converges on clear decisions, " +
+      "produce this exact format at the end of your response:\n" +
+      "Decisions:\n- [decision 1]\n- [decision 2]\n" +
+      "Prochaine etape: [suggested next step]",
+  );
+
   if (process.env.VOICE_PROVIDER || process.env.TTS_PROVIDER) {
     parts.push(
       "\nVOICE CAPABILITIES:" +

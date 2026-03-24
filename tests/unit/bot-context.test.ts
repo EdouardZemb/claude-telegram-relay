@@ -273,6 +273,53 @@ describe("bot-context", () => {
       expect(prompt).not.toContain("DOCUMENTS PERTINENTS");
       expect(prompt).not.toContain("Ne force pas leur mention");
     });
+
+    // ── V1, V3, V4: SDD Convergence instruction ──────────
+
+    it("V1: buildPrompt always contains SDD CONVERGENCE instruction", () => {
+      const prompt = botCtx.buildPrompt("test message");
+      expect(prompt).toContain("SDD CONVERGENCE");
+    });
+
+    it("V4: convergence instruction contains 'Decisions:' and 'Prochaine etape:'", () => {
+      const prompt = botCtx.buildPrompt("test message");
+      expect(prompt).toContain("Decisions:");
+      expect(prompt).toContain("Prochaine etape:");
+    });
+
+    it("V3: convergence instruction is under 100 words", () => {
+      const prompt = botCtx.buildPrompt("test message");
+      // Extract the SDD CONVERGENCE section
+      const sddStart = prompt.indexOf("SDD CONVERGENCE");
+      expect(sddStart).toBeGreaterThan(-1);
+      // Find end of the convergence block (next section or end)
+      const afterSdd = prompt.substring(sddStart);
+      // The instruction ends before the next \n\n section header
+      const nextSection = afterSdd.indexOf("\nVOICE CAPABILITIES");
+      const sddBlock = nextSection > 0
+        ? afterSdd.substring(0, nextSection)
+        : afterSdd.split("\n\n")[0] + "\n" + (afterSdd.split("\n\n")[1] || "");
+      const wordCount = sddBlock.split(/\s+/).filter(Boolean).length;
+      expect(wordCount).toBeLessThan(100);
+    });
+
+    it("convergence instruction is positioned after MEMORY MANAGEMENT", () => {
+      const prompt = botCtx.buildPrompt("test message");
+      const memIdx = prompt.indexOf("MEMORY MANAGEMENT");
+      const sddIdx = prompt.indexOf("SDD CONVERGENCE");
+      expect(memIdx).toBeGreaterThan(-1);
+      expect(sddIdx).toBeGreaterThan(-1);
+      expect(sddIdx).toBeGreaterThan(memIdx);
+    });
+
+    it("convergence instruction is positioned before recentMessages", () => {
+      const prompt = botCtx.buildPrompt("test", undefined, undefined, "Recent: hello");
+      const sddIdx = prompt.indexOf("SDD CONVERGENCE");
+      const recentIdx = prompt.indexOf("Recent: hello");
+      expect(sddIdx).toBeGreaterThan(-1);
+      expect(recentIdx).toBeGreaterThan(-1);
+      expect(sddIdx).toBeLessThan(recentIdx);
+    });
   });
 
   // ── sendResponse ───────────────────────────────────────

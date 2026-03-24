@@ -9,9 +9,18 @@
 
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
+import { assembleHandoffContext } from "../conversation-handoff.ts";
 import { isJobManagerEnabled, launch } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
-import { getTracker, updateStep } from "../pipeline-tracker.ts";
+import { getRecentMessages } from "../memory.ts";
+import { formatStatusBar, getTracker, updateStep } from "../pipeline-tracker.ts";
+import {
+  runSddChallenge,
+  runSddExplore,
+  runSddImplement,
+  runSddReview,
+  runSddSpec,
+} from "../sdd-agents.ts";
 
 const log = createLogger("sdd-flow");
 
@@ -198,8 +207,7 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
       case "challenge":
       case "implement":
       case "review": {
-        // Agent-backed phases: launch via job-manager (R13)
-        // Encode pipeline name in type to preserve it in getCompletionKeyboard (F-SS-1)
+        // Agent-backed phases: launch via job-manager (R9, R13)
         const jobType = `sdd-${action}:${name}`;
         const phase = action as "explore" | "spec" | "challenge" | "implement" | "review";
 
@@ -215,15 +223,37 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
             return;
           }
 
-          // Placeholder agent function — will be wired to real agents in Phase 3
-          const agentFn = async (): Promise<string> => {
-            return `SDD_${action.toUpperCase()}_OK: ${name} — Phase ${action} completee via SDD flow`;
-          };
+          // Build agent function — handoff assembled in callback (R9)
+          let agentFn: () => Promise<string>;
+
+          if (action === "explore") {
+            agentFn = () => runSddExplore(name, chatId, threadId, bctx);
+          } else if (action === "spec") {
+            // Assemble handoff before launch (R9, F-DA-6)
+            const recentMsgs = await getRecentMessages(bctx.supabase);
+            const msgLines = recentMsgs ? recentMsgs.split("\n").filter(Boolean) : [];
+            const handoff = assembleHandoffContext(msgLines, {
+              pipelineName: name,
+              explorationRef: tracker.steps.explore?.artifact,
+            });
+            agentFn = () => runSddSpec(name, handoff, bctx);
+          } else if (action === "challenge") {
+            agentFn = () => runSddChallenge(name, bctx);
+          } else if (action === "implement") {
+            agentFn = () => runSddImplement(name, bctx);
+          } else {
+            // review
+            agentFn = () => runSddReview(name, bctx);
+          }
 
           const jobId = await launch(jobType, chatId, agentFn, { messageThreadId: threadId });
           await updateStep(chatId, threadId, phase, { jobId });
+
+          // Display status bar (V21, F-SS-5)
+          const updatedTracker = await getTracker(chatId, threadId);
+          const statusBar = updatedTracker ? formatStatusBar(updatedTracker) : "";
           await ctx.reply(
-            `Job lance ${jobType} (id: ${jobId})\nPipeline: ${name}`,
+            `Job lance ${jobType} (id: ${jobId})\n${statusBar || `Pipeline: ${name}`}`,
             bctx.threadOpts(ctx),
           );
         } catch (error) {

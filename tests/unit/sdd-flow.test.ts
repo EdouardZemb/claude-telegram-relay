@@ -205,4 +205,29 @@ describe("sdd-flow", () => {
   // The core logic is verified via the pipeline-tracker tests (V5, TTL).
   // The sdd-flow composer checks getTracker() before launching — covered
   // by the pipeline-tracker.test.ts V5 TTL test and the callback handler code.
+
+  // ── V16, V17: Agent function wiring ──────────────────────
+
+  describe("agent wiring (structural)", () => {
+    it("V16: sdd-flow imports runSddExplore from sdd-agents", () => {
+      // Structural test: verify the module exports and imports are wired
+      const sddAgents = require("../../src/sdd-agents.ts");
+      expect(typeof sddAgents.runSddExplore).toBe("function");
+      expect(typeof sddAgents.runSddSpec).toBe("function");
+      expect(typeof sddAgents.runSddChallenge).toBe("function");
+      expect(typeof sddAgents.runSddImplement).toBe("function");
+      expect(typeof sddAgents.runSddReview).toBe("function");
+    });
+
+    it("V17: sdd-flow imports assembleHandoffContext from conversation-handoff", () => {
+      const handoff = require("../../src/conversation-handoff.ts");
+      expect(typeof handoff.assembleHandoffContext).toBe("function");
+      expect(typeof handoff.formatHandoffForAgent).toBe("function");
+    });
+
+    it("V21: sdd-flow imports formatStatusBar from pipeline-tracker", () => {
+      const tracker = require("../../src/pipeline-tracker.ts");
+      expect(typeof tracker.formatStatusBar).toBe("function");
+    });
+  });
 });

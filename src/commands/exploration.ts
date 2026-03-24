@@ -20,6 +20,7 @@ import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
 import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
+import { createPipeline, getTracker, toPipelineName, updateStep } from "../pipeline-tracker.ts";
 import { resolveProjectContext } from "../projects.ts";
 
 const log = createLogger("exploration");
@@ -206,8 +207,36 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     if (isJobManagerEnabled()) {
       const chatId = ctx.chat?.id || 0;
       const threadId = bctx.getThreadId(ctx);
-      const jobId = await launchJob("explore", chatId, exploreFn, { messageThreadId: threadId });
-      await ctx.reply(`Job lance explore (id: ${jobId})\nQuery: ${query}`, bctx.threadOpts(ctx));
+
+      // Create pipeline tracker (R10, D6)
+      const pipelineName = toPipelineName(query);
+
+      // Guard: if tracker < 1h, warn user (F-DA-2, F-EC-1)
+      const existingTracker = await getTracker(chatId, threadId);
+      if (existingTracker) {
+        const ageMs = Date.now() - new Date(existingTracker.updatedAt).getTime();
+        if (ageMs < 60 * 60 * 1000) {
+          await ctx.reply(
+            `Pipeline SDD « ${existingTracker.name} » actif (< 1h). Il sera remplace par la nouvelle exploration.`,
+            bctx.threadOpts(ctx),
+          );
+        }
+      }
+
+      await createPipeline(chatId, threadId, pipelineName);
+
+      // Launch with sdd-explore: prefix (R11, V13)
+      const jobId = await launchJob(`sdd-explore:${pipelineName}`, chatId, exploreFn, {
+        messageThreadId: threadId,
+      });
+
+      // Update tracker with running status and jobId (R11, V14)
+      await updateStep(chatId, threadId, "explore", { status: "running", jobId });
+
+      await ctx.reply(
+        `Job lance sdd-explore:${pipelineName} (id: ${jobId})\nQuery: ${query}`,
+        bctx.threadOpts(ctx),
+      );
     } else {
       const statusMsg = isWebResearch
         ? `Exploration en cours: ${query}\nAgent Ada analyse le codebase + recherche web...`
