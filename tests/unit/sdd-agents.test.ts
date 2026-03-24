@@ -25,25 +25,8 @@ mock.module("../../src/agent.ts", () => ({
   },
 }));
 
-// Mock writeFile for challenge report writing
+// Track writeFile calls without global mock — use the test hook exported by sdd-agents
 const writtenFiles: Array<{ path: string; content: string }> = [];
-mock.module("fs/promises", () => ({
-  readFile: async (path: string, _encoding?: string) => {
-    if (path.includes("explorer.md")) return "# Agent Explorer\nExplore the codebase.";
-    if (path.includes("spec-architect.md")) return "# Agent Spec Architect\nGenerate specs.";
-    if (path.includes("devils-advocate.md")) return "# Agent Devil's Advocate\nFind contradictions.";
-    if (path.includes("edge-case-hunter.md")) return "# Agent Edge Case Hunter\nFind edge cases.";
-    if (path.includes("simplicity-skeptic.md")) return "# Agent Simplicity Skeptic\nFind complexity.";
-    if (path.includes("reviewer.md")) return "# Agent Reviewer\nReview code.";
-    // Pass through to Bun native file read for other paths (avoids circular mock call)
-    return Bun.file(path).text();
-  },
-  writeFile: async (path: string, content: string) => {
-    writtenFiles.push({ path, content });
-  },
-  mkdir: async () => {},
-  rename: async () => {},
-}));
 
 // Now import the module under test
 import {
@@ -52,8 +35,14 @@ import {
   runSddImplement,
   runSddReview,
   runSddSpec,
+  setWriteFileHook,
 } from "../../src/sdd-agents.ts";
 import type { HandoffSummary } from "../../src/conversation-handoff.ts";
+
+// Install the hook once at module level — captures writes into writtenFiles
+setWriteFileHook(async (path: string, content: string) => {
+  writtenFiles.push({ path, content });
+});
 
 // ── Helpers ──────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@
  * Imports restricted to agent.ts, conversation-handoff.ts, logger.ts (R13).
  */
 
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { writeFile as _writeFileDefault, mkdir, readFile } from "fs/promises";
 import { dirname, join } from "path";
 import { spawnClaude } from "./agent.ts";
 import type { BotContext } from "./bot-context.ts";
@@ -13,6 +13,25 @@ import { formatHandoffForAgent, type HandoffSummary } from "./conversation-hando
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("sdd-agents");
+
+/**
+ * Optional test hook: replace writeFile without polluting the global fs/promises mock.
+ * In production this is undefined and the real writeFile is used.
+ * In tests, call setWriteFileHook(fn) before importing sdd-agents functions.
+ */
+let _writeFileHook: ((path: string, content: string) => Promise<void>) | undefined;
+
+/** @internal — for tests only */
+export function setWriteFileHook(
+  fn: ((path: string, content: string) => Promise<void>) | undefined,
+): void {
+  _writeFileHook = fn;
+}
+
+function writeFile(path: string, content: string): Promise<void> {
+  if (_writeFileHook) return _writeFileHook(path, content);
+  return _writeFileDefault(path, content);
+}
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const AGENTS_DIR = join(PROJECT_ROOT, ".claude", "agents");
