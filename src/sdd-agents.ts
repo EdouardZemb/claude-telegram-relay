@@ -87,9 +87,8 @@ async function readAgentFile(filename: string): Promise<string> {
 /** Run the SDD Explore phase (R5, R12). Builds prompt directly (no buildExploreFn reuse). */
 export async function runSddExplore(
   name: string,
-  chatId: number,
-  threadId: number | undefined,
-  bctx: BotContext,
+  _chatId?: number,
+  _threadId?: number | undefined,
 ): Promise<string> {
   try {
     const agentDef = await readAgentFile("explorer.md");

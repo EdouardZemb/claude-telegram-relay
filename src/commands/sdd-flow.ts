@@ -227,7 +227,7 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
           let agentFn: () => Promise<string>;
 
           if (action === "explore") {
-            agentFn = () => runSddExplore(name, chatId, threadId, bctx);
+            agentFn = () => runSddExplore(name, chatId, threadId);
           } else if (action === "spec") {
             // Assemble handoff before launch (R9, F-DA-6)
             const recentMsgs = await getRecentMessages(bctx.supabase);
