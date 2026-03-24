@@ -149,10 +149,9 @@ describe("MCP Business Server — S44 Task Tools", () => {
   });
 });
 
-
 describe("MCP Background Job Launcher", () => {
   it("defines launchMcpBackgroundJob function", () => {
-    expect(serverCode).toContain("function launchMcpBackgroundJob(");
+    expect(serverCode).toContain("function _launchMcpBackgroundJob(");
   });
 
   it("generates a short job ID via randomUUID", () => {

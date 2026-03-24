@@ -315,10 +315,14 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
         const sddName =
           typeColonIdx !== -1 ? job.type.substring(typeColonIdx + 1) : sddPhaseFromType;
 
-        const sddMatch = job.result?.match(/^SDD_(\w+)_(\w[\w-]*?):/);
-        if (sddMatch) {
-          const sddPhase = sddMatch[1].toLowerCase();
-          const sddVerdict = sddMatch[2];
+        // Parse verdict from result: SDD_{PHASE}_{VERDICT}: ...
+        // Use sddPhaseFromType (from job.type) for phase, parse only verdict from result
+        const sddVerdictMatch = job.result?.match(
+          /^SDD_\w+_(GO_WITH_CHANGES|NO-GO|GO|OK|FAILED|PIVOT|DROP):/,
+        );
+        if (sddVerdictMatch) {
+          const sddPhase = sddPhaseFromType.toLowerCase();
+          const sddVerdict = sddVerdictMatch[1];
           // Build contextual buttons based on phase and verdict
           if (sddPhase === "explore") {
             if (sddVerdict === "GO") {
