@@ -11,15 +11,21 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun
 
 // ── Mock spawnClaude before importing sdd-agents ─────────────
 
+// biome-ignore lint/suspicious/noExplicitAny: test mock
 const spawnClaudeCalls: Array<{ prompt: string; systemPrompt?: string; options: any }> = [];
 let spawnClaudeResults: Array<{ stdout: string; stderr: string; exitCode: number }> = [];
 let spawnCallIndex = 0;
 
 // Mock the agent module
 mock.module("../../src/agent.ts", () => ({
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
   spawnClaude: async (opts: any) => {
     spawnClaudeCalls.push({ prompt: opts.prompt, systemPrompt: opts.systemPrompt, options: opts });
-    const result = spawnClaudeResults[spawnCallIndex] || { stdout: "", stderr: "no mock", exitCode: 1 };
+    const result = spawnClaudeResults[spawnCallIndex] || {
+      stdout: "",
+      stderr: "no mock",
+      exitCode: 1,
+    };
     spawnCallIndex++;
     return result;
   },
@@ -28,6 +34,7 @@ mock.module("../../src/agent.ts", () => ({
 // Track writeFile calls without global mock — use the test hook exported by sdd-agents
 const writtenFiles: Array<{ path: string; content: string }> = [];
 
+import type { HandoffSummary } from "../../src/conversation-handoff.ts";
 // Now import the module under test
 import {
   runSddChallenge,
@@ -35,9 +42,9 @@ import {
   runSddImplement,
   runSddReview,
   runSddSpec,
+  setSpawnSyncHook,
   setWriteFileHook,
 } from "../../src/sdd-agents.ts";
-import type { HandoffSummary } from "../../src/conversation-handoff.ts";
 
 // Install the hook once at module level — captures writes into writtenFiles
 setWriteFileHook(async (path: string, content: string) => {
@@ -60,6 +67,7 @@ function makeHandoff(overrides: Partial<HandoffSummary> = {}): HandoffSummary {
   };
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: test mock
 function makeBctx(): any {
   return {
     supabase: null,
@@ -70,11 +78,24 @@ function makeBctx(): any {
 
 // ── Setup / Teardown ─────────────────────────────────────────
 
+// Track spawnSync calls (for VC8)
+const spawnSyncCalls: string[][] = [];
+
 beforeEach(() => {
   spawnClaudeCalls.length = 0;
   spawnClaudeResults = [];
   spawnCallIndex = 0;
   writtenFiles.length = 0;
+  spawnSyncCalls.length = 0;
+  // Install spawnSync hook
+  setSpawnSyncHook((args) => {
+    spawnSyncCalls.push(args);
+    return { exitCode: 0 };
+  });
+});
+
+afterEach(() => {
+  setSpawnSyncHook(undefined);
 });
 
 afterAll(() => {
@@ -193,9 +214,7 @@ describe("sdd-agents", () => {
     });
 
     it("builds prompt directly with spawnClaude (R12: no buildExploreFn reuse)", async () => {
-      spawnClaudeResults = [
-        { stdout: "## Verdict\nGO\n\nDone.", stderr: "", exitCode: 0 },
-      ];
+      spawnClaudeResults = [{ stdout: "## Verdict\nGO\n\nDone.", stderr: "", exitCode: 0 }];
 
       await runSddExplore("test-feature", 123, undefined, makeBctx());
 
@@ -222,18 +241,14 @@ describe("sdd-agents", () => {
     });
 
     it("V6: returns SDD_SPEC_FAILED on error", async () => {
-      spawnClaudeResults = [
-        { stdout: "", stderr: "Spec generation failed", exitCode: 1 },
-      ];
+      spawnClaudeResults = [{ stdout: "", stderr: "Spec generation failed", exitCode: 1 }];
 
       const result = await runSddSpec("test-feature", makeHandoff(), makeBctx());
       expect(result).toMatch(/^SDD_SPEC_FAILED:/);
     });
 
     it("V7: includes CONTEXTE CONVERSATIONNEL section in prompt", async () => {
-      spawnClaudeResults = [
-        { stdout: "Spec generated.", stderr: "", exitCode: 0 },
-      ];
+      spawnClaudeResults = [{ stdout: "Spec generated.", stderr: "", exitCode: 0 }];
 
       await runSddSpec("test-feature", makeHandoff(), makeBctx());
 
@@ -242,9 +257,7 @@ describe("sdd-agents", () => {
     });
 
     it("includes handoff decisions in the prompt", async () => {
-      spawnClaudeResults = [
-        { stdout: "Spec generated.", stderr: "", exitCode: 0 },
-      ];
+      spawnClaudeResults = [{ stdout: "Spec generated.", stderr: "", exitCode: 0 }];
 
       const handoff = makeHandoff({ decisions: ["Use REST API", "No websockets"] });
       await runSddSpec("test-feature", handoff, makeBctx());
@@ -260,7 +273,11 @@ describe("sdd-agents", () => {
     it("V8: calls spawnClaude 3 times in parallel (Promise.allSettled)", async () => {
       spawnClaudeResults = [
         { stdout: "DA report: all good.\n## Verdict de l'agent: GO", stderr: "", exitCode: 0 },
-        { stdout: "EC report: edge case found.\n## Verdict de l'agent: GO_WITH_CHANGES", stderr: "", exitCode: 0 },
+        {
+          stdout: "EC report: edge case found.\n## Verdict de l'agent: GO_WITH_CHANGES",
+          stderr: "",
+          exitCode: 0,
+        },
         { stdout: "SS report: too complex.\n## Verdict de l'agent: GO", stderr: "", exitCode: 0 },
       ];
 
@@ -392,18 +409,14 @@ describe("sdd-agents", () => {
     });
 
     it("V19: returns SDD_IMPLEMENT_FAILED on error", async () => {
-      spawnClaudeResults = [
-        { stdout: "", stderr: "Build failed", exitCode: 1 },
-      ];
+      spawnClaudeResults = [{ stdout: "", stderr: "Build failed", exitCode: 1 }];
 
       const result = await runSddImplement("test-feature", makeBctx());
       expect(result).toMatch(/^SDD_IMPLEMENT_FAILED:/);
     });
 
     it("includes spec and adversarial references in prompt", async () => {
-      spawnClaudeResults = [
-        { stdout: "Done.", stderr: "", exitCode: 0 },
-      ];
+      spawnClaudeResults = [{ stdout: "Done.", stderr: "", exitCode: 0 }];
 
       await runSddImplement("test-feature", makeBctx());
 
@@ -415,22 +428,114 @@ describe("sdd-agents", () => {
   // ── runSddReview ───────────────────────────────────────────
 
   describe("runSddReview", () => {
-    it("returns SDD_REVIEW_OK on success", async () => {
-      spawnClaudeResults = [
-        { stdout: "Review complete. No issues.", stderr: "", exitCode: 0 },
-      ];
-
-      const result = await runSddReview("test-feature", makeBctx());
-      expect(result).toMatch(/^SDD_REVIEW_OK:/);
-    });
-
     it("V19: returns SDD_REVIEW_FAILED on error", async () => {
-      spawnClaudeResults = [
-        { stdout: "", stderr: "Review error", exitCode: 1 },
-      ];
+      spawnClaudeResults = [{ stdout: "", stderr: "Review error", exitCode: 1 }];
 
       const result = await runSddReview("test-feature", makeBctx());
       expect(result).toMatch(/^SDD_REVIEW_FAILED:/);
+    });
+
+    it("VC7: returns SDD_REVIEW_APPROVED when stdout contains 'VERDICT: APPROVED'", async () => {
+      spawnClaudeResults = [
+        { stdout: "Conformite verifiee.\nVERDICT: APPROVED", stderr: "", exitCode: 0 },
+      ];
+
+      const result = await runSddReview("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+    });
+
+    it("VC7: returns SDD_REVIEW_CHANGES_REQUESTED when stdout contains 'VERDICT: CHANGES_REQUESTED'", async () => {
+      spawnClaudeResults = [
+        {
+          stdout: "Des corrections sont requises.\nVERDICT: CHANGES_REQUESTED",
+          stderr: "",
+          exitCode: 0,
+        },
+      ];
+
+      const result = await runSddReview("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_REVIEW_CHANGES_REQUESTED:/);
+    });
+
+    it("VC7: defaults to CHANGES_REQUESTED when no VERDICT found (conservative)", async () => {
+      spawnClaudeResults = [
+        { stdout: "Review complete. No explicit verdict.", stderr: "", exitCode: 0 },
+      ];
+
+      const result = await runSddReview("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_REVIEW_CHANGES_REQUESTED:/);
+    });
+
+    it("VC7: uses LAST occurrence of VERDICT to avoid false positives (F-EC-1)", async () => {
+      // First occurrence is quoted in criteria, last is the real verdict
+      spawnClaudeResults = [
+        {
+          stdout:
+            "Si l'implementation passe, le verdict attendu est VERDICT: APPROVED\nMais en realite des bugs sont trouves.\nVERDICT: CHANGES_REQUESTED",
+          stderr: "",
+          exitCode: 0,
+        },
+      ];
+
+      const result = await runSddReview("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_REVIEW_CHANGES_REQUESTED:/);
+    });
+
+    it("VC8: calls gh pr review --approve when verdict APPROVED and prUrl provided", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(spawnSyncCalls).toHaveLength(1);
+      expect(spawnSyncCalls[0][0]).toBe("gh");
+      expect(spawnSyncCalls[0][1]).toBe("pr");
+      expect(spawnSyncCalls[0][2]).toBe("review");
+      expect(spawnSyncCalls[0][3]).toBe("42");
+      expect(spawnSyncCalls[0]).toContain("--approve");
+
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("VC8: does NOT call gh pr review when verdict CHANGES_REQUESTED", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      spawnClaudeResults = [
+        { stdout: "Issues found.\nVERDICT: CHANGES_REQUESTED", stderr: "", exitCode: 0 },
+      ];
+
+      await runSddReview("test-feature", makeBctx(), "https://github.com/owner/repo/pull/42");
+
+      expect(spawnSyncCalls).toHaveLength(0);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("VC8: does NOT call gh pr review when GITHUB_REPO is empty (F-DA-3)", async () => {
+      delete process.env.GITHUB_REPO;
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(spawnSyncCalls).toHaveLength(0);
+    });
+
+    it("VC8: does NOT call gh pr review when prUrl is absent", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      await runSddReview("test-feature", makeBctx());
+
+      expect(spawnSyncCalls).toHaveLength(0);
+      delete process.env.GITHUB_REPO;
     });
   });
 });

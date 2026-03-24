@@ -12,6 +12,7 @@ import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
+import { updateStep } from "./pipeline-tracker.ts";
 import { Semaphore } from "./semaphore.ts";
 
 const log = createLogger("job-manager");
@@ -238,6 +239,20 @@ function extractPrUrl(text: string): string | undefined {
 }
 
 /**
+ * Find the PR URL for an implement job from the registry.
+ * Used as in-memory fallback for getCompletionKeyboard (sync) in review phase.
+ * After restart, registry is empty — tracker disk persistence is the canonical source.
+ */
+function findImplementPrUrl(pipelineName: string): string | undefined {
+  for (const job of registry.values()) {
+    if (job.type === `sdd-implement:${pipelineName}` && job.status === "completed" && job.result) {
+      return extractPrUrl(job.result);
+    }
+  }
+  return undefined;
+}
+
+/**
  * Build contextual inline keyboard for a completed job.
  */
 export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
@@ -318,7 +333,7 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
         // Parse verdict from result: SDD_{PHASE}_{VERDICT}: ...
         // Use sddPhaseFromType (from job.type) for phase, parse only verdict from result
         const sddVerdictMatch = job.result?.match(
-          /^SDD_\w+_(GO_WITH_CHANGES|NO-GO|GO|OK|FAILED|PIVOT|DROP):/,
+          /^SDD_\w+_(GO_WITH_CHANGES|NO-GO|GO|OK|FAILED|PIVOT|DROP|APPROVED|CHANGES_REQUESTED):/,
         );
         if (sddVerdictMatch) {
           const sddPhase = sddPhaseFromType.toLowerCase();
@@ -349,9 +364,21 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
             kb.text("Review", `sdd_review:${sddName}`);
             kb.text("Corriger", `sdd_implement:${sddName}`);
           } else if (sddPhase === "review") {
-            // Post-review: no further SDD buttons
+            if (sddVerdict === "APPROVED") {
+              const implementPrUrl = findImplementPrUrl(sddName);
+              if (implementPrUrl) kb.url("Voir la PR", implementPrUrl);
+              kb.row().text("Fusionner la PR", `sdd_merge_ask:${sddName}`);
+              hasButtons = true;
+            } else if (sddVerdict === "CHANGES_REQUESTED") {
+              const implementPrUrl = findImplementPrUrl(sddName);
+              if (implementPrUrl) {
+                kb.url("Voir la PR", implementPrUrl);
+                hasButtons = true;
+              }
+            }
+            // OK (legacy) and other verdicts: no buttons
           }
-          hasButtons = kb.inline_keyboard?.length > 0;
+          if (!hasButtons) hasButtons = kb.inline_keyboard?.length > 0;
         }
       } else {
         return undefined;
@@ -452,6 +479,22 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
     }
   } else {
     message = `Job ${job.type} échoué (${elapsed})\n${job.error || "Erreur inconnue"}`;
+  }
+
+  // R3: Persist prUrl for sdd-implement jobs so merge button works after restart
+  if (job.status === "completed" && job.type.startsWith("sdd-implement:") && job.result) {
+    const prUrl = extractPrUrl(job.result);
+    if (prUrl) {
+      const chatIdNum =
+        typeof job.chatId === "number" ? job.chatId : parseInt(String(job.chatId), 10);
+      if (!Number.isNaN(chatIdNum)) {
+        try {
+          await updateStep(chatIdNum, job.messageThreadId, "implement", { prUrl });
+        } catch (err) {
+          log.error("Failed to persist prUrl to tracker", { error: String(err) });
+        }
+      }
+    }
   }
 
   // Try direct notification to originating chat

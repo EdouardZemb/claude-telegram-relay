@@ -34,6 +34,7 @@ export interface PipelineStep {
   artifact?: string;
   summary?: string;
   jobId?: string;
+  prUrl?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -194,7 +195,7 @@ export async function updateStep(
   chatId: number,
   threadId: number | undefined,
   phase: SddPhase,
-  updates: Partial<Pick<PipelineStep, "status" | "artifact" | "summary" | "jobId">>,
+  updates: Partial<Pick<PipelineStep, "status" | "artifact" | "summary" | "jobId" | "prUrl">>,
 ): Promise<void> {
   const tracker = await getTracker(chatId, threadId);
   if (!tracker) {
@@ -207,6 +208,7 @@ export async function updateStep(
   if (updates.artifact !== undefined) step.artifact = updates.artifact;
   if (updates.summary !== undefined) step.summary = updates.summary;
   if (updates.jobId !== undefined) step.jobId = updates.jobId;
+  if (updates.prUrl !== undefined) step.prUrl = updates.prUrl;
 
   // Timestamps
   if (updates.status === "running" && !step.startedAt) {

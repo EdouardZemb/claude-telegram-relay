@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { readFile } from "fs/promises";
+import { join } from "path";
 import {
   buildSddKeyboard,
   detectConvergenceInResponse,
@@ -185,6 +187,20 @@ describe("sdd-flow", () => {
       const result = parseSddResultPrefix("");
       expect(result).toBeNull();
     });
+
+    it("parses SDD_REVIEW_APPROVED prefix (F-DA-6 verification)", () => {
+      const result = parseSddResultPrefix("SDD_REVIEW_APPROVED: foo");
+      expect(result).not.toBeNull();
+      expect(result!.phase).toBe("review");
+      expect(result!.verdict).toBe("APPROVED");
+    });
+
+    it("parses SDD_REVIEW_CHANGES_REQUESTED prefix (F-DA-6 verification)", () => {
+      const result = parseSddResultPrefix("SDD_REVIEW_CHANGES_REQUESTED: foo");
+      expect(result).not.toBeNull();
+      expect(result!.phase).toBe("review");
+      expect(result!.verdict).toBe("CHANGES_REQUESTED");
+    });
   });
 
   // ── V13: Guard prefix test ─────────────────────────────────
@@ -197,6 +213,80 @@ describe("sdd-flow", () => {
       // the expected default function.
       const mod = require("../../src/commands/sdd-flow.ts");
       expect(typeof mod.default).toBe("function");
+    });
+  });
+
+  // ── VC9-VC13: Merge callbacks ─────────────────────────────
+
+  describe("merge callbacks (VC9-VC13, structural)", () => {
+    let source: string;
+
+    it("loads sdd-flow source", async () => {
+      source = await readFile(
+        join(import.meta.dir, "..", "..", "src", "commands", "sdd-flow.ts"),
+        "utf-8",
+      );
+      expect(source.length).toBeGreaterThan(0);
+    });
+
+    it("VC9: merge_ask case handles absent prUrl with introuvable message", async () => {
+      const src = await readFile(
+        join(import.meta.dir, "..", "..", "src", "commands", "sdd-flow.ts"),
+        "utf-8",
+      );
+      // Verify merge_ask case exists
+      expect(src).toContain('"merge_ask"');
+      // Verify it checks prUrl from tracker
+      expect(src).toContain("steps.implement.prUrl");
+      // Verify error message for absent prUrl
+      expect(src).toContain("introuvable");
+      expect(src).toContain("mergez manuellement");
+    });
+
+    it("VC10: merge_ask shows PR number in confirmation and two buttons", async () => {
+      const src = await readFile(
+        join(import.meta.dir, "..", "..", "src", "commands", "sdd-flow.ts"),
+        "utf-8",
+      );
+      // Verify confirmation message references PR number
+      expect(src).toContain("Confirmer le merge de PR #");
+      // Verify merge_ok and merge_no buttons are created
+      expect(src).toContain("sdd_merge_ok");
+      expect(src).toContain("sdd_merge_no");
+      expect(src).toContain("Confirmer le merge");
+      expect(src).toContain("Annuler");
+    });
+
+    it("VC11: merge_no edits message to 'Merge annule.'", async () => {
+      const src = await readFile(
+        join(import.meta.dir, "..", "..", "src", "commands", "sdd-flow.ts"),
+        "utf-8",
+      );
+      expect(src).toContain('"merge_no"');
+      expect(src).toContain("Merge annule.");
+      expect(src).toContain("editMessageText");
+    });
+
+    it("VC12: merge_ok checks GITHUB_REPO before calling merge", async () => {
+      const src = await readFile(
+        join(import.meta.dir, "..", "..", "src", "commands", "sdd-flow.ts"),
+        "utf-8",
+      );
+      expect(src).toContain('"merge_ok"');
+      // Guard: githubRepo (from getConfig()) must be non-empty
+      expect(src).toMatch(/githubRepo|GITHUB_REPO/);
+      expect(src).toContain("non configure");
+      // Merge call present
+      expect(src).toContain("gh");
+      expect(src).toContain("--squash");
+      expect(src).toContain("--delete-branch");
+    });
+
+    it("VC13: sdd_merge_* callback_data respects 64-byte limit for 48-char names", () => {
+      const maxName = "a".repeat(48);
+      expect(("sdd_merge_ask:" + maxName).length).toBeLessThanOrEqual(64);
+      expect(("sdd_merge_ok:" + maxName).length).toBeLessThanOrEqual(64);
+      expect(("sdd_merge_no:" + maxName).length).toBeLessThanOrEqual(64);
     });
   });
 
