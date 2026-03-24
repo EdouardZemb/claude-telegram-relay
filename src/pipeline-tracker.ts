@@ -116,12 +116,18 @@ async function savePipelines(): Promise<void> {
  * 5 steps: lowercase -> NFD normalize -> strip diacritics -> strip non-alphanum -> collapse/trim hyphens
  */
 export function toPipelineName(description: string): string {
-  return description
+  const slug = description
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  // Telegram callback_data max 64 bytes. Prefix "sdd_implement:" = 14 chars.
+  // Truncate to 48 chars at last complete word boundary.
+  if (slug.length <= 48) return slug;
+  const truncated = slug.substring(0, 48);
+  const lastHyphen = truncated.lastIndexOf("-");
+  return lastHyphen > 10 ? truncated.substring(0, lastHyphen) : truncated;
 }
 
 /**
