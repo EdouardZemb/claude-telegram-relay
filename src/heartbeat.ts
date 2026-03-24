@@ -2,7 +2,7 @@
  * @module heartbeat
  * @description Autonomous heartbeat: periodic project pulse that observes, analyzes,
  * and takes initiative. Runs as PM2 cron service every 10 minutes.
- * Consolidates alert-cron (hourly alerts, memory archival, morning digest)
+ * Consolidates alert-cron (hourly alerts, memory archival)
  * and autonomy-cron (daily autonomy scan) into a single service.
  */
 
@@ -16,7 +16,6 @@
  *       → parse decision → execute actions → run periodic tasks → persist state
  *
  * Periodic tasks (run without Claude, time-gated):
- * - Every pulse: morning digest flush (if quiet hours just ended)
  * - Hourly: alert checks (runAllChecks) + memory archival (archiveOldMemories)
  * - Daily: autonomy scan (runAllScanners) — creates improvement tasks
  *
@@ -55,14 +54,7 @@ import {
 import { LLMOPS_CHECK_INTERVAL_MS, runLlmOpsCheck } from "./llm-ops.ts";
 import { createLogger } from "./logger.ts";
 import { archiveOldMemories } from "./memory.ts";
-import {
-  enqueue,
-  flushMorningDigest,
-  getQueue,
-  isQuietHours,
-  loadPrefs,
-  loadQueue,
-} from "./notification-queue.ts";
+import { enqueue } from "./notification-queue.ts";
 import { addTask, getCurrentSprint } from "./tasks.ts";
 
 const log = createLogger("heartbeat");
@@ -605,18 +597,6 @@ export async function pulse(): Promise<{
   // These run regardless of triage result, gated only by time intervals.
 
   const sprint = (await getCurrentSprint(supabase)) || undefined;
-
-  // Every pulse: Morning digest flush (if quiet hours just ended)
-  try {
-    await loadPrefs();
-    await loadQueue();
-    if (!isQuietHours() && getQueue().length > 0) {
-      log.info(`Flushing ${getQueue().length} queued notifications as morning digest.`);
-      await flushMorningDigest();
-    }
-  } catch (err) {
-    log.error("Morning digest flush error", { error: err });
-  }
 
   // Hourly: Alert checks
   try {

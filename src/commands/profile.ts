@@ -39,23 +39,6 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
     const parts = args.split(/\s+/);
     const action = parts[0];
 
-    if (action === "quiet" && parts[1]) {
-      const match = parts[1].match(/^(\d{1,2})h?-(\d{1,2})h?$/);
-      if (!match) {
-        await ctx.reply("Format: /notify quiet 22h-8h", bctx.threadOpts(ctx));
-        return;
-      }
-      const prefs = getPrefs();
-      prefs.quietStart = parseInt(match[1], 10);
-      prefs.quietEnd = parseInt(match[2], 10);
-      await savePrefs(prefs);
-      await ctx.reply(
-        `Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`,
-        bctx.threadOpts(ctx),
-      );
-      return;
-    }
-
     if (action === "off" && parts[1]) {
       const type = parts[1] as NotificationType;
       if (!["task", "pr", "idea", "alert"].includes(type)) {
@@ -97,23 +80,8 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    if (parts[1] === "batch" || action === "batch") {
-      const resolvedType = ["task", "pr", "idea", "alert"].includes(action)
-        ? (action as NotificationType)
-        : (parts[1] as NotificationType);
-      if (!["task", "pr", "idea", "alert"].includes(resolvedType)) {
-        await ctx.reply("Types valides : task, pr, idea, alert", bctx.threadOpts(ctx));
-        return;
-      }
-      const prefs = getPrefs();
-      prefs.types[resolvedType].immediate = false;
-      await savePrefs(prefs);
-      await ctx.reply(`Notifications ${resolvedType} en mode batch.`, bctx.threadOpts(ctx));
-      return;
-    }
-
     await ctx.reply(
-      "Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]",
+      "Usage: /notify [status|on TYPE|off TYPE|TYPE immediate]",
       bctx.threadOpts(ctx),
     );
   });

@@ -47,9 +47,13 @@ describe("Module Imports: Core", () => {
   it("imports notification-queue module", async () => {
     const mod = await import("../../src/notification-queue");
     expect(mod.enqueue).toBeFunction();
-    expect(mod.getQueue).toBeFunction();
-    expect(mod.loadQueue).toBeFunction();
     expect(mod.startQueue).toBeFunction();
+    expect(mod.getQueueSize).toBeFunction();
+    // getQueue and loadQueue removed (batching suppressed)
+    // biome-ignore lint/suspicious/noExplicitAny: checking removed exports
+    expect((mod as any).getQueue).toBeUndefined();
+    // biome-ignore lint/suspicious/noExplicitAny: checking removed exports
+    expect((mod as any).loadQueue).toBeUndefined();
   });
 });
 

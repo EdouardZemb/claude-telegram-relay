@@ -1,8 +1,4 @@
 {
-  "quietStart": 0,
-  "quietEnd": 0,
-  "batchIntervalMs": 300000,
-  "batchThreshold": 100,
   "types": {
     "task": {
       "enabled": true,

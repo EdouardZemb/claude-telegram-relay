@@ -1,10 +1,12 @@
 /**
  * Unit Tests — src/notification-queue.ts
  *
- * Tests for notification queue, batching, digest formatting, inline buttons.
+ * Tests for notification system: immediate enqueue, inline buttons, preferences.
+ * Batching, quiet hours, and digest features have been removed (S-simplify sprint).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { join } from "path";
 
 // Set env before imports
 process.env.TELEGRAM_GROUP_ID = "123456";
@@ -17,13 +19,13 @@ import type { NotificationItem } from "../../src/notification-queue";
 
 const {
   enqueue,
-  flush,
-  getQueue,
   stopQueue,
   getQueueSize,
-  formatDigest,
-  formatMorningDigest,
   getInlineKeyboard,
+  formatPrefs,
+  isTypeEnabled,
+  isImmediate,
+  consumeMcpPending,
 } = await import("../../src/notification-queue");
 
 const { savePrefs, getDefaultPrefs, loadPrefs } = await import("../../src/notification-queue");
@@ -39,80 +41,8 @@ function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   };
 }
 
-describe("formatDigest", () => {
-  it("groups items by type with priority ordering", () => {
-    const items = [
-      makeItem({ type: "idea", message: "New idea" }),
-      makeItem({ type: "alert", message: "Alert!" }),
-      makeItem({ type: "task", message: "Task done" }),
-    ];
-    const result = formatDigest(items);
-
-    const alertIdx = result.indexOf("ALERTES");
-    const taskIdx = result.indexOf("TACHES");
-    const ideaIdx = result.indexOf("IDEES");
-
-    expect(alertIdx).toBeGreaterThanOrEqual(0);
-    expect(taskIdx).toBeGreaterThan(alertIdx);
-    expect(ideaIdx).toBeGreaterThan(taskIdx);
-  });
-
-  it("shows counts per type", () => {
-    const items = [
-      makeItem({ type: "task", message: "Task 1" }),
-      makeItem({ type: "task", message: "Task 2" }),
-      makeItem({ type: "alert", message: "Alert 1" }),
-    ];
-    const result = formatDigest(items);
-    expect(result).toContain("TACHES (2)");
-    expect(result).toContain("ALERTES (1)");
-  });
-
-  it("collapses after 10 items", () => {
-    const items = Array.from({ length: 15 }, (_, i) =>
-      makeItem({ type: "task", message: `Task ${i}` }),
-    );
-    const result = formatDigest(items);
-    expect(result).toContain("+ 5 autres notifications");
-  });
-
-  it("handles empty array", () => {
-    const result = formatDigest([]);
-    expect(result).toBe("");
-  });
-
-  it("handles single item", () => {
-    const items = [makeItem({ type: "pr", message: "PR created" })];
-    const result = formatDigest(items);
-    expect(result).toContain("PULL REQUESTS (1)");
-    expect(result).toContain("PR created");
-  });
-});
-
-describe("formatMorningDigest", () => {
-  it("includes time range header", () => {
-    const items = [
-      makeItem({ createdAt: Date.now() - 3600000 }),
-      makeItem({ createdAt: Date.now() }),
-    ];
-    const result = formatMorningDigest(items);
-    expect(result).toContain("Resume");
-    expect(result).toContain("2 notifications");
-  });
-
-  it("returns empty string for empty array", () => {
-    expect(formatMorningDigest([])).toBe("");
-  });
-
-  it("singular for 1 notification", () => {
-    const items = [makeItem()];
-    const result = formatMorningDigest(items);
-    expect(result).toContain("1 notification");
-    expect(result).not.toContain("notifications");
-  });
-});
-
 describe("getInlineKeyboard", () => {
+  // V7: task with data returns keyboard
   it("returns start+view buttons for backlog task", () => {
     const item = makeItem({
       type: "task",
@@ -158,6 +88,7 @@ describe("getInlineKeyboard", () => {
     expect(kb).toBeDefined();
   });
 
+  // V8: task without data returns undefined
   it("returns undefined for task without data", () => {
     const item = makeItem({ type: "task" });
     const kb = getInlineKeyboard(item);
@@ -167,29 +98,19 @@ describe("getInlineKeyboard", () => {
 
 describe("enqueue", () => {
   beforeEach(async () => {
-    // Reset prefs to defaults
-    const prefs = getDefaultPrefs();
-    // Disable quiet hours for tests
-    prefs.quietStart = 0;
-    prefs.quietEnd = 0;
-    // High threshold so batch doesn't auto-flush
-    prefs.batchThreshold = 100;
-    await savePrefs(prefs);
+    await savePrefs(getDefaultPrefs());
     await loadPrefs();
-    // Clear queue
-    while (getQueue().length > 0) getQueue().pop();
   });
 
-  it("adds normal items to queue", async () => {
+  // V1: immediate send — queue size stays 0 (no internal queue)
+  it("V1: sends immediately — getQueueSize remains 0", async () => {
     await enqueue({ type: "task", severity: "normal", message: "Test" });
-    expect(getQueueSize()).toBe(1);
+    expect(getQueueSize()).toBe(0);
   });
 
-  it("skips disabled types", async () => {
+  // V2: disabled type is silently skipped
+  it("V2: skips disabled types", async () => {
     const prefs = getDefaultPrefs();
-    prefs.quietStart = 0;
-    prefs.quietEnd = 0;
-    prefs.batchThreshold = 100;
     prefs.types.idea.enabled = false;
     await savePrefs(prefs);
     await loadPrefs();
@@ -197,47 +118,170 @@ describe("enqueue", () => {
     await enqueue({ type: "idea", severity: "normal", message: "Skipped" });
     expect(getQueueSize()).toBe(0);
 
-    // Restore defaults to avoid leaking to other test files
-    const restored = getDefaultPrefs();
-    restored.quietStart = 0;
-    restored.quietEnd = 0;
-    restored.batchThreshold = 100;
-    await savePrefs(restored);
+    await savePrefs(getDefaultPrefs());
     await loadPrefs();
   });
 
-  it("assigns unique IDs and timestamps", async () => {
+  // V3: critical severity still calls send
+  it("V3: critical severity enqueues immediately without throwing", async () => {
+    await expect(
+      enqueue({ type: "task", severity: "critical", message: "Critical!" }),
+    ).resolves.toBeUndefined();
+    expect(getQueueSize()).toBe(0);
+  });
+
+  // V4: getQueueSize always returns 0
+  it("V4: getQueueSize always returns 0 regardless of enqueue calls", async () => {
     await enqueue({ type: "task", severity: "normal", message: "A" });
     await enqueue({ type: "task", severity: "normal", message: "B" });
-    const q = getQueue();
-    expect(q[0].id).not.toBe(q[1].id);
-    expect(q[0].createdAt).toBeLessThanOrEqual(q[1].createdAt);
+    await enqueue({ type: "pr", severity: "normal", message: "C" });
+    expect(getQueueSize()).toBe(0);
   });
 });
 
-describe("flush", () => {
+describe("notification preferences", () => {
   beforeEach(async () => {
+    await savePrefs(getDefaultPrefs());
+    await loadPrefs();
+  });
+
+  // V5: disable type via savePrefs
+  it("V5: isTypeEnabled returns false after disabling idea", async () => {
     const prefs = getDefaultPrefs();
-    prefs.quietStart = 0;
-    prefs.quietEnd = 0;
-    prefs.batchThreshold = 100;
+    prefs.types.idea.enabled = false;
     await savePrefs(prefs);
     await loadPrefs();
-    while (getQueue().length > 0) getQueue().pop();
+    expect(isTypeEnabled("idea")).toBe(false);
+
+    await savePrefs(getDefaultPrefs());
+    await loadPrefs();
   });
 
-  it("clears queue after flush", async () => {
-    await enqueue({ type: "task", severity: "normal", message: "A" });
-    await enqueue({ type: "task", severity: "normal", message: "B" });
-    expect(getQueueSize()).toBe(2);
+  it("V5: isTypeEnabled returns true after re-enabling", async () => {
+    const prefs = getDefaultPrefs();
+    prefs.types.task.enabled = false;
+    await savePrefs(prefs);
+    await loadPrefs();
+    expect(isTypeEnabled("task")).toBe(false);
 
-    await flush();
-    expect(getQueueSize()).toBe(0);
+    prefs.types.task.enabled = true;
+    await savePrefs(prefs);
+    await loadPrefs();
+    expect(isTypeEnabled("task")).toBe(true);
   });
 
-  it("does nothing on empty queue", async () => {
-    await flush(); // Should not throw
-    expect(getQueueSize()).toBe(0);
+  // V6: isImmediate defaults
+  it("V6: isImmediate returns true for alert by default", async () => {
+    expect(isImmediate("alert")).toBe(true);
+  });
+
+  it("V6: isImmediate returns false for task by default", async () => {
+    expect(isImmediate("task")).toBe(false);
+  });
+
+  // V9: formatPrefs output — no quiet hours, no batch interval
+  it("V9: formatPrefs does not mention quiet hours or batch interval", async () => {
+    const prefs = getDefaultPrefs();
+    const output = formatPrefs(prefs);
+    expect(output).not.toContain("Quiet");
+    expect(output).not.toContain("quiet");
+    expect(output).not.toContain("Batch interval");
+    expect(output).not.toContain("batchInterval");
+    expect(output).toContain("PREFERENCES NOTIFICATIONS");
+    expect(output).toContain("Types :");
+  });
+
+  it("V9: formatPrefs shows types with normal/immediat/desactive labels", async () => {
+    const prefs = getDefaultPrefs();
+    const output = formatPrefs(prefs);
+    // alert is immediate by default
+    expect(output).toContain("alert : immediat");
+    // task is normal (not immediate, not disabled)
+    expect(output).toContain("task : normal");
+  });
+
+  // V12: immediate mode via savePrefs
+  it("V12: setting immediate=true for task works", async () => {
+    const prefs = getDefaultPrefs();
+    prefs.types.task.immediate = true;
+    await savePrefs(prefs);
+    await loadPrefs();
+    expect(isImmediate("task")).toBe(true);
+
+    await savePrefs(getDefaultPrefs());
+    await loadPrefs();
+  });
+
+  // V18: loadPrefs ignores obsolete fields from JSON
+  it("V18: loadPrefs ignores quietStart/quietEnd/batchIntervalMs/batchThreshold", async () => {
+    const { writeFile } = await import("fs/promises");
+    const PREFS_FILE = join(process.cwd(), "config", "notification-prefs.json");
+
+    const oldPrefs = {
+      quietStart: 20,
+      quietEnd: 9,
+      batchIntervalMs: 300000,
+      batchThreshold: 5,
+      types: {
+        task: { enabled: true, immediate: false },
+        pr: { enabled: true, immediate: false },
+        idea: { enabled: true, immediate: false },
+        alert: { enabled: true, immediate: true },
+      },
+    };
+    await writeFile(PREFS_FILE, JSON.stringify(oldPrefs, null, 2));
+    const loaded = await loadPrefs();
+
+    // Types still loaded correctly despite obsolete fields
+    expect(loaded.types.task.enabled).toBe(true);
+    expect(loaded.types.alert.immediate).toBe(true);
+    expect(loaded.types.pr.enabled).toBe(true);
+    // Obsolete fields are not part of the typed NotificationPrefs interface
+    // (TypeScript ensures they're inaccessible via the typed API)
+
+    await savePrefs(getDefaultPrefs());
+    await loadPrefs();
+  });
+});
+
+describe("consumeMcpPending", () => {
+  const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
+  const MCP_FILE = join(RELAY_DIR, "mcp-pending-notifications.json");
+
+  // V16: file does not exist → no throw
+  it("V16: handles missing MCP file gracefully (ENOENT)", async () => {
+    const { unlink } = await import("fs/promises");
+    try {
+      await unlink(MCP_FILE);
+    } catch {
+      // file may not exist — that's fine
+    }
+    await expect(consumeMcpPending()).resolves.toBeUndefined();
+  });
+
+  // V15: reads valid pending items and clears file
+  it("V15: reads MCP pending items and clears the file", async () => {
+    const { mkdir: mkdirFn, writeFile: wf, readFile: rf } = await import("fs/promises");
+    await mkdirFn(RELAY_DIR, { recursive: true });
+
+    const pending = [
+      { type: "task", severity: "normal", message: "MCP task", data: {} },
+      { type: "alert", severity: "critical", message: "MCP alert" },
+    ];
+    await wf(MCP_FILE, JSON.stringify(pending));
+
+    await consumeMcpPending();
+
+    // File should be cleared
+    const content = await rf(MCP_FILE, "utf-8");
+    expect(JSON.parse(content)).toEqual([]);
+  });
+
+  it("V16: handles empty MCP file gracefully", async () => {
+    const { mkdir: mkdirFn, writeFile: wf } = await import("fs/promises");
+    await mkdirFn(RELAY_DIR, { recursive: true });
+    await wf(MCP_FILE, "[]");
+    await expect(consumeMcpPending()).resolves.toBeUndefined();
   });
 });
 
