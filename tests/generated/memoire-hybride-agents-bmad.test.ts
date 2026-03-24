@@ -233,6 +233,7 @@ describe("[V3] getAgentMemories returns max 15 entries sorted by importance DESC
       rpc: () => Promise.resolve({ data: null, error: { message: "RPC error" } }),
     };
 
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     const result = await getAgentMemories(supabaseMock as any, "qa", 15);
     expect(result).toEqual([]);
   });
@@ -430,123 +431,6 @@ describe("[V7] ROLE_MEMORY_SHARE is between 0.08 and 0.12", () => {
   test("ROLE_MEMORY_SHARE_WITH_EXPLORATION = 0.08", async () => {
     const { ROLE_MEMORY_SHARE_WITH_EXPLORATION } = await import("../../src/agent-context");
     expect(ROLE_MEMORY_SHARE_WITH_EXPLORATION).toBe(0.08);
-  });
-});
-
-// ─── V8 — promoteWorkingMemory tags agent_role in metadata ──
-
-// V-critere: V8
-describe("[V8] promoteWorkingMemory persists agent_role in metadata", () => {
-  test("metadata.agent_role = qa when item.agent = qa", async () => {
-    agentRoleMemoryFlagValue = false; // only test global memory insert (V8)
-    const { createMockSupabase } = await import("../fixtures/mock-supabase");
-    const { promoteWorkingMemory } = await import("../../src/memory");
-
-    const supabase = createMockSupabase();
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => []);
-
-    const workingMemory = {
-      decisions: [
-        {
-          agent: "qa",
-          decision: "Add test for null pointer edge case",
-          reasoning: "Prevents regression",
-        },
-      ],
-    };
-
-    await promoteWorkingMemory(supabase, workingMemory, "session-v8");
-
-    const memoryRows = supabase._getTable("memory");
-    const inserted = memoryRows.find((r) => r.metadata?.agent_role === "qa");
-    expect(inserted).toBeDefined();
-    expect(inserted?.metadata.agent_role).toBe("qa");
-  });
-
-  test("agent_role propagated for discoveries", async () => {
-    agentRoleMemoryFlagValue = false;
-    const { createMockSupabase } = await import("../fixtures/mock-supabase");
-    const { promoteWorkingMemory } = await import("../../src/memory");
-
-    const supabase = createMockSupabase();
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => []);
-
-    const workingMemory = {
-      discoveries: [
-        {
-          agent: "architect",
-          fact: "Dependency injection improves testability",
-          source: "code review",
-        },
-      ],
-    };
-
-    await promoteWorkingMemory(supabase, workingMemory, "session-v8-disc");
-
-    const memoryRows = supabase._getTable("memory");
-    const inserted = memoryRows.find((r) => r.metadata?.agent_role === "architect");
-    expect(inserted).toBeDefined();
-    expect(inserted?.metadata.agent_role).toBe("architect");
-  });
-});
-
-// ─── V9 — promoteWorkingMemory calls saveAgentMemory ────────
-
-// V-critere: V9
-describe("[V9] promoteWorkingMemory calls saveAgentMemory for each promoted item when flag=true", () => {
-  test("saveAgentMemory called N times = nb items when flag=true", async () => {
-    agentRoleMemoryFlagValue = true;
-    const { createMockSupabase } = await import("../fixtures/mock-supabase");
-    const { promoteWorkingMemory } = await import("../../src/memory");
-
-    const supabase = createMockSupabase();
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => []);
-    // resolveAgentMemoryConflict will query agent_memory (no items = always insert)
-
-    const workingMemory = {
-      decisions: [
-        { agent: "architect", decision: "Use event sourcing", reasoning: "Auditability" },
-        { agent: "qa", decision: "Test edge cases first", reasoning: "Quality" },
-      ],
-      discoveries: [
-        { agent: "dev", fact: "Bun is 10x faster than Node for tests", source: "benchmark" },
-      ],
-    };
-
-    await promoteWorkingMemory(supabase, workingMemory, "session-v9");
-    agentRoleMemoryFlagValue = false;
-
-    // All 3 items should be in agent_memory
-    const agentMemoryRows = supabase._getTable("agent_memory");
-    expect(agentMemoryRows.length).toBeGreaterThanOrEqual(3);
-
-    const roles = agentMemoryRows.map((r) => r.agent_role);
-    expect(roles).toContain("architect");
-    expect(roles).toContain("qa");
-    expect(roles).toContain("dev");
-  });
-
-  test("saveAgentMemory NOT called when flag=false", async () => {
-    agentRoleMemoryFlagValue = false;
-    const { createMockSupabase } = await import("../fixtures/mock-supabase");
-    const { promoteWorkingMemory } = await import("../../src/memory");
-
-    const supabase = createMockSupabase();
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => []);
-
-    const workingMemory = {
-      decisions: [{ agent: "architect", decision: "Use microservices", reasoning: "Scalability" }],
-    };
-
-    await promoteWorkingMemory(supabase, workingMemory, "session-v9-off");
-
-    // agent_memory should be empty (no saveAgentMemory call)
-    const agentMemoryRows = supabase._getTable("agent_memory");
-    expect(agentMemoryRows.length).toBe(0);
   });
 });
 
@@ -961,37 +845,6 @@ describe("[V17] ROLE_CANONICAL_TAGS has correct tags for all 8 roles", () => {
   test("sm has processus tag", async () => {
     const { ROLE_CANONICAL_TAGS } = await import("../../src/memory");
     expect(ROLE_CANONICAL_TAGS.sm).toContain("processus");
-  });
-});
-
-// ─── V18 — orchestrateur calls saveAgentMemory per agent ────
-
-// V-critere: V18 (integration)
-describe("[V18] orchestrator: role-specific memory saved per successful agent", () => {
-  test("saveAgentMemory called for each role when flag=true via promoteWorkingMemory", async () => {
-    agentRoleMemoryFlagValue = true;
-    const { createMockSupabase } = await import("../fixtures/mock-supabase");
-    const { promoteWorkingMemory } = await import("../../src/memory");
-
-    const supabase = createMockSupabase();
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => []);
-
-    // Simulate 2-step pipeline (architect + qa)
-    const workingMemory = {
-      decisions: [
-        { agent: "architect", decision: "Use hexagonal architecture", reasoning: "Testability" },
-        { agent: "qa", decision: "Gate 3 requires 3+ findings", reasoning: "Quality bar" },
-      ],
-    };
-
-    await promoteWorkingMemory(supabase, workingMemory, "session-v18");
-    agentRoleMemoryFlagValue = false;
-
-    const agentMemoryRows = supabase._getTable("agent_memory");
-    const roles = agentMemoryRows.map((r) => r.agent_role);
-    expect(roles).toContain("architect");
-    expect(roles).toContain("qa");
   });
 });
 

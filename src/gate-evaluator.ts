@@ -517,16 +517,6 @@ export async function evaluateGate(
         rubric: explorationChecks.rubric,
       };
     }
-    // If completeness check passed but feature flag says no LLM, return pass
-    if (!isFeatureEnabled("exploration_gate")) {
-      return {
-        pass: true,
-        score: explorationChecks.score,
-        issues: [],
-        gate_name: gateName,
-        rubric: explorationChecks.rubric,
-      };
-    }
   }
 
   // AC-005: Non-implementation gates skip deterministic checks

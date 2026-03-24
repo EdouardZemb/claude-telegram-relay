@@ -182,12 +182,11 @@ describe("Coding standards — S3: LOC threshold", () => {
   // Temporary allowlist for files currently above threshold.
   // These are tracked for future refactoring — see CLAUDE.md "File size guideline".
   const LOC_ALLOWLIST: Record<string, number> = {
-    "orchestrator/pipeline.ts": 1486,
+    "orchestrator/pipeline.ts": 1107,
     "agent-schemas.ts": 1091,
-    "commands/planning.ts": 1005,
-    "gate-evaluator.ts": 937,
+    "commands/planning.ts": 847,
+    "gate-evaluator.ts": 927,
     "commands/zz-messages.ts": 909,
-    "memory/graph.ts": 855,
     "workflow.ts": 848,
     "bot-context.ts": 816,
   };

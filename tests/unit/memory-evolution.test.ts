@@ -6,15 +6,13 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { MemoryHealthStats, WorkingMemoryData } from "../../src/memory";
+import type { MemoryHealthStats } from "../../src/memory";
 import {
   autoRemember,
   findSimilarFact,
   formatMemoryHealth,
   memoryHealthStats,
-  PROMOTION_MAX_CHARS,
   processMemoryIntents,
-  promoteWorkingMemory,
   resolveMemoryConflict,
   updateMemoryWithRevision,
 } from "../../src/memory";
@@ -78,7 +76,9 @@ describe("findSimilarFact", () => {
   });
 
   it("uses custom threshold", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     let searchBody: any = null;
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     supabase._registerFunction("search", (opts: any) => {
       searchBody = opts?.body;
       return [];
@@ -115,11 +115,13 @@ describe("resolveMemoryConflict", () => {
     const result = await resolveMemoryConflict(supabase, "Exact same fact");
 
     expect(result.action).toBe("skip");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     expect((result as any).existingId).toBe("f1");
   });
 
   it("bumps access on duplicate detection", async () => {
     let bumpedIds: string[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     supabase._registerRpc("bump_memory_access", (params: any) => {
       bumpedIds = params.memory_ids;
       return null;
@@ -141,6 +143,7 @@ describe("resolveMemoryConflict", () => {
     const result = await resolveMemoryConflict(supabase, "Updated version of fact");
 
     expect(result.action).toBe("update");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     expect((result as any).existingId).toBe("f1");
   });
 
@@ -152,6 +155,7 @@ describe("resolveMemoryConflict", () => {
     const result = await resolveMemoryConflict(supabase, "Additional detail about base fact");
 
     expect(result.action).toBe("merge");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
     expect((result as any).existingId).toBe("f1");
   });
 
@@ -546,198 +550,6 @@ describe("autoRemember conflict resolution for facts", () => {
   });
 });
 
-// ── promoteWorkingMemory (S36-08) ───────────────────────────────
-
-describe("promoteWorkingMemory", () => {
-  let supabase: ReturnType<typeof createMockSupabase>;
-
-  beforeEach(() => {
-    supabase = createMockSupabase();
-    // No search handler → resolveMemoryConflict returns "insert"
-    supabase._registerFunction("search", () => []);
-  });
-
-  it("promotes decisions to permanent memories", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [
-        { agent: "architect", decision: "Use microservices", reasoning: "Better scalability" },
-      ],
-      discoveries: [],
-      blockers: [],
-      context_updates: [],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-1");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(1);
-    expect(memory[0].type).toBe("fact");
-    expect(memory[0].content).toContain("Use microservices");
-    expect(memory[0].content).toContain("Better scalability");
-    expect(memory[0].metadata.source).toBe("working_memory_promotion");
-    expect(memory[0].metadata.pipeline_session_id).toBe("session-1");
-  });
-
-  it("promotes discoveries to permanent memories", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [],
-      discoveries: [{ agent: "qa", fact: "Coverage is 85%", source: "test run" }],
-      blockers: [],
-      context_updates: [],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-2");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory[0].content).toBe("Coverage is 85%");
-    expect(memory[0].metadata.agent).toBe("qa");
-  });
-
-  it("skips duplicate items during promotion", async () => {
-    supabase._registerRpc("bump_memory_access", () => null);
-    supabase._registerFunction("search", () => [
-      { id: "f1", content: "Same fact exists", type: "fact", similarity: 0.9 },
-    ]);
-
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "dev", decision: "Same fact exists", reasoning: "Already known" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-3");
-
-    expect(count).toBe(0);
-    const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(0);
-  });
-
-  it("handles multiple items", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [
-        { agent: "architect", decision: "Use REST", reasoning: "Simpler" },
-        { agent: "dev", decision: "Use TypeScript", reasoning: "Type safety" },
-      ],
-      discoveries: [{ agent: "qa", fact: "No regressions found", source: "tests" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-4");
-
-    expect(count).toBe(3);
-    const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(3);
-  });
-
-  it("returns 0 for null supabase", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "dev", decision: "Something", reasoning: "Because" }],
-    };
-
-    const count = await promoteWorkingMemory(null, wm, "session");
-    expect(count).toBe(0);
-  });
-
-  it("returns 0 for null workingMemory", async () => {
-    const count = await promoteWorkingMemory(supabase, null, "session");
-    expect(count).toBe(0);
-  });
-
-  it("returns 0 for empty working memory", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [],
-      discoveries: [],
-      blockers: [],
-      context_updates: [],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session");
-    expect(count).toBe(0);
-  });
-
-  it("ignores blockers and context_updates (not promoted)", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [],
-      discoveries: [],
-      blockers: [{ agent: "dev", issue: "API down", status: "resolved" }],
-      context_updates: [{ agent: "pm", key: "priority", value: "high" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session");
-    expect(count).toBe(0);
-  });
-
-  // V17: Items promoted are truncated to 500 chars before insertion
-  it("[V17] truncates items longer than 500 chars before insertion", async () => {
-    const longDecision = "A".repeat(1000);
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "architect", decision: longDecision, reasoning: "B" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-trunc");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(1);
-    expect(memory[0].content.length).toBeLessThanOrEqual(PROMOTION_MAX_CHARS);
-    expect(memory[0].metadata.truncated).toBe(true);
-  });
-
-  it("does not set truncated flag for short items", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "dev", decision: "Use REST", reasoning: "Simple" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-short");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory[0].metadata.truncated).toBeUndefined();
-  });
-
-  // V17 edge: truncation happens BEFORE resolve (F-DA-4)
-  it("truncates content before resolveMemoryConflict (dedup uses truncated text)", async () => {
-    const longText = "X".repeat(600);
-    // Register search that returns a match for the truncated version
-    supabase._registerFunction("search", (opts: any) => {
-      // The search query should be <= 500 chars
-      const query = opts?.body?.query || "";
-      if (query.length <= PROMOTION_MAX_CHARS) {
-        return [{ id: "f1", content: "existing", type: "fact", similarity: 0.9 }];
-      }
-      return [];
-    });
-    supabase._registerRpc("bump_memory_access", () => null);
-
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "dev", decision: longText, reasoning: "reason" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-resolve");
-    // Should be skipped due to dedup on the truncated text
-    expect(count).toBe(0);
-  });
-
-  it("includes promotion_type in metadata for decisions", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "architect", decision: "Use REST", reasoning: "Simple" }],
-    };
-
-    await promoteWorkingMemory(supabase, wm, "session-type");
-    const memory = supabase._getTable("memory");
-    expect(memory[0].metadata.promotion_type).toBe("decision");
-  });
-
-  it("includes promotion_type in metadata for discoveries", async () => {
-    const wm: WorkingMemoryData = {
-      discoveries: [{ agent: "qa", fact: "Coverage 85%", source: "tests" }],
-    };
-
-    await promoteWorkingMemory(supabase, wm, "session-type2");
-    const memory = supabase._getTable("memory");
-    expect(memory[0].metadata.promotion_type).toBe("discovery");
-  });
-});
-
 // ── memoryHealthStats ──────────────────────────────────────────
 
 describe("memoryHealthStats", () => {
@@ -1077,17 +889,5 @@ describe("formatMemoryHealth", () => {
     expect(text).toContain("...");
     // The displayed content should be truncated
     expect(text).toContain("5x");
-  });
-});
-
-// ── V12: Feature flag memory_promotion ────────────────────────────
-
-describe("Feature flag memory_promotion", () => {
-  it("[V12] exists in config/features.json with value false", async () => {
-    const fs = await import("fs");
-    const path = await import("path");
-    const featuresPath = path.join(process.cwd(), "config", "features.json");
-    const content = JSON.parse(fs.readFileSync(featuresPath, "utf-8"));
-    expect(content.memory_promotion).toBe(false);
   });
 });

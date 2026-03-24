@@ -41,13 +41,13 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `memory/classification.ts` | Message classification, autoRemember, findDuplicateIdea, classifyLinkContent |
 | `memory/scoring.ts` | Importance scoring, temporal decay, conflict resolution, contradiction detection |
 | `memory/ideas.ts` | Ideas CRUD: listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList |
-| `memory/graph.ts` | Memory linking, chains, clustering, health stats, promoteWorkingMemory, buildMemoryChains |
+| `memory/graph.ts` | Memory linking, chains, clustering, health stats, buildMemoryChains |
 | `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
 | `orchestrator.ts` | Barrel re-export for orchestrator sub-modules (see `src/orchestrator/`) + re-exports from deliberation.ts and pipeline-selection.ts |
 | `orchestrator/types.ts` | Types: AgentRole, AgentStepResult, OrchestratedResult, OrchestrateOptions, AGENT_COMMAND_MAP |
 | `orchestrator/agent-step.ts` | Single agent step: runAgentStep, getOrchestrationInstructions, persistAgentArtifact |
-| `orchestrator/pipeline.ts` | Main orchestrate() function: multi-agent pipeline with blackboard, gates, adversarial, conformance |
+| `orchestrator/pipeline.ts` | Main orchestrate() function: multi-agent pipeline with blackboard, gates, deliberation |
 | `orchestrator/format.ts` | Formatting: formatOrchestrationResult, buildOrchestrationSummary, logOrchestrationResult |
 | `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
 | `deliberation.ts` | Deliberation protocol: paired reviewer examines strategic agent output |
@@ -57,8 +57,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
 | `logger.ts` | Structured logger: JSON (production) / colored (dev), correlation IDs, log level filtering |
 | `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, V-criteria conformance check |
-| `adversarial-challenge.ts` | P2 adversarial challenge (Devil's Advocate) + E1 impact analysis before dev |
-| `spec-lite.ts` | P1 lightweight spec phase: proto-spec with V-criteria and impacted files |
 | `agent-schemas.ts` | Typed JSON output schemas per agent role, ProtoSpec/AdversarialResult/ImpactAnalysisResult |
 | `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent role |
@@ -87,7 +85,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets |
 | `mcp-config.ts` | Per-role MCP tool configuration and allowlists |
-| `exploration-scoring.ts` | Exploration phase scoring: graph + keywords + similarity |
 | `pipeline-selection.ts` | Dynamic pipeline selection: keywords, constants, adaptive selection |
 | `pipeline-state.ts` | Pipeline checkpoint/resume: persists state, enables resume from last success |
 | `action-registry.ts` | Registry of all 37 bot commands: metadata, params, risk levels, aliases |
@@ -189,7 +186,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    75 TypeScript modules (core logic)
+src/                    72 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
   orchestrator/         4 sub-modules (types, agent-step, pipeline, format)
@@ -198,14 +195,14 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  4035 tests (unit + integration + E2E)
+tests/                  3870 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
 docs/explorations/      Exploration reports (EXPLORE-{name}.md)
 docs/adr/               Architecture Decision Records (ADR-{nnn}.md)
-.claude/agents/         11 specialized agents (dev pipeline)
-.claude/skills/         7 skills (dev pipeline orchestration)
+.claude/agents/         6 specialized agents (dev pipeline)
+.claude/skills/         4 skills (dev pipeline orchestration)
 ```
 
 ### Dev Pipeline (maturation code)
@@ -215,23 +212,18 @@ Pour toute modification non triviale, utiliser le pipeline de maturation :
 | Commande | Phase | Description |
 |----------|-------|-------------|
 | `/dev-explore` | 0 | Exploration structuree avant spec (optionnel, verdict GO/PIVOT/DROP) |
-| `/dev-spec` | 1 | Specification formelle 9 sections + V-criteres |
-| `/dev-challenge` | 2 | Challenge adversarial (3 agents paralleles) + analyse d'impact |
-| `/dev-implement` | 3 | Implementation TDD (Test Architect → Implementer → Tester) |
-| `/dev-review` | 4 | Revue de code |
-| `/dev-doc` | 5 | Mise a jour documentation |
-| `/dev-pipeline` | * | Meta-orchestrateur (toutes les phases bout en bout) |
+| `/dev-implement` | 1 | Implementation TDD (generation tests + code + validation) |
+| `/dev-review` | 2 | Revue de code |
+| `/dev-doc` | 3 | Mise a jour documentation |
 
-Workflow complet : `/dev-spec` → quality gate → `/dev-challenge` + Impact → `/dev-implement` (TDD) → conformance → review → `/dev-doc` → commit
-
-Reprise en contexte frais : `/dev-pipeline --from {phase} docs/specs/SPEC-{name}.md`
+Workflow : `/dev-explore` (optionnel) → `/dev-implement` (TDD) → `/dev-review` → `/dev-doc` → commit
 
 Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/WORKFLOW-DEV.md](docs/WORKFLOW-DEV.md)
 
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (4035 tests, all must pass before merge)
+- Tests: `bun test` (3870 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -239,7 +231,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
-- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: pipeline.ts (1486), agent-schemas.ts (1091), planning.ts (1005), gate-evaluator.ts (937), zz-messages.ts (909), graph.ts (855), workflow.ts (848), bot-context.ts (816) — deferred to future vagues
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: pipeline.ts (1107), agent-schemas.ts (1091), planning.ts (847), gate-evaluator.ts (927), zz-messages.ts (909), workflow.ts (848), bot-context.ts (816) — deferred to future vagues
 
 ## Setup
 

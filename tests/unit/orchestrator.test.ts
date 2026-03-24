@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { isFeatureEnabled, loadFeatures } from "../../src/feature-flags";
 import {
   type AgentRole,
   type AgentStepResult,
@@ -360,40 +359,9 @@ describe("classifyPipeline", () => {
   });
 });
 
-// ── P1/P2/E1/P3 Feature Flags ────────────────────────────────
+// ── Pipeline Structure ────────────────────────────────────────
 
-describe("[V14] Feature Flags for P1/P2/E1/P3", () => {
-  it("[V14] config/features.json contains spec_phase_lite=false", () => {
-    const flags = loadFeatures();
-    expect(flags.spec_phase_lite).toBe(false);
-  });
-
-  it("[V14] config/features.json contains adversarial_challenge=false", () => {
-    const flags = loadFeatures();
-    expect(flags.adversarial_challenge).toBe(false);
-  });
-
-  it("spec_phase_lite is disabled by default", () => {
-    expect(isFeatureEnabled("spec_phase_lite")).toBe(false);
-  });
-
-  it("adversarial_challenge is disabled by default", () => {
-    expect(isFeatureEnabled("adversarial_challenge")).toBe(false);
-  });
-
-  it("[V15] existing flags are unchanged after adding new ones", () => {
-    const flags = loadFeatures();
-    expect(flags.heartbeat).toBe(true);
-    expect(flags.job_manager).toBe(true);
-    expect(flags.auto_document_search).toBe(true);
-    expect(flags.prd_to_deploy).toBe(true);
-    expect(flags.exploration_phase).toBe(false);
-    expect(flags.exploration_gate).toBe(false);
-    expect(flags.llmops_monitoring).toBe(true);
-  });
-});
-
-describe("[V12] P1/P2/E1/P3 pipeline scope guards", () => {
+describe("[V12] Pipeline scope guards", () => {
   function _makeTask(overrides: Partial<Task> = {}): Task {
     return {
       id: "test-scope",
@@ -434,147 +402,5 @@ describe("[V12] P1/P2/E1/P3 pipeline scope guards", () => {
     const plannerIdx = LIGHT_PIPELINE.indexOf("planner");
     expect(devIdx).toBeGreaterThan(plannerIdx);
     // F-DA-2: P2 inserts by detecting pre-dev agent, not by gateMap
-  });
-});
-
-// ── Working memory promotion in orchestrator ─────────────────
-
-describe("memory_promotion feature flag", () => {
-  // V2 / V12: Flag exists in config
-  it("[V12] memory_promotion flag exists in features.json and defaults to false", () => {
-    const flags = loadFeatures();
-    expect(flags.memory_promotion).toBe(false);
-  });
-
-  it("memory_promotion is disabled by default", () => {
-    expect(isFeatureEnabled("memory_promotion")).toBe(false);
-  });
-});
-
-// ── Working memory promotion structural verification ─────────
-
-describe("Working memory promotion in orchestrate()", () => {
-  // Read orchestrator source once for structural assertions
-  let orchestratorSource: string;
-
-  it("loads orchestrator source for structural tests", async () => {
-    const fs = await import("fs");
-    orchestratorSource = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-    expect(orchestratorSource.length).toBeGreaterThan(0);
-  });
-
-  it("[V1] promoteWorkingMemory is called when memory_promotion flag is active and blackboard has working_memory", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V1: The orchestrator must check isFeatureEnabled("memory_promotion") AND bbSessionId
-    const guardMatch = source.match(
-      /if\s*\(\s*isFeatureEnabled\(\s*["']memory_promotion["']\s*\)\s*&&\s*bbSessionId\s*\)/,
-    );
-    expect(guardMatch).not.toBeNull();
-
-    // V1: promoteWorkingMemory is called with supabase, working memory, and sessionId
-    const callMatch = source.match(
-      /promoteWorkingMemory\(\s*supabase\s*,\s*wmForPromotion\s*,\s*bbSessionId\s*\)/,
-    );
-    expect(callMatch).not.toBeNull();
-
-    // V1: working memory is read from blackboard section
-    expect(source).toContain('readSection(supabase, bbSessionId, "working_memory")');
-  });
-
-  it("[V2] promoteWorkingMemory is NOT called when flag is inactive", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V2: The guard ensures promotion is skipped when flag is off
-    // isFeatureEnabled("memory_promotion") is the first condition in the if-guard
-    const guardMatch = source.match(/if\s*\(\s*isFeatureEnabled\(\s*["']memory_promotion["']\s*\)/);
-    expect(guardMatch).not.toBeNull();
-
-    // V2: promoteWorkingMemory only appears INSIDE this guarded block, not elsewhere
-    const lines = source.split("\n");
-    const promoteCalls = lines.filter(
-      (l) =>
-        l.includes("promoteWorkingMemory(") &&
-        !l.trimStart().startsWith("import") &&
-        !l.trimStart().startsWith("//"),
-    );
-    // Should only have one call (the guarded one)
-    expect(promoteCalls.length).toBe(1);
-  });
-
-  it("[V3] promoteWorkingMemory is NOT called when useBlackboard is false", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V3: bbSessionId is only set when options.useBlackboard is true
-    // The guard `isFeatureEnabled("memory_promotion") && bbSessionId` ensures
-    // no promotion when blackboard is not used (bbSessionId stays null)
-    const bbSessionInit = source.match(/let\s+bbSessionId:\s*string\s*\|\s*null\s*=\s*null/);
-    expect(bbSessionInit).not.toBeNull();
-
-    // bbSessionId is only assigned inside if (options.useBlackboard)
-    const bbAssignment = source.match(
-      /if\s*\(\s*options\.useBlackboard\s*\)\s*\{[\s\S]*?bbSessionId\s*=\s*`bb-/,
-    );
-    expect(bbAssignment).not.toBeNull();
-  });
-
-  it("[V4] promoteWorkingMemory failure does not block orchestrate() return", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V4: The promotion block is wrapped in try/catch
-    // Extract the promotion block and verify it's inside try/catch
-    const tryCatchMatch = source.match(
-      /try\s*\{[\s\S]*?promoteWorkingMemory\([\s\S]*?\}\s*catch\s*\(\s*promoError\s*\)/,
-    );
-    expect(tryCatchMatch).not.toBeNull();
-
-    // V4: The catch block logs the error but does NOT re-throw
-    const catchBlock = source.match(
-      /catch\s*\(\s*promoError\s*\)\s*\{[^}]*log\.error\([^)]*\)[^}]*\}/,
-    );
-    expect(catchBlock).not.toBeNull();
-
-    // V4: After the try/catch, the function continues to return orchestratedResult
-    const afterPromotion = source.indexOf("promoteWorkingMemory(");
-    const returnResult = source.indexOf("return orchestratedResult;", afterPromotion);
-    expect(returnResult).toBeGreaterThan(afterPromotion);
-  });
-
-  it("[V5] promotion count is reported via onProgress", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V5: onProgress is called with the promoted count
-    const progressMatch = source.match(
-      /if\s*\(\s*promotedCount\s*>\s*0\s*&&\s*options\.onProgress\s*\)/,
-    );
-    expect(progressMatch).not.toBeNull();
-
-    // V5: The message contains the count of promoted items (may be multiline after formatting)
-    const messageMatch = source.match(
-      /options\.onProgress\(\s*`Working memory: \$\{promotedCount\} items promus en memoire permanente`[\s,]*\)/s,
-    );
-    expect(messageMatch).not.toBeNull();
-  });
-
-  it("[V13] promotion works with InMemoryBlackboard fallback", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // V13: When supabase is null or bbFallback exists, reading uses InMemoryBlackboard
-    const fallbackRead = source.match(
-      /bbFallback\?\.read\(\s*bbSessionId\s*,\s*["']working_memory["']\s*\)/,
-    );
-    expect(fallbackRead).not.toBeNull();
-
-    // V13: The ternary handles both Supabase and InMemoryBlackboard paths
-    const ternaryMatch = source.match(
-      /supabase\s*&&\s*!bbFallback[\s\S]*?readSection\([\s\S]*?\)\s*:\s*.*bbFallback\?\.read\(/,
-    );
-    expect(ternaryMatch).not.toBeNull();
   });
 });

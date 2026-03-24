@@ -1,20 +1,15 @@
 /**
  * @module memory.graph
  * @description Memory linking, chains, clustering, health stats,
- * similar tasks, working memory promotion, agent memory chains.
+ * similar tasks, agent memory chains.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isFeatureEnabled } from "../feature-flags.ts";
 import { createLogger } from "../logger.ts";
-import { getAgentMemories, graduateAgentMemory, saveAgentMemory } from "./agent-memory.ts";
+import { getAgentMemories } from "./agent-memory.ts";
 import { classifyLinkContent } from "./classification.ts";
-import {
-  bumpMemoryAccess,
-  PROMOTION_MAX_CHARS,
-  resolveMemoryConflict,
-  updateMemoryWithRevision,
-} from "./scoring.ts";
+import { bumpMemoryAccess } from "./scoring.ts";
 
 const log = createLogger("memory.graph");
 
@@ -89,14 +84,6 @@ export interface SimilarTask {
   actualHours: number | null;
   sprint: string | null;
   tags: string[];
-}
-
-/** Working memory data structure from blackboard */
-export interface WorkingMemoryData {
-  decisions?: Array<{ agent: string; decision: string; reasoning: string }>;
-  discoveries?: Array<{ agent: string; fact: string; source: string }>;
-  blockers?: Array<{ agent: string; issue: string; status: string }>;
-  context_updates?: Array<{ agent: string; key: string; value: string }>;
 }
 
 /** A fact from get_facts RPC */
@@ -752,104 +739,5 @@ export async function findSimilarPastTasks(
   } catch (error) {
     log.error("findSimilarPastTasks error", { error: String(error) });
     return [];
-  }
-}
-
-// ── Working Memory Promotion (S36-08) ────────────────────────
-
-/**
- * Promote significant working memory items to permanent memories.
- * Extracts decisions and discoveries, persists them with conflict resolution.
- * Called at pipeline end by the orchestrator.
- */
-export async function promoteWorkingMemory(
-  supabase: SupabaseClient | null,
-  workingMemory: WorkingMemoryData | null,
-  sessionId: string,
-): Promise<number> {
-  if (!supabase || !workingMemory) return 0;
-
-  try {
-    let promoted = 0;
-    const items: Array<{
-      content: string;
-      agent: string;
-      promotionType: "decision" | "discovery";
-    }> = [];
-
-    // Collect decisions (always promote)
-    if (Array.isArray(workingMemory.decisions)) {
-      for (const d of workingMemory.decisions) {
-        items.push({
-          content: `${d.decision} (raison: ${d.reasoning})`,
-          agent: d.agent,
-          promotionType: "decision",
-        });
-      }
-    }
-
-    // Collect discoveries
-    if (Array.isArray(workingMemory.discoveries)) {
-      for (const d of workingMemory.discoveries) {
-        items.push({ content: d.fact, agent: d.agent, promotionType: "discovery" });
-      }
-    }
-
-    // Persist each item with conflict resolution
-    for (const item of items) {
-      // R11: Truncate content to 500 chars BEFORE conflict resolution (F-DA-4)
-      const truncated = item.content.length > PROMOTION_MAX_CHARS;
-      const content = truncated ? item.content.slice(0, PROMOTION_MAX_CHARS) : item.content;
-
-      const resolution = await resolveMemoryConflict(supabase, content);
-      if (resolution.action === "skip") continue;
-
-      if (resolution.action === "update" || resolution.action === "merge") {
-        const ok = await updateMemoryWithRevision(
-          supabase,
-          resolution.existingId,
-          content,
-          resolution.action,
-        );
-        if (ok) promoted++;
-        continue;
-      }
-
-      // Insert new fact (V1 limitation: all promoted as "fact", promotion_type in metadata)
-      // V8: tag with agent_role for traceability
-      const { error } = await supabase.from("memory").insert({
-        type: "fact",
-        content,
-        metadata: {
-          source: "working_memory_promotion",
-          pipeline_session_id: sessionId,
-          agent: item.agent,
-          agent_role: item.agent, // R3: explicit role tag for promoted items (V8)
-          promotion_type: item.promotionType,
-          ...(truncated ? { truncated: true } : {}),
-        },
-      });
-      if (!error) {
-        promoted++;
-
-        // R15 / V9: save to role-specific memory when feature flag enabled
-        if (isFeatureEnabled("agent_role_memory")) {
-          // saveAgentMemory is awaited to ensure sequential insertion (avoids race conditions)
-          // Non-blocking on error: any exception is caught and logged inside saveAgentMemory
-          await saveAgentMemory(supabase, item.agent, content, undefined, {
-            promotion_type: item.promotionType,
-            pipeline_session_id: sessionId,
-          }).catch(() => {});
-
-          // Graduation check: fire-and-forget (non-blocking, R11)
-          graduateAgentMemory(supabase, content).catch(() => {});
-        }
-      }
-    }
-
-    return promoted;
-  } catch (error) {
-    log.error("promoteWorkingMemory error", { error: String(error) });
-    return 0;
   }
 }

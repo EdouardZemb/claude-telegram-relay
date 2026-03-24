@@ -4,151 +4,16 @@
  * Slug: sante-systeme-memoire-permanente-multi
  * Spec: docs/specs/SPEC-sante-systeme-memoire-permanente-multi.md
  *
- * Covers all 18 V-criteres:
- *   V1-V5 : orchestrator promotion integration (structural, source-based)
- *   V6-V10, V12, V14, V16, V17 : memoryHealthStats / formatMemoryHealth / promoteWorkingMemory (unit)
+ * Covers V-criteres:
+ *   V6-V10, V14, V16 : memoryHealthStats / formatMemoryHealth (unit)
  *   V11, V18 : /brain health dispatch (structural, source-based)
- *   V13 : InMemoryBlackboard fallback (structural)
  *   V15 : auto-pipeline useBlackboard (structural)
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { MemoryHealthStats, WorkingMemoryData } from "../../src/memory.ts";
-import {
-  formatMemoryHealth,
-  memoryHealthStats,
-  PROMOTION_MAX_CHARS,
-  promoteWorkingMemory,
-} from "../../src/memory.ts";
+import type { MemoryHealthStats } from "../../src/memory.ts";
+import { formatMemoryHealth, memoryHealthStats } from "../../src/memory.ts";
 import { createMockSupabase } from "../fixtures/mock-supabase.ts";
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V1 — promoteWorkingMemory appele en fin de pipeline (flag actif)
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V1
-describe("[V1] promoteWorkingMemory appele quand flag memory_promotion actif et blackboard non-null", () => {
-  it("orchestrator source contient le guard isFeatureEnabled('memory_promotion') && bbSessionId", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // Guard condition: feature flag AND bbSessionId
-    const guardMatch = source.match(
-      /if\s*\(\s*isFeatureEnabled\(\s*["']memory_promotion["']\s*\)\s*&&\s*bbSessionId\s*\)/,
-    );
-    expect(guardMatch).not.toBeNull();
-
-    // Call to promoteWorkingMemory with supabase, wmForPromotion, bbSessionId
-    const callMatch = source.match(
-      /promoteWorkingMemory\(\s*supabase\s*,\s*wmForPromotion\s*,\s*bbSessionId\s*\)/,
-    );
-    expect(callMatch).not.toBeNull();
-
-    // Working memory is read from blackboard section
-    expect(source).toContain('readSection(supabase, bbSessionId, "working_memory")');
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V2 — promotion NON appelee quand flag inactif
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V2
-describe("[V2] promoteWorkingMemory NON appelee quand flag memory_promotion inactif", () => {
-  it("orchestrator source: promoteWorkingMemory est uniquement dans le bloc garde par isFeatureEnabled", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // The guard ensures promotion is skipped when flag is off
-    const guardMatch = source.match(/if\s*\(\s*isFeatureEnabled\(\s*["']memory_promotion["']\s*\)/);
-    expect(guardMatch).not.toBeNull();
-
-    // promoteWorkingMemory appears exactly once (inside the guarded block)
-    const lines = source.split("\n");
-    const promoteCalls = lines.filter(
-      (l) =>
-        l.includes("promoteWorkingMemory(") &&
-        !l.trimStart().startsWith("import") &&
-        !l.trimStart().startsWith("//"),
-    );
-    expect(promoteCalls.length).toBe(1);
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V3 — promotion NON appelee quand useBlackboard false
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V3
-describe("[V3] promoteWorkingMemory NON appelee quand useBlackboard est false", () => {
-  it("orchestrator source: bbSessionId initialise null, assigne seulement si useBlackboard", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // bbSessionId initialized to null — null guard prevents promotion
-    const bbSessionInit = source.match(/let\s+bbSessionId:\s*string\s*\|\s*null\s*=\s*null/);
-    expect(bbSessionInit).not.toBeNull();
-
-    // bbSessionId assigned only inside if (options.useBlackboard)
-    const bbAssignment = source.match(
-      /if\s*\(\s*options\.useBlackboard\s*\)\s*\{[\s\S]*?bbSessionId\s*=\s*`bb-/,
-    );
-    expect(bbAssignment).not.toBeNull();
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V4 — echec promoteWorkingMemory ne bloque pas orchestrate()
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V4
-describe("[V4] echec de promoteWorkingMemory ne bloque pas le retour de orchestrate()", () => {
-  it("orchestrator source: promotion est dans try/catch isole", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // try/catch wrapping promoteWorkingMemory
-    const tryCatchMatch = source.match(
-      /try\s*\{[\s\S]*?promoteWorkingMemory\([\s\S]*?\}\s*catch\s*\(\s*promoError\s*\)/,
-    );
-    expect(tryCatchMatch).not.toBeNull();
-
-    // catch block logs error without re-throwing
-    const catchBlock = source.match(
-      /catch\s*\(\s*promoError\s*\)\s*\{[^}]*log\.error\([^)]*\)[^}]*\}/,
-    );
-    expect(catchBlock).not.toBeNull();
-
-    // After the try/catch, the function continues to return orchestratedResult
-    const afterPromotion = source.indexOf("promoteWorkingMemory(");
-    const returnResult = source.indexOf("return orchestratedResult;", afterPromotion);
-    expect(returnResult).toBeGreaterThan(afterPromotion);
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V5 — compteur de promotions reporte via onProgress
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V5
-describe("[V5] compteur de promotions reporte via onProgress", () => {
-  it("orchestrator source: onProgress appele avec 'Working memory: N items promus' si promotedCount > 0", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // onProgress called conditionally when promotedCount > 0
-    const progressMatch = source.match(
-      /if\s*\(\s*promotedCount\s*>\s*0\s*&&\s*options\.onProgress\s*\)/,
-    );
-    expect(progressMatch).not.toBeNull();
-
-    // Message includes the count
-    const messageMatch = source.match(
-      /options\.onProgress\(\s*`Working memory: \$\{promotedCount\} items promus en memoire permanente`[\s,]*\)/s,
-    );
-    expect(messageMatch).not.toBeNull();
-  });
-});
 
 // ════════════════════════════════════════════════════════════════
 // V-critere: V6 — memoryHealthStats retourne total par type
@@ -458,45 +323,6 @@ describe("[V11] /brain health repond avec les metriques de sante memoire formate
 });
 
 // ════════════════════════════════════════════════════════════════
-// V-critere: V12 — flag memory_promotion dans config/features.json avec valeur false
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V12
-describe("[V12] le flag memory_promotion existe dans config/features.json avec valeur false", () => {
-  it("config/features.json contient memory_promotion: false", async () => {
-    const fs = await import("fs");
-    const path = await import("path");
-    const featuresPath = path.join(process.cwd(), "config", "features.json");
-    const content = JSON.parse(fs.readFileSync(featuresPath, "utf-8"));
-    expect(content.memory_promotion).toBe(false);
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V13 — promotion fonctionne avec InMemoryBlackboard fallback
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V13 (structural)
-describe("[V13] promotion fonctionne avec le fallback InMemoryBlackboard", () => {
-  it("orchestrator source: lecture working_memory via bbFallback?.read() si supabase absent", async () => {
-    const fs = await import("fs");
-    const source = fs.readFileSync("src/orchestrator/pipeline.ts", "utf-8");
-
-    // The ternary handles both Supabase and InMemoryBlackboard paths
-    const fallbackRead = source.match(
-      /bbFallback\?\.read\(\s*bbSessionId\s*,\s*["']working_memory["']\s*\)/,
-    );
-    expect(fallbackRead).not.toBeNull();
-
-    // The condition: supabase && !bbFallback uses Supabase, otherwise uses bbFallback
-    const ternaryMatch = source.match(
-      /supabase\s*&&\s*!bbFallback[\s\S]*?readSection\([\s\S]*?\)\s*:\s*.*bbFallback\?\.read\(/,
-    );
-    expect(ternaryMatch).not.toBeNull();
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
 // V-critere: V14 — memoryHealthStats calcule score importance moyen et age moyen
 // ════════════════════════════════════════════════════════════════
 
@@ -575,51 +401,6 @@ describe("[V16] memoryHealthStats retourne 0 pour les moyennes quand la table me
     expect(stats.avgAgeDays).toBe(0);
     expect(Number.isNaN(stats.avgImportanceScore)).toBe(false);
     expect(Number.isNaN(stats.avgAgeDays)).toBe(false);
-  });
-});
-
-// ════════════════════════════════════════════════════════════════
-// V-critere: V17 — items promus tronques a 500 caracteres avant insertion
-// ════════════════════════════════════════════════════════════════
-
-// V-critere: V17
-describe("[V17] les items promus sont tronques a 500 caracteres avant insertion", () => {
-  let supabase: ReturnType<typeof createMockSupabase>;
-
-  beforeEach(() => {
-    supabase = createMockSupabase();
-    supabase._registerFunction("search", () => []);
-  });
-
-  it("decision de 1000 chars tronquee a PROMOTION_MAX_CHARS (500)", async () => {
-    const longDecision = "A".repeat(1000);
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "architect", decision: longDecision, reasoning: "B" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-trunc");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory.length).toBe(1);
-    expect(memory[0].content.length).toBeLessThanOrEqual(PROMOTION_MAX_CHARS);
-    expect(memory[0].metadata.truncated).toBe(true);
-  });
-
-  it("decision courte non tronquee, pas de flag truncated", async () => {
-    const wm: WorkingMemoryData = {
-      decisions: [{ agent: "dev", decision: "Use REST", reasoning: "Simple" }],
-    };
-
-    const count = await promoteWorkingMemory(supabase, wm, "session-short");
-
-    expect(count).toBe(1);
-    const memory = supabase._getTable("memory");
-    expect(memory[0].metadata.truncated).toBeUndefined();
-  });
-
-  it("PROMOTION_MAX_CHARS est bien 500", () => {
-    expect(PROMOTION_MAX_CHARS).toBe(500);
   });
 });
 

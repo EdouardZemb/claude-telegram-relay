@@ -49,9 +49,7 @@ export {
   type MemoryCluster,
   type MemoryHealthStats,
   memoryHealthStats,
-  promoteWorkingMemory,
   type SimilarTask,
-  type WorkingMemoryData,
 } from "./memory/graph.ts";
 // ── ideas.ts ─────────────────────────────────────────────────
 export {

@@ -8,8 +8,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnClaude } from "./agent.ts";
 import { type CodeGraph, estimateComplexity, findAffectedModules, getGraph } from "./code-graph.ts";
-import { computeExplorationScore } from "./exploration-scoring.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
 import { findSimilarPastTasks, type SimilarTask } from "./memory.ts";
 import type { AgentRole } from "./orchestrator.ts";
@@ -92,21 +90,7 @@ export async function routeTask(task: Task): Promise<RouterDecision | null> {
     log.warn("selectPipeline: code-graph unavailable for complexity hint");
   }
 
-  // Exploration score hint for RESEARCH recommendation
-  let explorationHint = "";
-  if (isFeatureEnabled("exploration_phase")) {
-    try {
-      const explorationResult = await computeExplorationScore(task);
-      if (explorationResult.score >= 0.5) {
-        explorationHint = `Exploration score: ${explorationResult.score} (>= 0.5 suggests RESEARCH pipeline). Keywords: ${explorationResult.components.keywordSignal > 0 ? "yes" : "no"}, graph complexity: ${explorationResult.components.graphComplexity >= 0 ? explorationResult.components.graphComplexity.toFixed(2) : "N/A"}`;
-      }
-    } catch {
-      // R8: business error → log.warn
-      log.warn("selectPipeline: computeExplorationScore unavailable");
-    }
-  }
-
-  const fullHint = [complexityHint, explorationHint].filter(Boolean).join("\n");
+  const fullHint = complexityHint;
 
   const prompt = ROUTER_PROMPT_TEMPLATE.replace("{title}", task.title)
     .replace("{description}", task.description || "No description")

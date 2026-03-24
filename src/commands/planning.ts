@@ -25,25 +25,19 @@ import {
   updatePRDStatus,
 } from "../prd.ts";
 import {
-  buildPreflightResultTag,
   buildRevisionKeyboard,
   buildTriageResponse,
   canRevise,
   chatKey,
   clearPendingDescription,
-  clearPendingProtoSpec,
   clearPendingRevision,
   decomposePRDIntoTasks,
   extractSessionConstraints,
   generateAndSavePRD,
   getPendingDescription,
-  getPendingProtoSpec,
   getRevisionCount,
-  isPrdMaturationEnabled,
   isPrdWorkflowEnabled,
-  runPrdPreflightChecks,
   storePendingDescription,
-  storePendingProtoSpec,
   storePendingRevision,
   triageDescription,
 } from "../prd-workflow.ts";
@@ -664,114 +658,6 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
         return;
       }
 
-      if (data === "prdwf_preflight_ok") {
-        // Preflight accepted: launch implementation batch (V9)
-        await ctx.answerCallbackQuery({ text: "Lancement..." });
-
-        // Retrieve prdId from pending proto-specs
-        const pending = getPendingProtoSpec(ck);
-        if (!pending) {
-          await ctx.editMessageText("Données de preflight expirées. Relance le workflow.");
-          return;
-        }
-
-        // Get tasks tagged with this PRD
-        const { data: tasks } = await bctx.supabase
-          .from("tasks")
-          .select("*")
-          .contains("tags", [`prd:${pending.prdId}`])
-          .eq("status", "backlog")
-          .order("priority", { ascending: true });
-
-        if (!tasks || tasks.length === 0) {
-          await ctx.editMessageText("Aucune tâche en backlog pour ce PRD.");
-          clearPendingProtoSpec(ck);
-          return;
-        }
-
-        // Launch batch pipeline via job manager (same pattern as prdwf_launch)
-        if (isJobManagerEnabled()) {
-          const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
-          // R5: Capture chatId and threadId before closure
-          const capturedChatId = cId;
-          const capturedThreadId = tId;
-          const launchFn = async (): Promise<string> => {
-            // R4/R16: onProgress sends one message per completed task
-            const onProgress = async (msg: string) => {
-              await sendProgressMessage(capturedChatId, capturedThreadId, msg);
-            };
-            const results = await runBatchPipeline(bctx.supabase!, tasks, {
-              autoPipeline: true,
-              onProgress,
-            });
-            const ok = results.filter((r) => r.success).length;
-            // R9/R15: Collect failed IDs including non-executed tasks
-            const executedIds = new Set(results.map((r) => r.task.id));
-            const failedIds = results
-              .filter((r) => !r.success)
-              .map((r) => r.task.id.substring(0, 8));
-            // R15: Include tasks that were not executed (early stop in sequential mode)
-            for (const t of tasks) {
-              if (!executedIds.has(t.id)) {
-                failedIds.push(t.id.substring(0, 8));
-              }
-            }
-            const lines = results.map((r) => formatPipelineResult(r));
-            return `BATCH_COMPLETE:${ok}/${tasks.length}:failed=${failedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
-          };
-          const taskList = tasks
-            .map(
-              (t: { title: string; id: string }, i: number) =>
-                `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`,
-            )
-            .join("\n");
-          const jobId = await launchJob("autopipeline-batch", capturedChatId, launchFn, {
-            messageThreadId: capturedThreadId,
-          });
-          await ctx.editMessageText(
-            `Implémentation lancée pour ${tasks.length} tâches (job: ${jobId})\n\n${taskList}`,
-          );
-        } else {
-          await ctx.editMessageText(
-            "Le job manager n'est pas actif. Active-le avec /feature enable job_manager puis relance.",
-          );
-        }
-        clearPendingProtoSpec(ck);
-        return;
-      }
-
-      if (data === "prdwf_preflight_abort") {
-        // Preflight aborted: cancel workflow (V10)
-        await ctx.answerCallbackQuery({ text: "Annule." });
-        await ctx.editMessageText("Workflow annulé. Le PRD et les tâches restent dans le backlog.");
-        // Clean up all pending state (V20)
-        clearPendingProtoSpec(ck);
-        clearPendingDescription(ck);
-        clearPendingRevision(ck);
-        return;
-      }
-
-      if (data === "prdwf_revise_prd") {
-        // Preflight revision: redirect to PRD revision flow (V11, R10)
-        await ctx.answerCallbackQuery({ text: "Envoie tes modifications." });
-        const pending = getPendingProtoSpec(ck);
-        if (!pending) {
-          await ctx.editMessageText("Données de preflight expirées. Relance le workflow.");
-          return;
-        }
-
-        // Store pending revision with prdId (reuse existing revision flow)
-        const session = getSession(cId, tId);
-        const constraints = extractSessionConstraints(session.constraints);
-        storePendingRevision(ck, pending.prdId, constraints);
-        clearPendingProtoSpec(ck);
-
-        await ctx.editMessageText(
-          `PRD en revision [${pending.prdId.substring(0, 8)}]\n\nLe challenge adversarial a identifié des problèmes. Décris les modifications souhaitées. Je régénérerai le PRD.`,
-        );
-        return;
-      }
-
       // Not a prdwf_ callback we handle
       await next();
       return;
@@ -854,70 +740,26 @@ export default function planningCommands(bctx: BotContext): Composer<Context> {
             const currentProject = await resolveProjectContext(bctx.supabase, threadId);
 
             if (isPrdWorkflowEnabled()) {
-              // PRD-to-Deploy workflow: decompose then optionally run preflight (R1)
+              // PRD-to-Deploy workflow: decompose then offer launch
               const chatId = ctx.chat?.id || 0;
               const cbThreadId = ctx.callbackQuery.message?.message_thread_id;
 
-              if (isPrdMaturationEnabled()) {
-                // Maturation enabled: decompose then preflight (R1)
-                const decomposeThenPreflightFn = async (): Promise<string> => {
-                  const result = await decomposePRDIntoTasks(
-                    bctx.supabase!,
-                    prd,
-                    projectSlug,
-                    currentProject?.id,
-                  );
-                  if (result.tasks.length === 0) {
-                    return `PRDWF_DECOMPOSED:${prd.id}|0|Aucune tache generee`;
-                  }
-
-                  // Fetch full tasks for preflight
-                  const { data: fullTasks } = await bctx
-                    .supabase!.from("tasks")
-                    .select("*")
-                    .contains("tags", [`prd:${prd.id}`])
-                    .eq("status", "backlog");
-
-                  if (!fullTasks || fullTasks.length === 0) {
-                    return `PRDWF_DECOMPOSED:${prd.id}|${result.tasks.length}|${result.message}`;
-                  }
-
-                  // Run preflight checks (P1+P2+E1)
-                  const report = await runPrdPreflightChecks(prd, fullTasks);
-
-                  // Store proto-specs for later use (R8)
-                  const ck = chatKey(chatId, cbThreadId);
-                  storePendingProtoSpec(ck, prd.id, report.protoSpecs);
-
-                  // Build result tag for job-manager (R14)
-                  return buildPreflightResultTag(report);
-                };
-
-                const jobId = await launchJob("prd-preflight", chatId, decomposeThenPreflightFn, {
-                  messageThreadId: cbThreadId,
-                });
-                await ctx.editMessageText(
-                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition et verification en cours (job: ${jobId}). Tu recevras un rapport de pre-lancement avec les resultats.`,
+              const decomposeFn = async (): Promise<string> => {
+                const result = await decomposePRDIntoTasks(
+                  bctx.supabase!,
+                  prd,
+                  projectSlug,
+                  currentProject?.id,
                 );
-              } else {
-                // No maturation: decompose then offer launch (existing behavior)
-                const decomposeFn = async (): Promise<string> => {
-                  const result = await decomposePRDIntoTasks(
-                    bctx.supabase!,
-                    prd,
-                    projectSlug,
-                    currentProject?.id,
-                  );
-                  return `PRDWF_DECOMPOSED:${prd.id}|${result.tasks.length}|${result.message}`;
-                };
+                return `PRDWF_DECOMPOSED:${prd.id}|${result.tasks.length}|${result.message}`;
+              };
 
-                const jobId = await launchJob("prd-decompose", chatId, decomposeFn, {
-                  messageThreadId: cbThreadId,
-                });
-                await ctx.editMessageText(
-                  `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee (job: ${jobId}). Tu recevras une notification avec les taches et l'option de lancer l'implementation.`,
-                );
-              }
+              const jobId = await launchJob("prd-decompose", chatId, decomposeFn, {
+                messageThreadId: cbThreadId,
+              });
+              await ctx.editMessageText(
+                `PRD APPROUVE : ${updated.title} [${updated.id.substring(0, 8)}]\n\nDecomposition en taches lancee (job: ${jobId}). Tu recevras une notification avec les taches et l'option de lancer l'implementation.`,
+              );
             } else {
               // Legacy flow
               const decomposeFn = async (): Promise<string> => {

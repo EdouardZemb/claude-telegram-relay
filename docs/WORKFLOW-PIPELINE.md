@@ -25,12 +25,10 @@ Chaque etape est executee par un agent specialise qui a un role precis et un per
 Maturation complete d'une feature, de l'idee au commit.
 
 ```
-/dev-spec -> quality gate -> /dev-challenge + Impact -> /dev-implement (TDD) -> conformance -> review -> /dev-doc -> commit
+/dev-explore (optionnel) -> /dev-implement (TDD) -> /dev-review -> /dev-doc -> commit
 ```
 
 Reference detaillee : [WORKFLOW-DEV.md](WORKFLOW-DEV.md)
-
-Orchestration automatisee : `/dev-pipeline` (execute toutes les phases) ou `/dev-pipeline --from {phase}` (reprise).
 
 ## Conventions de nommage des artefacts
 
@@ -55,6 +53,6 @@ Certaines commandes fonctionnent independamment du pipeline :
 | Commande | Usage | Artefact |
 |----------|-------|----------|
 | `/dev-explore` | Exploration prealable, etat de l'art | `docs/explorations/EXPLORE-{name}.md` |
+| `/dev-implement` | Implementation TDD complete | `docs/reviews/implement-{name}.md` |
 | `/dev-review` | Revue de code ponctuelle | Aucun (inline) |
-| `/dev-test` | Generation de tests | Fichiers `tests/` |
 | `/dev-doc` | Mise a jour documentation | Fichiers `docs/` |

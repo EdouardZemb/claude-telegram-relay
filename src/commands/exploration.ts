@@ -18,7 +18,6 @@ import { buildAgentSystemPromptPart, buildAgentTaskPromptPart } from "../bmad-pr
 import type { BotContext } from "../bot-context.ts";
 import { getGraph } from "../code-graph.ts";
 import { tryGraphResponse } from "../explore-graph.ts";
-import { isFeatureEnabled } from "../feature-flags.ts";
 import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
 import { resolveProjectContext } from "../projects.ts";
@@ -76,11 +75,6 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
 
   // /explore — launch the Explorer agent to investigate a topic
   composer.command("explore", async (ctx) => {
-    if (!isFeatureEnabled("exploration_phase")) {
-      await ctx.reply("La commande /explore est desactivee.", bctx.threadOpts(ctx));
-      return;
-    }
-
     const blocked = bctx.commandGuard(ctx, "explore");
     if (blocked) {
       await ctx.reply(blocked, bctx.threadOpts(ctx));

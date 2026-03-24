@@ -39,7 +39,6 @@ const MIGRATED_MODULES = [
   "adversarial-verifier.ts",
   // Vague 3 — Modules legers
   "tasks.ts",
-  "adversarial-challenge.ts",
   "commands/utilities.ts",
   "llm-router.ts",
   "document-sharding.ts",
@@ -47,7 +46,6 @@ const MIGRATED_MODULES = [
   "cost-tracking.ts",
   "notification-queue.ts",
   "projects.ts",
-  "spec-lite.ts",
   "pipeline-state.ts",
   "job-manager.ts",
   "commands/documents.ts",

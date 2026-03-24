@@ -12,7 +12,6 @@ import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
-import { buildPreflightKeyboard } from "./prd-workflow.ts";
 import { Semaphore } from "./semaphore.ts";
 
 const log = createLogger("job-manager");
@@ -290,22 +289,6 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
         }
       }
       break;
-    case "prd-preflight":
-      // R14: Parse PRDWF_PREFLIGHT:{prdId}|{verdict}|{resume}
-      if (job.result?.startsWith("PRDWF_PREFLIGHT:")) {
-        const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
-        const verdict = (parts[1] || "") as "PASS" | "PAUSE" | "SKIPPED";
-        const preflightKb = buildPreflightKeyboard(verdict);
-        // Copy buttons from preflight keyboard
-        for (const row of preflightKb.inline_keyboard) {
-          for (const btn of row) {
-            kb.text(btn.text, ("callback_data" in btn ? btn.callback_data : "") || "");
-          }
-          kb.row();
-        }
-        hasButtons = true;
-      }
-      break;
     case "prd":
       // result format: PRD_CREATED:<id>|<title>
       if (job.result?.startsWith("PRD_CREATED:")) {
@@ -346,11 +329,6 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       const taskCount = parts[1] || "?";
       const details = parts.slice(2).join("|");
       message = `Décomposition terminée (${elapsed})\n${taskCount} tâches créées\n\n${details}`;
-    } else if (job.type === "prd-preflight" && job.result?.startsWith("PRDWF_PREFLIGHT:")) {
-      const parts = job.result.replace("PRDWF_PREFLIGHT:", "").split("|");
-      const verdict = parts[1] || "?";
-      const resume = parts.slice(2).join("|");
-      message = `Preflight termine (${elapsed})\nVerdict : ${verdict}\n${resume}`;
     } else if (job.type === "autopipeline-batch" && job.result?.startsWith("BATCH_COMPLETE:")) {
       const batch = parseBatchResult(job.result);
       if (batch) {
