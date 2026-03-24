@@ -150,6 +150,24 @@ describe("sdd-flow", () => {
       const kb = buildSddKeyboard("unknown", "foo");
       expect(kb).toBeUndefined();
     });
+
+    it("V10: review phase returns keyboard with Documenter button and sdd_doc callback", () => {
+      const kb = buildSddKeyboard("review", "foo");
+      expect(kb).toBeDefined();
+
+      const buttons = kb!.inline_keyboard.flat();
+      const documentButton = buttons.find(
+        (b) =>
+          b.text === "Documenter" &&
+          (b as { callback_data?: string }).callback_data === "sdd_doc:foo",
+      );
+      expect(documentButton).toBeDefined();
+    });
+
+    it("V11: doc phase returns undefined (terminal phase, no buttons)", () => {
+      const kb = buildSddKeyboard("doc", "foo");
+      expect(kb).toBeUndefined();
+    });
   });
 
   // ── parseSddResultPrefix ───────────────────────────────────
@@ -217,6 +235,7 @@ describe("sdd-flow", () => {
       expect(typeof sddAgents.runSddChallenge).toBe("function");
       expect(typeof sddAgents.runSddImplement).toBe("function");
       expect(typeof sddAgents.runSddReview).toBe("function");
+      expect(typeof sddAgents.runSddDoc).toBe("function");
     });
 
     it("V17: sdd-flow imports assembleHandoffContext from conversation-handoff", () => {

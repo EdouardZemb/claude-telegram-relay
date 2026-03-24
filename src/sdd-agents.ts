@@ -35,6 +35,7 @@ function writeFile(path: string, content: string): Promise<void> {
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const AGENTS_DIR = join(PROJECT_ROOT, ".claude", "agents");
+const SKILLS_DIR = join(PROJECT_ROOT, ".claude", "skills");
 
 // ── Verdict Extraction Helpers ───────────────────────────────
 
@@ -329,6 +330,51 @@ export async function runSddImplement(name: string, bctx: BotContext): Promise<s
     const msg = error instanceof Error ? error.message : String(error);
     log.error("runSddImplement exception", { name, error: msg });
     return `SDD_IMPLEMENT_FAILED: ${msg.substring(0, 500)}`;
+  }
+}
+
+/** Run the SDD Doc phase. Dev-doc skill updates documentation post-implementation. */
+export async function runSddDoc(name: string, bctx: BotContext): Promise<string> {
+  try {
+    let skillContent = "";
+    try {
+      skillContent = await readFile(join(SKILLS_DIR, "dev-doc", "SKILL.md"), "utf-8");
+    } catch {
+      log.warn("dev-doc SKILL.md not found, running without system prompt");
+    }
+
+    const implRef = `docs/reviews/implement-${name}.md`;
+
+    const prompt = [
+      "DOCUMENTATION SDD",
+      "",
+      `Pipeline: ${name}`,
+      `Rapport d'implementation: ${implRef}`,
+      "",
+      "Instructions:",
+      `- Lis le rapport d'implementation ${implRef} si disponible`,
+      "- Mets a jour la documentation du codebase (CLAUDE.md, docs/) selon les modifications",
+      "- Verifie la coherence des modules/exports documentes",
+    ].join("\n");
+
+    const result = await spawnClaude({
+      prompt,
+      systemPrompt: skillContent || undefined,
+      model: "claude-sonnet-4-6",
+      effort: "medium",
+    });
+
+    if (result.exitCode !== 0 || !result.stdout.trim()) {
+      const error = result.stderr || "Pas de reponse de l'agent documentation";
+      log.error("runSddDoc failed", { name, error });
+      return `SDD_DOC_FAILED: ${error.substring(0, 500)}`;
+    }
+
+    return `SDD_DOC_OK: ${name} — documentation mise a jour`;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.error("runSddDoc exception", { name, error: msg });
+    return `SDD_DOC_FAILED: ${msg.substring(0, 500)}`;
   }
 }
 

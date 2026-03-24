@@ -350,6 +350,8 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
             kb.text("Corriger", `sdd_implement:${sddName}`);
           } else if (sddPhase === "review") {
             // Post-review: no further SDD buttons
+          } else if (sddPhase === "doc") {
+            // Terminal phase: no continuation buttons (R11)
           }
           hasButtons = kb.inline_keyboard?.length > 0;
         }

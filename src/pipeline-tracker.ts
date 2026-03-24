@@ -25,7 +25,14 @@ function getPipelinesFile(): string {
 
 // ── Types ────────────────────────────────────────────────────
 
-export type SddPhase = "explore" | "discuss" | "spec" | "challenge" | "implement" | "review";
+export type SddPhase =
+  | "explore"
+  | "discuss"
+  | "spec"
+  | "challenge"
+  | "implement"
+  | "review"
+  | "doc";
 export type StepStatus = "pending" | "running" | "ok" | "failed";
 
 export interface PipelineStep {
@@ -49,7 +56,15 @@ export interface PipelineTracker {
 
 // ── Constants ────────────────────────────────────────────────
 
-const ALL_PHASES: SddPhase[] = ["explore", "discuss", "spec", "challenge", "implement", "review"];
+export const ALL_PHASES: SddPhase[] = [
+  "explore",
+  "discuss",
+  "spec",
+  "challenge",
+  "implement",
+  "review",
+  "doc",
+];
 
 const PHASE_LABELS: Record<SddPhase, string> = {
   explore: "Exploration",
@@ -58,6 +73,7 @@ const PHASE_LABELS: Record<SddPhase, string> = {
   challenge: "Challenge",
   implement: "Implementation",
   review: "Review",
+  doc: "Documentation",
 };
 
 const STATUS_SYMBOLS: Record<StepStatus, string> = {
@@ -87,6 +103,10 @@ async function loadPipelines(): Promise<void> {
     for (const { key, tracker } of entries) {
       // Only restore non-expired trackers (R3)
       if (now - new Date(tracker.updatedAt).getTime() < TTL_MS) {
+        // R12: backward-compat — add "doc" step if missing from pre-migration trackers
+        if (!(tracker.steps as Record<string, unknown>).doc) {
+          tracker.steps.doc = { phase: "doc", status: "pending" };
+        }
         pipelines.set(key, tracker);
       }
     }
@@ -132,7 +152,7 @@ export function toPipelineName(description: string): string {
 
 /**
  * Create a new pipeline tracker (R3, V3).
- * All 6 steps initialized to 'pending'.
+ * All 7 steps initialized to 'pending'.
  */
 export async function createPipeline(
   chatId: number,

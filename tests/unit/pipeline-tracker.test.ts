@@ -3,14 +3,15 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import {
   _clearForTests,
+  ALL_PHASES,
   createPipeline,
   formatStatusBar,
   getTracker,
   initPipelineTracker,
-  toPipelineName,
-  updateStep,
   type PipelineTracker,
   type SddPhase,
+  toPipelineName,
+  updateStep,
 } from "../../src/pipeline-tracker.ts";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-pipeline-tracker");
@@ -74,10 +75,23 @@ describe("pipeline-tracker", () => {
     });
   });
 
+  // ── V2: ALL_PHASES has 7 elements ─────────────────────────
+
+  describe("ALL_PHASES", () => {
+    it("V2: ALL_PHASES has 7 elements and last is 'doc'", () => {
+      expect(ALL_PHASES.length).toBe(7);
+      expect(ALL_PHASES.at(-1)).toBe("doc");
+    });
+
+    it("V2: ALL_PHASES contains 'doc'", () => {
+      expect(ALL_PHASES).toContain("doc");
+    });
+  });
+
   // ── V3: createPipeline ────────────────────────────────────
 
   describe("createPipeline", () => {
-    it("V3: creates tracker with 6 steps all pending", async () => {
+    it("V3: creates tracker with 7 steps all pending", async () => {
       const tracker = await createPipeline(12345, undefined, "test-pipeline");
 
       expect(tracker.chatId).toBe(12345);
@@ -85,12 +99,27 @@ describe("pipeline-tracker", () => {
       expect(tracker.createdAt).toBeTruthy();
       expect(tracker.updatedAt).toBeTruthy();
 
-      const phases: SddPhase[] = ["explore", "discuss", "spec", "challenge", "implement", "review"];
+      const phases: SddPhase[] = [
+        "explore",
+        "discuss",
+        "spec",
+        "challenge",
+        "implement",
+        "review",
+        "doc",
+      ];
       for (const phase of phases) {
         expect(tracker.steps[phase]).toBeDefined();
         expect(tracker.steps[phase].status).toBe("pending");
         expect(tracker.steps[phase].phase).toBe(phase);
       }
+    });
+
+    it("V4: createPipeline initializes steps.doc to pending", async () => {
+      const tracker = await createPipeline(12345, undefined, "test-pipeline");
+      expect(tracker.steps.doc).toBeDefined();
+      expect(tracker.steps.doc.status).toBe("pending");
+      expect(tracker.steps.doc.phase).toBe("doc");
     });
 
     it("V4: storage key for threadId=67 is '12345:67'", async () => {
@@ -145,6 +174,39 @@ describe("pipeline-tracker", () => {
     it("returns null for unknown chatId", async () => {
       const result = await getTracker(99999, undefined);
       expect(result).toBeNull();
+    });
+  });
+
+  // ── V5b: backward-compat migration ───────────────────────
+
+  describe("loadPipelines backward-compat", () => {
+    it("V5: migrates tracker without doc step — adds steps.doc as pending", async () => {
+      // Write a tracker fixture without "doc" step (simulates pre-migration disk state)
+      const oldTracker = {
+        chatId: 12345,
+        name: "old-pipeline",
+        steps: {
+          explore: { phase: "explore", status: "ok" },
+          discuss: { phase: "discuss", status: "ok" },
+          spec: { phase: "spec", status: "ok" },
+          challenge: { phase: "challenge", status: "ok" },
+          implement: { phase: "implement", status: "ok" },
+          review: { phase: "review", status: "pending" },
+          // Note: no "doc" key
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      _clearForTests();
+      const entries = [{ key: "12345:main", tracker: oldTracker }];
+      await writeFile(PIPELINES_FILE, JSON.stringify(entries, null, 2));
+
+      const tracker = await getTracker(12345, undefined);
+      expect(tracker).not.toBeNull();
+      expect(tracker!.steps.doc).toBeDefined();
+      expect(tracker!.steps.doc.status).toBe("pending");
+      expect(tracker!.steps.doc.phase).toBe("doc");
     });
   });
 
@@ -216,6 +278,7 @@ describe("pipeline-tracker", () => {
           challenge: { phase: "challenge", status: "failed" },
           implement: { phase: "implement", status: "pending" },
           review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -244,6 +307,7 @@ describe("pipeline-tracker", () => {
           challenge: { phase: "challenge", status: "pending" },
           implement: { phase: "implement", status: "pending" },
           review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -266,6 +330,7 @@ describe("pipeline-tracker", () => {
           challenge: { phase: "challenge", status: "pending" },
           implement: { phase: "implement", status: "pending" },
           review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -286,6 +351,7 @@ describe("pipeline-tracker", () => {
           challenge: { phase: "challenge", status: "pending" },
           implement: { phase: "implement", status: "pending" },
           review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -308,6 +374,7 @@ describe("pipeline-tracker", () => {
           challenge: { phase: "challenge", status: "pending" },
           implement: { phase: "implement", status: "pending" },
           review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -315,6 +382,28 @@ describe("pipeline-tracker", () => {
 
       const bar = formatStatusBar(tracker);
       expect(bar).toContain("EN COURS Spec...");
+    });
+
+    it("V14: formatStatusBar shows Documentation line for steps.doc", () => {
+      const tracker: PipelineTracker = {
+        chatId: 12345,
+        name: "test",
+        steps: {
+          explore: { phase: "explore", status: "ok" },
+          discuss: { phase: "discuss", status: "ok" },
+          spec: { phase: "spec", status: "ok" },
+          challenge: { phase: "challenge", status: "ok" },
+          implement: { phase: "implement", status: "ok" },
+          review: { phase: "review", status: "ok" },
+          doc: { phase: "doc", status: "running" },
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const bar = formatStatusBar(tracker);
+      expect(bar).toContain("Documentation");
+      expect(bar).toContain("EN COURS Documentation...");
     });
   });
 
