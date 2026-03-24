@@ -26,7 +26,7 @@ const {
   getInlineKeyboard,
 } = await import("../../src/notification-queue");
 
-const { savePrefs, getDefaultPrefs, loadPrefs } = await import("../../src/notification-prefs");
+const { savePrefs, getDefaultPrefs, loadPrefs } = await import("../../src/notification-queue");
 
 function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {

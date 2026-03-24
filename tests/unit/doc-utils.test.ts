@@ -64,7 +64,6 @@ describe("doc-utils", () => {
       const modules = await parseClaudeMdModules(CLAUDE_MD_PATH);
       expect(modules.length).toBeGreaterThanOrEqual(30);
       expect(modules).toContain("relay.ts");
-      expect(modules).toContain("conversation-session.ts");
     });
   });
 

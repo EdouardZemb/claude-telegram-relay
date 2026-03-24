@@ -55,8 +55,14 @@ import {
 import { LLMOPS_CHECK_INTERVAL_MS, runLlmOpsCheck } from "./llm-ops.ts";
 import { createLogger } from "./logger.ts";
 import { archiveOldMemories } from "./memory.ts";
-import { isQuietHours, loadPrefs } from "./notification-prefs.ts";
-import { enqueue, flushMorningDigest, getQueue, loadQueue } from "./notification-queue.ts";
+import {
+  enqueue,
+  flushMorningDigest,
+  getQueue,
+  isQuietHours,
+  loadPrefs,
+  loadQueue,
+} from "./notification-queue.ts";
 import { addTask, getCurrentSprint } from "./tasks.ts";
 
 const log = createLogger("heartbeat");

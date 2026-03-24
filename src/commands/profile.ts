@@ -6,7 +6,7 @@
 
 import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { formatPrefs, getPrefs, type NotificationType, savePrefs } from "../notification-prefs.ts";
+import { formatPrefs, getPrefs, type NotificationType, savePrefs } from "../notification-queue.ts";
 
 export default function profileComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();

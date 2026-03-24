@@ -208,44 +208,14 @@ describe("[V6] getStaleTasks handles Supabase errors", () => {
       }),
     };
 
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase
     const result = await getStaleTasks(mockSupabase as any);
     expect(result.tasks).toBe("");
     expect(result.hasStale).toBe(false);
   });
 });
 
-// ── V7: getDevInstructions("exec") contains required strings ──
-
-// V-critere: V7
-describe("[V7] getDevInstructions('exec') includes CLAUDE.md, bun build, bun test", () => {
-  test("exec instructions mention CLAUDE.md update obligation", () => {
-    const { buildFullAgentPrompt } = require("../../src/bmad-prompts.ts");
-    const prompt = buildFullAgentPrompt("dev", { command: "exec" });
-    expect(prompt).toContain("CLAUDE.md");
-  });
-
-  test("exec instructions mention bun build for typecheck", () => {
-    const { buildFullAgentPrompt } = require("../../src/bmad-prompts.ts");
-    const prompt = buildFullAgentPrompt("dev", { command: "exec" });
-    expect(prompt).toContain("bun build");
-  });
-
-  test("exec instructions mention bun test for unit tests", () => {
-    const { buildFullAgentPrompt } = require("../../src/bmad-prompts.ts");
-    const prompt = buildFullAgentPrompt("dev", { command: "exec" });
-    expect(prompt).toContain("bun test");
-  });
-
-  test("new instructions appear before 'Commence maintenant'", () => {
-    const { buildFullAgentPrompt } = require("../../src/bmad-prompts.ts");
-    const prompt = buildFullAgentPrompt("dev", { command: "exec" });
-    const claudeMdIdx = prompt.indexOf("CLAUDE.md");
-    const commenceIdx = prompt.indexOf("Commence maintenant");
-    expect(claudeMdIdx).toBeGreaterThan(0);
-    expect(commenceIdx).toBeGreaterThan(0);
-    expect(claudeMdIdx).toBeLessThan(commenceIdx);
-  });
-});
+// V7: bmad-prompts.ts removed (ARCHITECTURE-V2), test removed
 
 // ── V8: heartbeat.ts imports from ./doc-utils.ts ──
 

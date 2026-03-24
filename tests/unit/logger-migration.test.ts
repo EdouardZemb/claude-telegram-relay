@@ -28,14 +28,12 @@ const MIGRATED_MODULES = [
   "bot-context.ts",
   // Vague 2 — Infrastructure et agents
   "tts.ts",
-  "workflow.ts",
   "loader.ts",
   // Vague 3 — Modules legers
   "tasks.ts",
   "commands/utilities.ts",
   "document-sharding.ts",
   "llm-ops.ts",
-  "cost-tracking.ts",
   "notification-queue.ts",
   "projects.ts",
   "job-manager.ts",
@@ -45,8 +43,6 @@ const MIGRATED_MODULES = [
   "gates.ts",
   "transcribe.ts",
   "intent-detection.ts",
-  "conversation-session.ts",
-  "bmad-prompts.ts",
   "commands/help.ts",
 ];
 
@@ -167,4 +163,3 @@ describe("Logger migration — V8: loader.ts no [loader] prefix", () => {
     expect(loaderPrefixLines).toEqual([]);
   });
 });
-

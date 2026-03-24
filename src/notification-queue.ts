@@ -15,16 +15,119 @@
 import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import type { Bot } from "grammy";
 import { InlineKeyboard } from "grammy";
-import { join } from "path";
+import { dirname, join } from "path";
 import { createLogger } from "./logger.ts";
-import {
-  getPrefs,
-  isImmediate,
-  isQuietHours,
-  isTypeEnabled,
-  loadPrefs,
-  type NotificationType,
-} from "./notification-prefs.ts";
+
+// ── Notification Preferences (inlined from notification-prefs.ts) ──
+
+const PREFS_PROJECT_ROOT = dirname(dirname(import.meta.path));
+const PREFS_FILE = join(PREFS_PROJECT_ROOT, "config", "notification-prefs.json");
+
+export type NotificationType = "task" | "pr" | "idea" | "alert";
+
+export interface TypePrefs {
+  enabled: boolean;
+  immediate: boolean;
+}
+
+export interface NotificationPrefs {
+  quietStart: number;
+  quietEnd: number;
+  batchIntervalMs: number;
+  batchThreshold: number;
+  types: Record<NotificationType, TypePrefs>;
+}
+
+const DEFAULT_PREFS: NotificationPrefs = {
+  quietStart: 20,
+  quietEnd: 9,
+  batchIntervalMs: 5 * 60 * 1000,
+  batchThreshold: 5,
+  types: {
+    task: { enabled: true, immediate: false },
+    pr: { enabled: true, immediate: false },
+    idea: { enabled: true, immediate: false },
+    alert: { enabled: true, immediate: true },
+  },
+};
+
+let cachedPrefs: NotificationPrefs | null = null;
+
+export async function loadPrefs(): Promise<NotificationPrefs> {
+  try {
+    const content = await readFile(PREFS_FILE, "utf-8");
+    const parsed = JSON.parse(content);
+    const merged: NotificationPrefs = {
+      ...DEFAULT_PREFS,
+      ...parsed,
+      types: { ...DEFAULT_PREFS.types, ...parsed.types },
+    };
+    cachedPrefs = merged;
+    return merged;
+  } catch {
+    cachedPrefs = getDefaultPrefs();
+    return cachedPrefs;
+  }
+}
+
+export async function savePrefs(prefs: NotificationPrefs): Promise<void> {
+  cachedPrefs = prefs;
+  await writeFile(PREFS_FILE, JSON.stringify(prefs, null, 2));
+}
+
+export function getPrefs(): NotificationPrefs {
+  return cachedPrefs || { ...DEFAULT_PREFS, types: { ...DEFAULT_PREFS.types } };
+}
+
+export function isTypeEnabled(type: NotificationType): boolean {
+  return getPrefs().types[type]?.enabled ?? true;
+}
+
+export function isImmediate(type: NotificationType): boolean {
+  return getPrefs().types[type]?.immediate ?? false;
+}
+
+export function isQuietHours(timezone?: string): boolean {
+  const prefs = getPrefs();
+  const tz = timezone || process.env.USER_TIMEZONE || "Europe/Paris";
+  const now = new Date();
+  const currentHour = parseInt(
+    now.toLocaleTimeString("en-US", { hour: "2-digit", hour12: false, timeZone: tz }),
+    10,
+  );
+  const { quietStart, quietEnd } = prefs;
+  if (quietStart < quietEnd) return currentHour >= quietStart && currentHour < quietEnd;
+  if (quietStart > quietEnd) return currentHour >= quietStart || currentHour < quietEnd;
+  return false;
+}
+
+export function formatPrefs(prefs: NotificationPrefs): string {
+  const lines = [
+    "PREFERENCES NOTIFICATIONS",
+    "",
+    `Quiet hours : ${prefs.quietStart}h - ${prefs.quietEnd}h`,
+    `Batch : ${prefs.batchIntervalMs / 60000}min ou ${prefs.batchThreshold} messages`,
+    "",
+    "Types :",
+  ];
+  for (const [type, tp] of Object.entries(prefs.types)) {
+    const status = tp.enabled ? (tp.immediate ? "immediat" : "batch") : "desactive";
+    lines.push(`  ${type} : ${status}`);
+  }
+  return lines.join("\n");
+}
+
+export function getDefaultPrefs(): NotificationPrefs {
+  return {
+    ...DEFAULT_PREFS,
+    types: {
+      task: { ...DEFAULT_PREFS.types.task },
+      pr: { ...DEFAULT_PREFS.types.pr },
+      idea: { ...DEFAULT_PREFS.types.idea },
+      alert: { ...DEFAULT_PREFS.types.alert },
+    },
+  };
+}
 
 const log = createLogger("notification-queue");
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");

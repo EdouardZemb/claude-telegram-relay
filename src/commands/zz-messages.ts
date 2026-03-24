@@ -14,14 +14,6 @@ import { type ActionDefinition, formatActionsForLLM, getAction } from "../action
 import { recordResponseTime } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, BOT_TOKEN, formatDocumentContext, UPLOADS_DIR } from "../bot-context.ts";
-import {
-  addConstraint,
-  addIntent as addSessionIntent,
-  addMessage as addSessionMessage,
-  extractConstraints,
-  formatSessionForIntent,
-  getSession,
-} from "../conversation-session.ts";
 import type { DocumentCreateInput, DocumentSearchResult } from "../documents.ts";
 import { checkDuplicate, computeFileHash, createDocument, searchDocuments } from "../documents.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
@@ -404,17 +396,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     await bctx.saveMessage("user", options.saveMessageText, meta);
 
-    // S43: Track conversation session
-    const chatId = ctx.chat?.id || 0;
-    const session = getSession(chatId, threadId);
-    addSessionMessage(session, input);
-
-    // Extract user constraints from the message
-    const constraints = extractConstraints(input);
-    for (const c of constraints) {
-      addConstraint(session, c.type, c.value, c.source);
-    }
-
     // S37: Check if this is a response to a pending clarification
     const clarificationCmd = checkPendingClarification(ctx, input);
     if (clarificationCmd) {
@@ -467,32 +448,16 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
       // High-confidence regex match — route to command
-      addSessionIntent(
-        session,
-        regexResult.detected.intent,
-        regexResult.detected.command,
-        regexResult.detected.confidence,
-        true,
-      );
       const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
       if (routeResult.handled) return;
     } else {
-      // LLM fallback for ambiguous messages — with session context
-      const sessionCtx = formatSessionForIntent(session);
+      // LLM fallback for ambiguous messages
       const llmResult = await detectIntentWithLLM(input, {
         callLLM: (prompt) => bctx.callClaude(prompt),
         recentMessages,
         timeoutMs: 15000,
-        sessionContext: sessionCtx,
       });
       if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
-        addSessionIntent(
-          session,
-          llmResult.detected.intent,
-          llmResult.detected.command,
-          llmResult.detected.confidence,
-          true,
-        );
         const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
         if (routeResult.handled) return;
       }
@@ -526,6 +491,7 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     const convergence = detectConvergenceInResponse(finalResponse);
     if (convergence) {
       const { getTracker } = await import("../pipeline-tracker.ts");
+      const chatId = ctx.chat?.id || 0;
       const tracker = await getTracker(chatId, threadId);
       if (tracker) {
         const keyboard = buildSddKeyboard("discuss", tracker.name);

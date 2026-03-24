@@ -76,7 +76,6 @@ describe("action-registry", () => {
         "speak",
         "export",
         "feature",
-        "estimate",
         "rollback",
       ];
       for (const cmd of expected) {

@@ -40,6 +40,7 @@ describe("Module Imports: Core", () => {
     expect(mod.formatProjectList).toBeFunction();
     expect(mod.formatProjectDetail).toBeFunction();
     // getProjectById was removed in S18-01 — should NOT exist
+    // biome-ignore lint/suspicious/noExplicitAny: checking removed export
     expect((mod as any).getProjectById).toBeUndefined();
   });
 
@@ -53,16 +54,6 @@ describe("Module Imports: Core", () => {
 });
 
 describe("Module Imports: BMad System", () => {
-  it("imports bmad-agents module", async () => {
-    const mod = await import("../../src/bmad-agents");
-    expect(mod.getAgent).toBeFunction();
-    expect(mod.getAgents).toBeFunction();
-    expect(mod.getAgentForCommand).toBeFunction();
-    expect(mod.formatAgentList).toBeFunction();
-    const agents = mod.getAgents();
-    expect(agents.length).toBeGreaterThanOrEqual(6);
-  });
-
   it("imports gates module", async () => {
     const mod = await import("../../src/gates");
     expect(mod.checkGate1_PRD).toBeFunction();
@@ -70,22 +61,11 @@ describe("Module Imports: BMad System", () => {
     expect(mod.checkGatesWithOverrides).toBeFunction();
   });
 
-  // story-files, feedback-loop, code-review modules removed (ARCHITECTURE-V2 Phase 4)
+  // bmad-agents, bmad-prompts, story-files, feedback-loop, code-review modules removed (ARCHITECTURE-V2)
 });
 
 describe("Module Imports: Workflow & Analysis", () => {
-  it("imports workflow module", async () => {
-    const mod = await import("../../src/workflow");
-    expect(mod.WorkflowTracker).toBeDefined();
-    expect(mod.collectSprintMetrics).toBeFunction();
-    expect(mod.getSprintMetrics).toBeFunction();
-    expect(mod.generateRetroData).toBeFunction();
-    expect(mod.saveRetro).toBeFunction();
-    expect(mod.formatMetrics).toBeFunction();
-    expect(mod.formatRetro).toBeFunction();
-  });
-
-  // patterns module removed (ARCHITECTURE-V2 Phase 4)
+  // workflow module removed (ARCHITECTURE-V2 — metrics/retro inlined into quality.ts)
 
   it("imports alerts module", async () => {
     const mod = await import("../../src/alerts");
@@ -106,7 +86,9 @@ describe("Module Imports: Workflow & Analysis", () => {
     expect(mod.invalidateProjectCache).toBeFunction();
     expect(mod.clearContextCache).toBeFunction();
     // shardAnalysis and shardMemoryFacts were removed in S18-01
+    // biome-ignore lint/suspicious/noExplicitAny: checking removed export
     expect((mod as any).shardAnalysis).toBeUndefined();
+    // biome-ignore lint/suspicious/noExplicitAny: checking removed export
     expect((mod as any).shardMemoryFacts).toBeUndefined();
   });
 

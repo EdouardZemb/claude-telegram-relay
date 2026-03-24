@@ -1,6 +1,6 @@
 /**
  * @module commands/utilities
- * @description Composer for utility commands: /speak, /export, /feature, /estimate, /rollback.
+ * @description Composer for utility commands: /speak, /export, /feature, /rollback.
  * Also handles gate override callbacks (gate_override, gate_cancel) and
  * notification action callbacks (notif_*).
  */
@@ -158,19 +158,6 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     }
 
     await ctx.reply("Usage: /feature [list|enable <flag>|disable <flag>]", bctx.threadOpts(ctx));
-  });
-
-  // /estimate — simplified (cost-estimate module removed)
-  composer.command("estimate", async (ctx) => {
-    const blocked = bctx.commandGuard(ctx, "estimate");
-    if (blocked) {
-      await ctx.reply(blocked, bctx.threadOpts(ctx));
-      return;
-    }
-    await ctx.reply(
-      "Commande /estimate retiree. Utilise /cost pour consulter les couts reels par sprint.",
-      bctx.threadOpts(ctx),
-    );
   });
 
   // /rollback

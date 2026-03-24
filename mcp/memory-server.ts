@@ -251,6 +251,7 @@ server.tool(
   },
   async ({ session_id, section }) => {
     const url = `blackboard?session_id=eq.${session_id}&select=sections,version,status,pipeline_type`;
+    // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
     const data = (await callSupabaseRest(url)) as any[];
 
     if (!data?.length) {
@@ -283,6 +284,7 @@ server.tool(
   async ({ session_id, section, data, role }) => {
     const current = (await callSupabaseRest(
       `blackboard?session_id=eq.${session_id}&select=sections,version`,
+      // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
     )) as any[];
     if (!current?.length) {
       return { content: [{ type: "text" as const, text: "Blackboard not found" }] };
@@ -325,17 +327,15 @@ server.tool(
   },
 );
 
-
 // ── S44: Business Logic Server (Task Tools) ─────────────────
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { rename as fsRename, mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { decomposeTask } from "../src/agent.ts";
 import { runAllChecks } from "../src/alerts.ts";
-import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
 import { listFeatures, setFeature } from "../src/feature-flags.ts";
+import { getSprintCostSummary, getTotalCost } from "../src/llm-ops.ts";
 import {
   addTask,
   getBacklog,
@@ -380,7 +380,7 @@ async function enqueueMcpNotification(notif: Omit<McpNotification, "createdAt">)
 // work in background and return immediately with a job ID.
 // Completion notifications go through the existing mcp-pending-notifications bridge.
 
-function launchMcpBackgroundJob(
+function _launchMcpBackgroundJob(
   type: string,
   _description: string,
   fn: () => Promise<string>,
@@ -539,6 +539,7 @@ server.tool(
           `tasks?sprint=eq.${sprintId}&status=neq.cancelled` +
             `&select=id,title,status,priority,description,estimated_hours,actual_hours,tags` +
             `&order=priority.asc,status.asc`,
+          // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
         ) as Promise<any[]>,
       ]);
       const completionRate =
@@ -584,6 +585,7 @@ server.tool(
     try {
       const sprintId = sprint || (await getCurrentSprint(supabase)) || "unknown";
       const metricsUrl = `sprint_metrics?sprint_id=eq.${sprintId}&select=*&limit=1`;
+      // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
       const metricsData = (await callSupabaseRest(metricsUrl)) as any[];
 
       // Also fetch task stats for the sprint
@@ -593,6 +595,7 @@ server.tool(
       const recentUrl =
         `sprint_metrics?select=sprint_id,velocity,rework_rate,cycle_time_hours,total_tasks,completed_tasks` +
         `&order=created_at.desc&limit=3`;
+      // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
       const recent = (await callSupabaseRest(recentUrl)) as any[];
 
       return {
@@ -787,7 +790,6 @@ server.tool(
   },
 );
 
-
 // ── Audit Tool ───────────────────────────────────────────────
 
 server.tool(
@@ -810,6 +812,7 @@ server.tool(
       const url =
         "audit_results?select=id,global_score,axis_scores,findings,created_at" +
         "&order=created_at.desc&limit=1";
+      // biome-ignore lint/suspicious/noExplicitAny: Supabase REST response
       const data = (await callSupabaseRest(url)) as any[];
 
       if (!data?.length) {
@@ -838,6 +841,7 @@ server.tool(
         const axisScore = row.axis_scores?.[axis] ?? null;
         const axisFindings = Array.isArray(row.findings)
           ? row.findings.filter(
+              // biome-ignore lint/suspicious/noExplicitAny: dynamic findings shape
               (g: any) => g.axis === axis || g.type?.toLowerCase().includes(axis.toLowerCase()),
             )
           : [];

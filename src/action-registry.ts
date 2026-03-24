@@ -61,16 +61,6 @@ const ACTIONS: ActionDefinition[] = [
     aliases: ["processus", "workflow bmad", "etapes"],
   },
   {
-    command: "agents",
-    description: "Lister les agents BMad et leurs roles",
-    usage: "/agents",
-    params: [],
-    risk: "low",
-    module: "help",
-    requiresSupabase: false,
-    aliases: ["agents bmad", "equipe", "qui fait quoi"],
-  },
-  {
     command: "status",
     description: "Etat du serveur et sante systeme",
     usage: "/status",
@@ -388,19 +378,6 @@ const ACTIONS: ActionDefinition[] = [
     module: "utilities",
     requiresSupabase: false,
     aliases: ["feature flag", "flags", "activer feature"],
-  },
-  {
-    command: "estimate",
-    description: "Estimer le cout d'un sprint",
-    usage: "/estimate <nombre_taches> [pipeline]",
-    params: [
-      { name: "taskCount", required: true, description: "Nombre de taches" },
-      { name: "pipeline", required: false, description: "DEFAULT, QUICK, REVIEW" },
-    ],
-    risk: "low",
-    module: "utilities",
-    requiresSupabase: false,
-    aliases: ["estimation cout", "combien ca va couter", "budget sprint"],
   },
   {
     command: "rollback",

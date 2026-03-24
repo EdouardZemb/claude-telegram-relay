@@ -60,7 +60,7 @@ export async function extractCommands(relayPath: string): Promise<string[]> {
 
   // Scan relay.ts
   const relayContent = await readFile(relayPath, "utf-8");
-  let match;
+  let match: RegExpExecArray | null;
   while ((match = regex.exec(relayContent)) !== null) {
     commands.push(`/${match[1]}`);
   }
@@ -94,7 +94,7 @@ export async function parseClaudeMdModules(claudeMdPath: string): Promise<string
   const content = await readFile(claudeMdPath, "utf-8");
   const _regex = /\| `([^`]+\.ts)` \|/g;
   const modules: string[] = [];
-  let match;
+  let match: RegExpExecArray | null;
   // Only match in the Source Modules section
   const modulesSection = content.split("### Source Modules")[1]?.split("###")[0] || "";
   const sectionRegex = /\| `([^`]+\.ts)` \|/g;
@@ -112,7 +112,7 @@ export async function parseClaudeMdCommands(claudeMdPath: string): Promise<strin
   const commandsSection = content.split("### Telegram Commands")[1]?.split("###")[0] || "";
   const regex = /\| `(\/\w+)/g;
   const commands: string[] = [];
-  let match;
+  let match: RegExpExecArray | null;
   while ((match = regex.exec(commandsSection)) !== null) {
     commands.push(match[1]);
   }

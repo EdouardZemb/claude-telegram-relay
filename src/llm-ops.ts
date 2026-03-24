@@ -6,10 +6,245 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { type CostEntry, logCost } from "./cost-tracking.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("llm-ops");
+
+// ── Cost Tracking (inlined from cost-tracking.ts) ────────────
+
+export interface TokenUsage {
+  tokensInput: number;
+  tokensOutput: number;
+  tokensTotal: number;
+  costUsd: number;
+}
+
+export interface CostEntry {
+  taskId?: string;
+  sprintId?: string;
+  agentRole?: string;
+  agentName?: string;
+  tokensInput: number;
+  tokensOutput: number;
+  costUsd: number;
+  durationMs: number;
+  retryAttempt?: number;
+  context?: string;
+  metadata?: Record<string, unknown>;
+  model?: string;
+  cascadeEscalations?: number;
+  span_id?: string;
+  session_id?: string;
+}
+
+export interface SprintCostSummary {
+  sprintId: string;
+  totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  agentExecutions: number;
+  costByAgent: Record<string, { tokens: number; cost: number; count: number }>;
+  costByTask: Array<{ taskId: string; tokens: number; cost: number }>;
+}
+
+export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+  "claude-haiku-4-5": { input: 0.8, output: 4.0 },
+};
+
+const DEFAULT_PRICING = MODEL_PRICING["claude-sonnet-4-6"];
+
+export function estimateCost(tokensInput: number, tokensOutput: number, model?: string): number {
+  const pricing = (model && MODEL_PRICING[model]) || DEFAULT_PRICING;
+  const inputCost = (tokensInput / 1_000_000) * pricing.input;
+  const outputCost = (tokensOutput / 1_000_000) * pricing.output;
+  return Math.round((inputCost + outputCost) * 10000) / 10000;
+}
+
+export function parseTokenUsage(
+  output: string,
+  promptLength: number = 0,
+  model?: string,
+): TokenUsage {
+  const usageMatch = output.match(
+    /\{[^{}]*"input_tokens"\s*:\s*(\d+)[^{}]*"output_tokens"\s*:\s*(\d+)[^{}]*\}/,
+  );
+  if (usageMatch) {
+    const tokensInput = parseInt(usageMatch[1], 10);
+    const tokensOutput = parseInt(usageMatch[2], 10);
+    return {
+      tokensInput,
+      tokensOutput,
+      tokensTotal: tokensInput + tokensOutput,
+      costUsd: estimateCost(tokensInput, tokensOutput, model),
+    };
+  }
+  const estimatedInput = Math.max(promptLength, 500) / 4;
+  const estimatedOutput = Math.max(output.length, 100) / 4;
+  const tokensInput = Math.round(estimatedInput);
+  const tokensOutput = Math.round(estimatedOutput);
+  return {
+    tokensInput,
+    tokensOutput,
+    tokensTotal: tokensInput + tokensOutput,
+    costUsd: estimateCost(tokensInput, tokensOutput, model),
+  };
+}
+
+export async function logCost(supabase: SupabaseClient | null, entry: CostEntry): Promise<void> {
+  if (!supabase) return;
+  try {
+    const row: Record<string, unknown> = {
+      task_id: entry.taskId || null,
+      sprint_id: entry.sprintId || null,
+      agent_role: entry.agentRole || null,
+      agent_name: entry.agentName || null,
+      tokens_input: entry.tokensInput,
+      tokens_output: entry.tokensOutput,
+      cost_usd: entry.costUsd,
+      duration_ms: entry.durationMs,
+      retry_attempt: entry.retryAttempt || 0,
+      context: entry.context || null,
+      metadata: entry.metadata || {},
+      model: entry.model || null,
+    };
+    if (entry.span_id) row.span_id = entry.span_id;
+    if (entry.session_id) row.session_id = entry.session_id;
+    const { error } = await supabase.from("cost_tracking").insert(row);
+    if (error) log.error("logCost error", { error: String(error) });
+  } catch (error) {
+    log.error("logCost error", { error: String(error) });
+  }
+}
+
+export async function getSprintCostSummary(
+  supabase: SupabaseClient | null,
+  sprintId: string,
+): Promise<SprintCostSummary | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("cost_tracking")
+      .select("task_id, agent_role, agent_name, tokens_input, tokens_output, cost_usd")
+      .eq("sprint_id", sprintId);
+    if (error || !data?.length) {
+      return {
+        sprintId,
+        totalTokens: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCostUsd: 0,
+        agentExecutions: 0,
+        costByAgent: {},
+        costByTask: [],
+      };
+    }
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    const costByAgent: Record<string, { tokens: number; cost: number; count: number }> = {};
+    const taskCosts: Record<string, { tokens: number; cost: number }> = {};
+    for (const row of data) {
+      const input = row.tokens_input || 0;
+      const output = row.tokens_output || 0;
+      const cost = Number(row.cost_usd) || 0;
+      totalInputTokens += input;
+      totalOutputTokens += output;
+      totalCostUsd += cost;
+      const role = row.agent_role || "unknown";
+      if (!costByAgent[role]) costByAgent[role] = { tokens: 0, cost: 0, count: 0 };
+      costByAgent[role].tokens += input + output;
+      costByAgent[role].cost += cost;
+      costByAgent[role].count += 1;
+      if (row.task_id) {
+        if (!taskCosts[row.task_id]) taskCosts[row.task_id] = { tokens: 0, cost: 0 };
+        taskCosts[row.task_id].tokens += input + output;
+        taskCosts[row.task_id].cost += cost;
+      }
+    }
+    const costByTask = Object.entries(taskCosts)
+      .map(([taskId, costs]) => ({ taskId, ...costs }))
+      .sort((a, b) => b.cost - a.cost);
+    return {
+      sprintId,
+      totalTokens: totalInputTokens + totalOutputTokens,
+      totalInputTokens,
+      totalOutputTokens,
+      totalCostUsd: Math.round(totalCostUsd * 10000) / 10000,
+      agentExecutions: data.length,
+      costByAgent,
+      costByTask,
+    };
+  } catch (error) {
+    log.error("getSprintCostSummary error", { error: String(error) });
+    return null;
+  }
+}
+
+export async function getTotalCost(
+  supabase: SupabaseClient | null,
+): Promise<{ totalTokens: number; totalCostUsd: number; executions: number }> {
+  if (!supabase) return { totalTokens: 0, totalCostUsd: 0, executions: 0 };
+  try {
+    const { data, error } = await supabase
+      .from("cost_tracking")
+      .select("tokens_input, tokens_output, cost_usd");
+    if (error || !data?.length) return { totalTokens: 0, totalCostUsd: 0, executions: 0 };
+    let totalTokens = 0;
+    let totalCostUsd = 0;
+    for (const row of data) {
+      totalTokens += (row.tokens_input || 0) + (row.tokens_output || 0);
+      totalCostUsd += Number(row.cost_usd) || 0;
+    }
+    return {
+      totalTokens,
+      totalCostUsd: Math.round(totalCostUsd * 10000) / 10000,
+      executions: data.length,
+    };
+  } catch {
+    return { totalTokens: 0, totalCostUsd: 0, executions: 0 };
+  }
+}
+
+export function formatTokenCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return String(count);
+}
+
+export function formatCostSummary(summary: SprintCostSummary | null): string {
+  if (!summary) return "Pas de donnees de cout disponibles.";
+  if (summary.agentExecutions === 0) {
+    return `Couts Sprint ${summary.sprintId}\n\nAucune execution d'agent enregistree.`;
+  }
+  const lines: string[] = [
+    `Couts Sprint ${summary.sprintId}`,
+    "",
+    `Executions: ${summary.agentExecutions}`,
+    `Tokens totaux: ${formatTokenCount(summary.totalTokens)} (${formatTokenCount(summary.totalInputTokens)} in / ${formatTokenCount(summary.totalOutputTokens)} out)`,
+    `Cout estime: $${summary.totalCostUsd.toFixed(4)}`,
+  ];
+  const agents = Object.entries(summary.costByAgent).sort((a, b) => b[1].cost - a[1].cost);
+  if (agents.length > 0) {
+    lines.push("", "Par agent:");
+    for (const [role, stats] of agents) {
+      lines.push(
+        `  ${role}: ${stats.count}x, ${formatTokenCount(stats.tokens)} tokens, $${stats.cost.toFixed(4)}`,
+      );
+    }
+  }
+  if (summary.costByTask.length > 0) {
+    lines.push("", "Top taches:");
+    for (const task of summary.costByTask.slice(0, 5)) {
+      lines.push(
+        `  ${task.taskId.slice(0, 8)}: ${formatTokenCount(task.tokens)} tokens, $${task.cost.toFixed(4)}`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
 // ── Constants ────────────────────────────────────────────────
 
 /** Interval for periodic LLM-Ops check in heartbeat (R7) — 30 minutes */

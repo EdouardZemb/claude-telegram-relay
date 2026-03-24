@@ -13,7 +13,6 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawn, spawnSync } from "bun";
-import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
 import { createLogger } from "./logger.ts";
 import { type Task, updateTaskStatus } from "./tasks.ts";
 
@@ -628,10 +627,41 @@ export async function executeTask(
 
 /**
  * Build a structured prompt for the sub-agent.
- * Uses BMad Dev agent (Amelia) persona for structured execution.
  */
 function buildAgentPrompt(task: Task): string {
-  return buildBmadExecPrompt(task);
+  const parts: string[] = [`TACHE: ${task.title}`];
+  if (task.description) parts.push(`DESCRIPTION: ${task.description}`);
+  if (task.project) parts.push(`PROJET: ${task.project}`);
+  if (task.priority != null) parts.push(`PRIORITE: P${task.priority}`);
+  if (task.acceptance_criteria) {
+    parts.push("", "CRITERES D'ACCEPTATION:", task.acceptance_criteria);
+  }
+  if (task.dev_notes) {
+    parts.push("", "NOTES DEV:", task.dev_notes);
+  }
+  if (task.architecture_ref) {
+    parts.push("", "REFERENCE ARCHITECTURE:", task.architecture_ref);
+  }
+  if (task.subtasks && task.subtasks.length > 0) {
+    parts.push("", "SOUS-TACHES:");
+    for (const st of task.subtasks) {
+      parts.push(
+        `${st.done ? "[x]" : "[ ]"} ${st.title}${st.ac_mapping ? ` (AC: ${st.ac_mapping})` : ""}`,
+      );
+    }
+  }
+  parts.push(
+    "",
+    "INSTRUCTIONS:",
+    "- Analyse le codebase existant avant toute modification",
+    "- Execute les sous-taches dans l'ordre indique",
+    "- Ecris des tests pour chaque fonctionnalite implementee",
+    "- Respecte le style de code existant",
+    "- Avant de terminer, executer bun build --no-bundle --target=bun et bun test tests/unit",
+    "",
+    "Commence maintenant.",
+  );
+  return parts.join("\n");
 }
 
 /**
@@ -662,11 +692,9 @@ export async function decomposeTask(
     "JSON:",
   ].join("\n");
 
-  // Enrich with PM agent (John) persona
-  const { enrichedPrompt: prompt } = enrichPromptWithAgent("plan", taskPrompt);
+  const prompt = taskPrompt;
 
   try {
-    // S28: Use centralized spawnClaude
     const result = await spawnClaude({ prompt });
 
     // Extract JSON from the response

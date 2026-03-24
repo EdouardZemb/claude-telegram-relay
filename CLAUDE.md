@@ -27,7 +27,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
 | `commands/jobs.ts` | Composer: /jobs (list, cancel) |
 | `commands/sdd-flow.ts` | Composer: SDD InlineKeyboard callbacks (sdd_ prefix), contextual keyboard construction, convergence detection |
-| `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
+| `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
@@ -41,19 +41,14 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
-| `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
+| `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, cost tracking, observability |
 | `logger.ts` | Structured logger: JSON (production) / colored (dev), correlation IDs, log level filtering |
-| `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds, AgentRole type |
-| `bmad-prompts.ts` | Context-aware prompt builder per agent role |
-| `cost-tracking.ts` | Token usage tracking, multi-model cost estimation, sprint aggregation |
-| `workflow.ts` | Workflow engine: state transitions, enforcement, retry policies |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `doc-utils.ts` | Documentation parsing utilities: module/command extraction, test count, gap detection |
 | `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads relevant shards |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
-| `notification-queue.ts` | Notification batching: flush intervals, digest, quiet hours, inline buttons |
-| `notification-prefs.ts` | Notification preferences: quiet hours, per-type config |
+| `notification-queue.ts` | Notification batching: flush intervals, digest, quiet hours, inline buttons, preferences |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
 | `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence, batch result parsing, progress messaging |
@@ -61,9 +56,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
-| `action-registry.ts` | Registry of all 37 bot commands: metadata, params, risk levels, aliases |
+| `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
-| `conversation-session.ts` | Conversation sessions: per-chat tracking, constraint extraction, phase detection |
 | `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
 | `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
 
@@ -94,7 +88,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/brain` | Memory synthesis: patterns, health, ideas, suggestions. Sub-command: /brain health |
 | `/ideas` | Ideas pipeline: list, add, review, promote, archive |
 | `/notify` | Notification preferences: status, quiet hours, on/off per type, immediate mode |
-| `/estimate` | Pre-implementation cost estimation per sprint/pipeline |
 | `/feature` | Feature flags: list, enable, disable |
 | `/jobs` | Background job status (list, cancel) |
 | `/rollback` | Rollback to previous commit |
@@ -135,7 +128,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    54 TypeScript modules (core logic)
+src/                    48 TypeScript modules (core logic)
   commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
 dashboard/              Kanban board (server.ts + index.html)
@@ -143,7 +136,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2101 tests (unit + integration + E2E)
+tests/                  1820 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -171,7 +164,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2101 tests, all must pass before merge)
+- Tests: `bun test` (1820 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -179,7 +172,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
-- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: zz-messages.ts (~920, includes inlined command-router), workflow.ts (848) — deferred to future vagues
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: zz-messages.ts (~880, includes inlined command-router)
 
 ## Setup
 

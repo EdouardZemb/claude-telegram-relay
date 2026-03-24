@@ -30,12 +30,10 @@ import {
   TEMP_DIR,
   UPLOADS_DIR,
 } from "./bot-context.ts";
-import { initSessions } from "./conversation-session.ts";
 import { initJobManager } from "./job-manager.ts";
 import { loadComposers } from "./loader.ts";
 import { createLogger } from "./logger.ts";
-import { loadPrefs } from "./notification-prefs.ts";
-import { startQueue } from "./notification-queue.ts";
+import { loadPrefs, startQueue } from "./notification-queue.ts";
 import { initPipelineTracker } from "./pipeline-tracker.ts";
 
 const log = createLogger("relay");
@@ -145,7 +143,6 @@ if (import.meta.main) {
   const mainBot = await createBot(BOT_TOKEN);
   await startQueue(mainBot);
   initJobManager(mainBot);
-  await initSessions();
   await initPipelineTracker();
   await loadPrefs();
 

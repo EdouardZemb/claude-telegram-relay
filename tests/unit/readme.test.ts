@@ -221,7 +221,7 @@ describe("README AC-3: reflects all features up to S31", () => {
       "gate-evaluator",
       "adversarial",
       "notification-queue",
-      "cost-tracking",
+      "cost tracking",
       "MCP",
     ];
     for (const feature of features) {

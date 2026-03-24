@@ -124,7 +124,6 @@ describe("Coding standards — S2: no direct process.env", () => {
     "job-manager.ts": "RELAY_DIR — standalone job persistence directory",
     "notification-queue.ts":
       "RELAY_DIR, TELEGRAM_USER_ID, USER_TIMEZONE, TELEGRAM_GROUP_ID, SPRINT/DEV_THREAD_ID — notification routing",
-    "conversation-session.ts": "RELAY_DIR — session persistence directory",
     "pipeline-tracker.ts": "RELAY_DIR — SDD pipeline persistence directory",
     "bot-context.ts": "HOME, VOICE_PROVIDER, TTS_PROVIDER — runtime provider detection",
     // Code tooling: PROJECT_DIR for filesystem operations
@@ -136,7 +135,6 @@ describe("Coding standards — S2: no direct process.env", () => {
     "transcribe.ts":
       "VOICE_PROVIDER, WHISPER_LANGUAGE, WHISPER_BINARY, WHISPER_MODEL_PATH, TMPDIR — whisper config",
     "tts.ts": "TTS_PROVIDER, GROQ_API_KEY, GROQ_TTS_*, PIPER_*, TMPDIR — TTS provider config",
-    "notification-prefs.ts": "USER_TIMEZONE — timezone for quiet hours",
     // Commands: timezone and thread IDs for user-facing formatting
     "commands/tasks.ts": "SPRINT_THREAD_ID, USER_TIMEZONE — sprint routing and formatting",
     "commands/memory-cmds.ts": "USER_TIMEZONE — timestamp formatting",

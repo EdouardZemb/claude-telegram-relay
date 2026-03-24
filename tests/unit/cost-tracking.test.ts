@@ -14,7 +14,7 @@ import {
   getTotalCost,
   logCost,
   parseTokenUsage,
-} from "../../src/cost-tracking";
+} from "../../src/llm-ops";
 import { createMockSupabase } from "../fixtures/mock-supabase";
 
 // ── estimateCost ─────────────────────────────────────────────

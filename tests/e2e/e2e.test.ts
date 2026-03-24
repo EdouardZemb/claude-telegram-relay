@@ -61,12 +61,7 @@ describe("E2E Telegram Commands", () => {
     expect(reply).toBeTruthy();
   });
 
-  test("/estimate returns cost estimation data", async () => {
-    const reply = await fw.sendCommand("/estimate");
-    expect(reply.length).toBeGreaterThan(0);
-    // Should respond with cost estimate or usage info
-    expect(reply).toBeTruthy();
-  });
+  // /estimate removed (ARCHITECTURE-V2)
 
   test("/notify status returns notification preferences", async () => {
     const reply = await fw.sendCommand("/notify status");
