@@ -70,25 +70,7 @@ describe("Module Imports: BMad System", () => {
     expect(mod.checkGatesWithOverrides).toBeFunction();
   });
 
-  it("imports story-files module", async () => {
-    const mod = await import("../../src/story-files");
-    expect(mod.buildStoryFile).toBeFunction();
-    expect(mod.formatStoryForAgent).toBeFunction();
-    expect(mod.enrichTaskWithStory).toBeFunction();
-    expect(mod.formatStoryPreview).toBeFunction();
-  });
-
-  it("imports feedback-loop module", async () => {
-    const mod = await import("../../src/feedback-loop");
-    expect(mod.processRetroFeedback).toBeFunction();
-    expect(mod.loadFeedbackRules).toBeFunction();
-  });
-
-  it("imports code-review module", async () => {
-    const mod = await import("../../src/code-review");
-    expect(mod.saveReviewResult).toBeFunction();
-    expect(mod.formatReviewResult).toBeFunction();
-  });
+  // story-files, feedback-loop, code-review modules removed (ARCHITECTURE-V2 Phase 4)
 });
 
 describe("Module Imports: Workflow & Analysis", () => {
@@ -103,11 +85,7 @@ describe("Module Imports: Workflow & Analysis", () => {
     expect(mod.formatRetro).toBeFunction();
   });
 
-  it("imports patterns module", async () => {
-    const mod = await import("../../src/patterns");
-    expect(mod.analyzePatterns).toBeFunction();
-    expect(mod.formatPatterns).toBeFunction();
-  });
+  // patterns module removed (ARCHITECTURE-V2 Phase 4)
 
   it("imports alerts module", async () => {
     const mod = await import("../../src/alerts");
@@ -141,12 +119,7 @@ describe("Module Imports: Utilities", () => {
     expect(mod.transcribe).toBeFunction();
   });
 
-  it("imports profile-evolution module", async () => {
-    const mod = await import("../../src/profile-evolution");
-    expect(mod.analyzeProfile).toBeFunction();
-    expect(mod.proposeProfileUpdates).toBeFunction();
-    expect(mod.formatProfileInsights).toBeFunction();
-  });
+  // profile-evolution module removed (ARCHITECTURE-V2 Phase 4)
 });
 
 // ── Document Sharding Functional Test ────────────────────────

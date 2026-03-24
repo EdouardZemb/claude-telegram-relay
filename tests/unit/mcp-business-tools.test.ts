@@ -129,11 +129,7 @@ describe("MCP Business Server — S44 Task Tools", () => {
     expect(serverCode).toContain('"write_blackboard"');
   });
 
-  it("preserves all S39 code graph tools", () => {
-    expect(serverCode).toContain('"query_dependencies"');
-    expect(serverCode).toContain('"query_dependents"');
-    expect(serverCode).toContain('"query_impact_radius"');
-  });
+  // S39 code graph tools removed (ARCHITECTURE-V2 Phase 4)
 
   // ── Error handling ───────────────────────────────────────────
 

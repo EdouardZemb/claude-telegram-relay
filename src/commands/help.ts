@@ -11,7 +11,6 @@ import { cpus, freemem, hostname, loadavg, uptime as osUptime, totalmem } from "
 import { formatMonitoringStats } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
-import { formatGraphStatsForMonitor, loadGraph } from "../code-graph.ts";
 import { formatLlmOpsSnapshot, getLlmOpsSnapshot } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
 
@@ -175,17 +174,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         // R8: business error → log.warn
         log.warn("monitor: llm-ops snapshot unavailable");
       }
-    }
-
-    // S39: Code graph stats
-    try {
-      const graph = loadGraph();
-      if (graph) {
-        parts.push("", formatGraphStatsForMonitor(graph));
-      }
-    } catch {
-      // R8: business error → log.warn
-      log.warn("monitor: code-graph stats unavailable");
     }
 
     await ctx.reply(parts.join("\n"), threadOpts(ctx));

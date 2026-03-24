@@ -8,21 +8,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type CostEntry, logCost } from "./cost-tracking.ts";
 import { createLogger } from "./logger.ts";
-import {
-  formatRecentGateEvaluations,
-  getAutonomyLevel,
-  getCachedTrustScore,
-  getCachedTrustScores,
-} from "./trust-scores.ts";
 
 const log = createLogger("llm-ops");
 // ── Constants ────────────────────────────────────────────────
-
-/** Trust score below which circuit-breaker opens (R6) */
-const CB_TRUST_THRESHOLD = 30;
-
-/** Consecutive failures triggering circuit-breaker (R6) */
-const CB_FAILURE_THRESHOLD = 3;
 
 /** Interval for periodic LLM-Ops check in heartbeat (R7) — 30 minutes */
 export const LLMOPS_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -92,28 +80,9 @@ export async function logCostWithSpan(
 
 /**
  * Get circuit-breaker status for an agent role.
- * Non-blocking: returns status + recommendation, decision stays with caller (R5).
- * Thresholds: trust_score < 30 OR consecutiveFailures >= 3 (R6).
+ * Simplified: always returns healthy since trust scores are removed.
  */
-export function getCircuitBreakerStatus(role: string): CircuitBreakerStatus {
-  const trust = getCachedTrustScore(role);
-
-  if (trust.score < CB_TRUST_THRESHOLD) {
-    return {
-      open: true,
-      reason: `trust_score ${trust.score} < ${CB_TRUST_THRESHOLD}`,
-      suggestedDowngrade: "QUICK",
-    };
-  }
-
-  if (trust.consecutiveFailures >= CB_FAILURE_THRESHOLD) {
-    return {
-      open: true,
-      reason: `consecutive_failures ${trust.consecutiveFailures} >= ${CB_FAILURE_THRESHOLD}`,
-      suggestedDowngrade: "QUICK",
-    };
-  }
-
+export function getCircuitBreakerStatus(_role: string): CircuitBreakerStatus {
   return {
     open: false,
     reason: "healthy",
@@ -198,32 +167,14 @@ export async function getActivePromptVersion(
  * Acceptable latency for /monitor (< 1/h usage). Cost summary filtered to 7 days (F-DA-4).
  */
 export async function getLlmOpsSnapshot(supabase: SupabaseClient): Promise<LlmOpsSnapshot> {
-  // Trust scores from in-memory cache (no query needed)
-  const rawScores = getCachedTrustScores();
+  // Trust scores removed — empty
   const trustScores: LlmOpsSnapshot["trustScores"] = {};
-  const allRoles = Object.keys(rawScores);
+  const circuitBreakers: LlmOpsSnapshot["circuitBreakers"] = [];
 
-  for (const role of allRoles) {
-    const ts = rawScores[role];
-    const autonomy = getAutonomyLevel(role);
-    trustScores[role] = {
-      score: ts.score,
-      autonomyLevel: autonomy.label,
-      consecutiveFailures: ts.consecutiveFailures,
-    };
-  }
-
-  // Circuit-breakers from trust score cache (no query needed)
-  const circuitBreakers = allRoles.map((role) => {
-    const cb = getCircuitBreakerStatus(role);
-    return { role, open: cb.open, reason: cb.reason };
-  });
-
-  // Parallel queries: gate evaluations, prompt versions, cost summary (7 days)
+  // Parallel queries: prompt versions, cost summary (7 days)
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [recentEvals, promptVersionsResult, costResult] = await Promise.all([
-    formatRecentGateEvaluations(supabase),
+  const [promptVersionsResult, costResult] = await Promise.all([
     supabase
       .from("prompt_versions")
       .select("agent_role, combined_hash, created_at")
@@ -273,7 +224,7 @@ export async function getLlmOpsSnapshot(supabase: SupabaseClient): Promise<LlmOp
 
   return {
     trustScores,
-    recentGateEvaluations: recentEvals,
+    recentGateEvaluations: "Pas de donnees",
     circuitBreakers,
     promptVersions,
     costSummary: {
@@ -293,36 +244,10 @@ export async function getLlmOpsSnapshot(supabase: SupabaseClient): Promise<LlmOp
  */
 export async function runLlmOpsCheck(
   _supabase: SupabaseClient,
-  notifyFn: (msg: string) => Promise<void>,
+  _notifyFn: (msg: string) => Promise<void>,
 ): Promise<LlmOpsCheckResult> {
-  const anomalies: string[] = [];
-  const circuitBreakersOpen: string[] = [];
-  let notificationsSent = 0;
-
-  // Check all known roles
-  const roles: string[] = ["analyst", "pm", "architect", "dev", "qa", "sm", "explorer", "planner"];
-  const scores = getCachedTrustScores();
-
-  for (const role of roles) {
-    // Only check roles that have data in the cache
-    if (!scores[role]) continue;
-
-    const cb = getCircuitBreakerStatus(role);
-    if (cb.open) {
-      circuitBreakersOpen.push(role);
-      const msg = `[LLM-Ops] Circuit-breaker ouvert pour ${role}: ${cb.reason}`;
-      anomalies.push(msg);
-
-      try {
-        await notifyFn(msg);
-        notificationsSent++;
-      } catch (err) {
-        log.error("runLlmOpsCheck notify error", { error: String(err) });
-      }
-    }
-  }
-
-  return { anomalies, notificationsSent, circuitBreakersOpen };
+  // Simplified: trust scores removed, no circuit-breakers to check
+  return { anomalies: [], notificationsSent: 0, circuitBreakersOpen: [] };
 }
 
 // ── SHA256 Hashing ──────────────────────────────────────────

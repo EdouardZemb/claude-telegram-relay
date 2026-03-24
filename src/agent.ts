@@ -13,11 +13,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawn, spawnSync } from "bun";
-import { buildAgentContext } from "./agent-context.ts";
 import { buildBmadExecPrompt, enrichPromptWithAgent } from "./bmad-agents.ts";
-import { formatReviewResult, runCodeReview, saveReviewResult } from "./code-review.ts";
 import { createLogger } from "./logger.ts";
-import { buildMcpToolInstructions } from "./mcp-config.ts";
 import { type Task, updateTaskStatus } from "./tasks.ts";
 
 const log = createLogger("agent");
@@ -40,8 +37,6 @@ export interface SpawnClaudeOptions {
   fromPr?: number;
   cwd?: string;
   timeout?: number;
-  /** S33: Agent role for MCP tool instructions injection */
-  mcpRole?: string;
   /** S34: Enable model cascade (Haiku -> Sonnet -> Opus). AC-011 to AC-015 */
   cascade?: boolean;
 }
@@ -136,12 +131,8 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
   const args: string[] = [CLAUDE_PATH];
 
   // System prompt (--append-system-prompt) before task prompt
-  // S33: Append MCP tool instructions when mcpRole is set
-  const systemParts: string[] = [];
-  if (options.systemPrompt) systemParts.push(options.systemPrompt);
-  if (options.mcpRole) systemParts.push(buildMcpToolInstructions(options.mcpRole));
-  if (systemParts.length > 0) {
-    args.push("--append-system-prompt", systemParts.join("\n\n"));
+  if (options.systemPrompt) {
+    args.push("--append-system-prompt", options.systemPrompt);
   }
 
   // Task prompt
@@ -471,18 +462,9 @@ export async function executeTask(
       }, AGENT_HEARTBEAT_MS);
     }
 
-    // S32: Build Supabase context for dev agent
-    const agentCtx = await buildAgentContext(supabase, {
-      role: "dev",
-      projectId: task.project_id || undefined,
-      sprintId: task.sprint || undefined,
-    });
-
-    // S28: Use centralized spawnClaude, S32: inject context, S33: MCP tools
+    // S28: Use centralized spawnClaude
     const result = await spawnClaude({
       prompt,
-      systemPrompt: agentCtx || undefined,
-      mcpRole: "dev",
     });
 
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -505,7 +487,6 @@ export async function executeTask(
     // Check if there are any changes to commit
     const status = git("status", "--porcelain");
     let prUrl: string | undefined;
-    let reviewResult: Awaited<ReturnType<typeof runCodeReview>> | undefined;
 
     if (status.stdout) {
       // Stage all changes
@@ -526,35 +507,6 @@ export async function executeTask(
 
       git("commit", "-m", `feat: ${task.title}`);
 
-      // Gate 3: Adversarial code review before push
-      if (onProgress) {
-        await onProgress("Code review adversariale en cours...");
-      }
-      reviewResult = await runCodeReview(branchName, task.title, onProgress);
-
-      if (supabase) {
-        await saveReviewResult(supabase, task.id, branchName, reviewResult);
-      }
-
-      if (onProgress) {
-        const reviewText = formatReviewResult(reviewResult);
-        await onProgress(reviewText.length > 4000 ? reviewText.substring(0, 4000) : reviewText);
-      }
-
-      if (!reviewResult.passesGate) {
-        git("checkout", "master");
-        if (supabase) {
-          await updateTaskStatus(supabase, task.id, "review");
-        }
-        return {
-          success: true,
-          output: output.trim(),
-          durationMs: Date.now() - startTime,
-          reviewScore: reviewResult.score,
-          reviewSummary: `Code review bloquee (score: ${reviewResult.score}/100). ${reviewResult.findings.filter((f) => f.severity === "critical").length} findings critiques.`,
-        };
-      }
-
       // Push branch
       const pushResult = git("push", "-u", "origin", branchName);
       if (!pushResult.ok) {
@@ -568,7 +520,6 @@ export async function executeTask(
           output: output.trim(),
           error: `Push echoue: ${pushResult.stderr}`,
           durationMs: Date.now() - startTime,
-          reviewScore: reviewResult?.score,
         };
       }
 
@@ -616,7 +567,6 @@ export async function executeTask(
           output: output.trim(),
           error: `PR creation echouee (branche poussee: ${branchName}): ${prStderr}`,
           durationMs: Date.now() - startTime,
-          reviewScore: reviewResult?.score,
         };
       }
 
@@ -662,8 +612,6 @@ export async function executeTask(
       durationMs,
       prUrl,
       ciPassed: prUrl ? true : undefined,
-      reviewScore: reviewResult?.score,
-      reviewSummary: reviewResult?.summary,
     };
   } catch (error) {
     // R9: propagation → log.error

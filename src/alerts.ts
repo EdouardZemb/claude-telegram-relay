@@ -11,7 +11,6 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { formatTrustScores } from "./trust-scores.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -548,10 +547,6 @@ export function formatMonitoringStats(): string {
       lines.push(`  ${mod}: ${count}`);
     }
   }
-
-  // S35: Trust scores
-  lines.push("");
-  lines.push(formatTrustScores());
 
   return lines.join("\n");
 }

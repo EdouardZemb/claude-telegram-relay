@@ -20,7 +20,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/help.ts` | Composer: /help, /workflow, /status, /monitor |
 | `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
 | `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
-| `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
+| `commands/quality.ts` | Composer: /metrics, /retro, /alerts, /cost + retro callbacks |
 | `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
 | `commands/project.ts` | Composer: /projects, /project |
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
@@ -30,9 +30,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
-| `agent-context.ts` | Supabase context assembly for agents with token budgets per role (ROLE_MEMORY_SHARE, planner/explorer budgets) |
-| `code-graph.ts` | Codebase knowledge graph: regex indexer, dependency queries, impact radius |
-| `explore-graph.ts` | Zero-LLM fast-path for /explore structural queries via code graph |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Barrel re-export for memory sub-modules (see `src/memory/`) |
@@ -51,32 +48,21 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `cost-tracking.ts` | Token usage tracking, multi-model cost estimation, sprint aggregation |
 | `workflow.ts` | Workflow engine: state transitions, enforcement, retry policies |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
-| `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
-| `code-review.ts` | Adversarial code review before merge |
-| `feedback-loop.ts` | Double-loop learning: retro + gate analysis → agent prompt enrichment |
-| `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
 | `doc-utils.ts` | Documentation parsing utilities: module/command extraction, test count, gap detection |
 | `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads relevant shards |
-| `profile-evolution.ts` | Auto-learns user style, activity patterns, autonomy level |
-| `proactive-planner.ts` | Backlog analysis, pipeline suggestions, auto-defer for overloaded sprints |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
 | `notification-queue.ts` | Notification batching: flush intervals, digest, quiet hours, inline buttons |
 | `notification-prefs.ts` | Notification preferences: quiet hours, per-type config |
 | `transcribe.ts` | Voice transcription (Groq cloud or whisper-cpp local) |
 | `tts.ts` | Text-to-speech via Piper (local) |
-| `autonomy-scanner.ts` | Proactive task creation from codebase scanning |
 | `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence, batch result parsing, progress messaging |
 | `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
-| `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets |
-| `mcp-config.ts` | Per-role MCP tool configuration and allowlists |
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
 | `action-registry.ts` | Registry of all 37 bot commands: metadata, params, risk levels, aliases |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
-| `command-router.ts` | Routes intents to commands: risk confirmation, parameter extraction |
-| `trust-scores.ts` | Per-role trust scores: confidence tracking, autonomy levels |
 | `conversation-session.ts` | Conversation sessions: per-chat tracking, constraint extraction, phase detection |
 | `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
 | `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
@@ -98,7 +84,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/profile` | User profile (view, update, insights) |
 | `/metrics` | Sprint metrics (velocity, rework, cycle time) |
 | `/retro <sprint>` | Generate retrospective |
-| `/patterns` | Workflow pattern analysis |
 | `/alerts` | Check anomalies |
 | `/cost` | Token usage and cost tracking (per sprint or total) |
 | `/status` | System health check |
@@ -125,7 +110,7 @@ Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search),
 
 ### MCP Memory Server (`mcp/`)
 
-Local MCP server (`.mcp.json`, stdio) exposing 21 tools: memory CRUD, task management, code graph queries, sprint/metrics/cost/alerts, feature flags, backlog analysis. Notification bridge via `mcp-pending-notifications.json`.
+Local MCP server (`.mcp.json`, stdio) exposing tools: memory CRUD, task management, sprint/metrics/cost/alerts, feature flags. Notification bridge via `mcp-pending-notifications.json`.
 
 ### Development Workflow
 
@@ -150,7 +135,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    68 TypeScript modules (core logic)
+src/                    54 TypeScript modules (core logic)
   commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
 dashboard/              Kanban board (server.ts + index.html)
@@ -158,7 +143,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2618 tests (unit + integration + E2E)
+tests/                  2101 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -186,7 +171,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2618 tests, all must pass before merge)
+- Tests: `bun test` (2101 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -194,7 +179,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
-- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: workflow.ts (848), bot-context.ts (816) — deferred to future vagues
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: zz-messages.ts (~920, includes inlined command-router), workflow.ts (848) — deferred to future vagues
 
 ## Setup
 

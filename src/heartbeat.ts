@@ -31,7 +31,6 @@ import { join } from "path";
 import { spawnClaude } from "./agent.ts";
 // Periodic task imports (consolidated from alert-cron + autonomy-cron)
 import { runAllChecks } from "./alerts.ts";
-import { isDuplicate, runAllScanners } from "./autonomy-scanner.ts";
 import {
   countTests,
   type DocState,
@@ -681,49 +680,6 @@ export async function pulse(): Promise<{
     }
   } catch (err) {
     log.error("LLM-Ops check error", { error: err });
-  }
-
-  // Daily: Autonomy scan
-  try {
-    const dayAgo = now - 24 * 60 * 60 * 1000;
-    if (!state.lastAutonomyScanAt || new Date(state.lastAutonomyScanAt).getTime() < dayAgo) {
-      log.info("Running daily autonomy scan...");
-      const scanResult = await runAllScanners(PROJECT_DIR, supabase);
-      if (scanResult.opportunities.length > 0) {
-        log.info(`${scanResult.opportunities.length} opportunity(ies) found.`);
-        const currentSprint = await getCurrentSprint(supabase);
-        let created = 0;
-        const MAX_TASKS_PER_RUN = 3;
-        for (const opp of scanResult.opportunities.slice(0, MAX_TASKS_PER_RUN)) {
-          const duplicate = await isDuplicate(supabase, opp.dedup_key);
-          if (duplicate) {
-            log.info(`Skip (duplicate): ${opp.title}`);
-            continue;
-          }
-          const task = await addTask(supabase, opp.title, {
-            description: opp.description,
-            priority: opp.priority,
-            sprint: currentSprint ?? undefined,
-            tags: ["auto-generated", opp.type],
-          });
-          if (task) {
-            await supabase.from("tasks").update({ notes: opp.dedup_key }).eq("id", task.id);
-            log.info(`Created: ${opp.title} [${task.id.substring(0, 8)}]`);
-            created++;
-          }
-        }
-        if (created > 0) {
-          await writeMcpPending({
-            type: "alert",
-            severity: "normal",
-            message: `[Autonomie] ${created} tache(s) auto-generee(s) par le scan quotidien.`,
-          });
-        }
-      }
-      state.lastAutonomyScanAt = timestamp;
-    }
-  } catch (err) {
-    log.error("Autonomy scan error", { error: err });
   }
 
   // Daily: Lightweight audit (structure + tests)

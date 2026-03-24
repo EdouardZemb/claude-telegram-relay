@@ -114,7 +114,6 @@ export async function runSddExplore(
       systemPrompt: agentDef || undefined,
       model: "claude-sonnet-4-6",
       effort: "medium",
-      mcpRole: "explorer",
     });
 
     if (result.exitCode !== 0 || !result.stdout.trim()) {

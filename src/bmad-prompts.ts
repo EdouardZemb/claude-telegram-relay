@@ -17,7 +17,6 @@
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
-import { buildFeedbackContext } from "./feedback-loop.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("bmad-prompts");
@@ -139,12 +138,6 @@ export function buildAgentSystemPromptPart(agentId: string, context: AgentPrompt
   // Command-specific instructions
   parts.push("");
   parts.push(getCommandInstructions(agentId, context));
-
-  // Feedback from retros (S16-03)
-  const feedback = buildFeedbackContext(agentId as import("./bmad-agents.ts").AgentRole);
-  if (feedback) {
-    parts.push(feedback);
-  }
 
   return parts.join("\n");
 }

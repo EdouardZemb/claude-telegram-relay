@@ -9,13 +9,10 @@ import { formatAlerts, runAllChecks } from "../alerts.ts";
 import { getAgentForCommand } from "../bmad-agents.ts";
 import type { BotContext } from "../bot-context.ts";
 import { formatCostSummary, getSprintCostSummary, getTotalCost } from "../cost-tracking.ts";
-import { loadFeedbackRules, processRetroFeedback } from "../feedback-loop.ts";
 import { createLogger } from "../logger.ts";
-import { analyzePatterns, formatPatterns } from "../patterns.ts";
 import { getCurrentSprint } from "../tasks.ts";
 import {
   acceptRetroActions,
-  applyWorkflowSuggestions,
   collectSprintMetrics,
   formatMetrics,
   formatMetricsComparison,
@@ -105,8 +102,6 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    const patternAnalysis = await analyzePatterns(bctx.supabase);
-
     const smAgent = getAgentForCommand("retro");
     const agentPrefix = smAgent
       ? `Tu es ${smAgent.name}, ${smAgent.title} (${smAgent.icon}). ${smAgent.communicationStyle}\n\n`
@@ -120,16 +115,9 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       `Metriques: ${JSON.stringify(retroData.metrics)}`,
       `Stats workflow: ${JSON.stringify(retroData.workflowStats)}`,
       `Taches (${retroData.tasks.length}): ${JSON.stringify(retroData.tasks.map((t) => ({ title: (t as { title?: unknown }).title, status: (t as { status?: unknown }).status, priority: (t as { priority?: unknown }).priority })))}`,
-      patternAnalysis.patterns.length > 0
-        ? `Patterns detectes automatiquement: ${JSON.stringify(patternAnalysis.patterns.map((p) => p.description))}`
-        : "",
-      patternAnalysis.suggestions.length > 0
-        ? `Suggestions workflow automatiques: ${JSON.stringify(patternAnalysis.suggestions.map((s) => ({ action: s.action, priority: s.priority, target_step: s.target_step, suggested_change: s.suggested_change })))}`
-        : "",
       "",
       "Format JSON attendu:",
       '{"what_worked": ["..."], "what_didnt": ["..."], "patterns_detected": ["..."], "actions_proposed": [{"action": "...", "priority": "high|medium|low", "target_step": "optional_step_id", "suggested_change": "optional_change"}]}',
-      "Inclus les suggestions workflow automatiques dans actions_proposed en conservant target_step et suggested_change.",
     ].join("\n");
 
     try {
@@ -166,23 +154,6 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       log.error("Retro generation error", { error: String(error) });
       await ctx.reply("Erreur lors de la generation de la retro.", bctx.threadOpts(ctx));
     }
-  });
-
-  // /patterns
-  composer.command("patterns", async (ctx) => {
-    const blocked = bctx.commandGuard(ctx, "patterns");
-    if (blocked) {
-      await ctx.reply(blocked, bctx.threadOpts(ctx));
-      return;
-    }
-    if (!bctx.supabase) {
-      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
-      return;
-    }
-
-    await ctx.replyWithChatAction("typing");
-    const analysis = await analyzePatterns(bctx.supabase);
-    await bctx.sendResponse(ctx, formatPatterns(analysis));
   });
 
   // /alerts
@@ -263,26 +234,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       if (retro?.actions_proposed) {
         await acceptRetroActions(bctx.supabase, sprintId, retro.actions_proposed);
 
-        const feedbackResult = await processRetroFeedback(bctx.supabase, {
-          sprint_id: sprintId,
-          what_didnt: retro.what_didnt || [],
-          patterns_detected: retro.patterns_detected || [],
-          actions_proposed: retro.actions_proposed,
-        });
-        log.info(
-          `Feedback loop: ${feedbackResult.newRules} new rules, ${feedbackResult.updatedRules} updated`,
-        );
-
-        await loadFeedbackRules(bctx.supabase);
-
-        const workflowChanges = applyWorkflowSuggestions(retro.actions_proposed);
-
-        let message = `Retro ${sprintId} : toutes les actions ont ete validees.`;
-        if (workflowChanges.length > 0) {
-          message += `\n\nModifications appliquees :\n${workflowChanges.map((c) => `  ${c}`).join("\n")}`;
-        } else {
-          message += " Elles seront prises en compte dans le prochain sprint.";
-        }
+        const message = `Retro ${sprintId} : toutes les actions ont ete validees. Elles seront prises en compte dans le prochain sprint.`;
 
         await ctx.answerCallbackQuery({ text: "Actions validees !" });
         await ctx.editMessageText(message);

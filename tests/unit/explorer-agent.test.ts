@@ -6,7 +6,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { buildAgentSystemPrompt, getAgent, getAgentForCommand } from "../../src/bmad-agents";
-import { buildMcpToolInstructions, getMcpToolsForRole, isToolAllowed } from "../../src/mcp-config";
 
 // ── Agent Definition ────────────────────────────────────────────
 
@@ -59,29 +58,3 @@ describe("Explorer Agent Definition", () => {
   });
 });
 
-// ── MCP Config ──────────────────────────────────────────────────
-
-describe("Explorer MCP Config", () => {
-  it("has MCP tools configured for explorer", () => {
-    const tools = getMcpToolsForRole("explorer");
-    expect(tools.length).toBeGreaterThan(0);
-  });
-
-  it("explorer has read-only access (no write_blackboard, no capture_thought)", () => {
-    expect(isToolAllowed("explorer", "write_blackboard")).toBe(false);
-    expect(isToolAllowed("explorer", "capture_thought")).toBe(false);
-  });
-
-  it("explorer can read project context and blackboard", () => {
-    expect(isToolAllowed("explorer", "get_project_context")).toBe(true);
-    expect(isToolAllowed("explorer", "read_blackboard")).toBe(true);
-    expect(isToolAllowed("explorer", "search_thoughts")).toBe(true);
-  });
-
-  it("builds MCP tool instructions for explorer", () => {
-    const instructions = buildMcpToolInstructions("explorer");
-    expect(instructions).toContain("OUTILS MCP");
-    expect(instructions).toContain("read-only");
-    expect(instructions).toContain("search_thoughts");
-  });
-});

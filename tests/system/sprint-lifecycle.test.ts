@@ -21,7 +21,6 @@ import {
   runAllChecks,
 } from "../../src/alerts";
 import { getMemoryContext, getRecentMessages, processMemoryIntents } from "../../src/memory";
-import { analyzePatterns, formatPatterns } from "../../src/patterns";
 import { addTask, getBacklog, getCurrentSprint, updateTaskStatus } from "../../src/tasks";
 import {
   applyWorkflowSuggestions,
@@ -227,9 +226,9 @@ describe("System: Rework-Heavy Sprint -> Alerts + Pattern Detection", () => {
   });
 });
 
-// ── Scenario 3: Multi-Sprint Trend Analysis ──
+// Scenario 3 (Multi-Sprint Trend Analysis) removed — patterns.ts deleted in ARCHITECTURE-V2 Phase 4
 
-describe("System: Multi-Sprint Trend Analysis", () => {
+describe.skip("System: Multi-Sprint Trend Analysis (removed)", () => {
   it("detects improving trend across 3 sprints", async () => {
     const supabase = createMockSupabase({
       sprint_metrics: [

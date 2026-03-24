@@ -4,16 +4,9 @@
  * Includes profile update callback queries (profile_apply, profile_skip).
  */
 
-import { Composer, type Context, InlineKeyboard } from "grammy";
+import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { formatPrefs, getPrefs, type NotificationType, savePrefs } from "../notification-prefs.ts";
-import {
-  analyzeProfile,
-  applyProfileUpdates,
-  formatProfileInsights,
-  formatProfileUpdates,
-  proposeProfileUpdates,
-} from "../profile-evolution.ts";
 
 export default function profileComposer(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
@@ -25,31 +18,12 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
       await ctx.reply(blocked, bctx.threadOpts(ctx));
       return;
     }
-    if (!bctx.supabase) {
-      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
-      return;
-    }
 
-    await ctx.replyWithChatAction("typing");
-    const insights = await analyzeProfile(bctx.supabase);
-    const updates = proposeProfileUpdates(insights, bctx.profileContext);
-
-    let response = formatProfileInsights(insights);
-    if (updates.length > 0) {
-      response += "\n\n" + formatProfileUpdates(updates);
-
-      const keyboard = new InlineKeyboard()
-        .text("Appliquer les mises a jour", `profile_apply`)
-        .row()
-        .text("Ignorer", `profile_skip`);
-      await bctx.sendResponse(ctx, response);
-      await ctx.reply("Appliquer ces modifications au profil ?", {
-        ...bctx.threadOpts(ctx),
-        reply_markup: keyboard,
-      });
-    } else {
-      await bctx.sendResponse(ctx, response);
-    }
+    const profileCtx = bctx.profileContext;
+    const response = profileCtx
+      ? `Profil charge depuis config/profile.md\n\n${profileCtx.substring(0, 1000)}`
+      : "Profil non configure. Edite config/profile.md pour personnaliser.";
+    await bctx.sendResponse(ctx, response);
   });
 
   // /notify
@@ -142,39 +116,6 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
       "Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]",
       bctx.threadOpts(ctx),
     );
-  });
-
-  // Profile update callbacks
-  composer.on("callback_query:data", async (ctx, next) => {
-    const data = ctx.callbackQuery.data;
-    if (!data.startsWith("profile_")) {
-      await next();
-      return;
-    }
-
-    if (data === "profile_apply") {
-      if (!bctx.supabase) {
-        await ctx.answerCallbackQuery({ text: "Supabase non configure." });
-        return;
-      }
-      const insights = await analyzeProfile(bctx.supabase);
-      const updates = proposeProfileUpdates(insights, bctx.profileContext);
-      if (updates.length > 0) {
-        const applied = applyProfileUpdates(updates);
-        if (applied) {
-          await bctx.reloadProfile();
-          await ctx.answerCallbackQuery({ text: "Profil mis a jour !" });
-          await ctx.editMessageText("Profil mis a jour avec succes.");
-        } else {
-          await ctx.answerCallbackQuery({ text: "Erreur lors de la mise a jour." });
-        }
-      } else {
-        await ctx.answerCallbackQuery({ text: "Aucune mise a jour a appliquer." });
-      }
-    } else if (data === "profile_skip") {
-      await ctx.answerCallbackQuery({ text: "Modifications ignorees." });
-      await ctx.editMessageText("Modifications du profil ignorees.");
-    }
   });
 
   return composer;

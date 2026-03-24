@@ -98,13 +98,12 @@ describe("MCP audit_codebase tool", () => {
     expect(auditSection).toContain("Suggested next:");
   });
 
-  it("description suggests get_alerts and analyze_backlog as next", () => {
+  it("description suggests get_alerts as next", () => {
     const auditSection = serverCode.slice(
       serverCode.indexOf('"audit_codebase"'),
       serverCode.indexOf('"audit_codebase"') + 500,
     );
     expect(auditSection).toContain("get_alerts");
-    expect(auditSection).toContain("analyze_backlog");
   });
 
   // ── Error handling ────────────────────────────────────────────
@@ -114,16 +113,5 @@ describe("MCP audit_codebase tool", () => {
       /server\.tool\(\s*"audit_codebase"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
     );
     expect(match).not.toBeNull();
-  });
-
-  // ── Placement ─────────────────────────────────────────────────
-
-  it("is placed after analyze_backlog", () => {
-    const analyzeIdx = serverCode.indexOf('"analyze_backlog"');
-    const auditIdx = serverCode.indexOf('"audit_codebase"');
-
-    expect(analyzeIdx).toBeGreaterThan(-1);
-    expect(auditIdx).toBeGreaterThan(-1);
-    expect(auditIdx).toBeGreaterThan(analyzeIdx);
   });
 });

@@ -13,7 +13,6 @@ process.env.PROJECT_DIR = import.meta.dir + "/../fixtures";
 
 import { formatAlerts, runAllChecks } from "../../src/alerts";
 import { getMemoryContext, getRecentMessages, processMemoryIntents } from "../../src/memory";
-import { analyzePatterns, formatPatterns } from "../../src/patterns";
 import { addTask, getBacklog, getCurrentSprint, updateTaskStatus } from "../../src/tasks";
 import {
   collectSprintMetrics,
@@ -124,65 +123,7 @@ describe("Full Sprint Lifecycle", () => {
   });
 });
 
-// ── Pattern Detection on Multi-Sprint Data ──────────────────
-
-describe("Multi-Sprint Pattern Detection", () => {
-  it("detects patterns across multiple sprints", async () => {
-    const supabase = createMockSupabase({
-      sprint_metrics: [
-        { sprint_id: "S10", tasks_planned: 10, tasks_completed: 5, created_at: "2026-01-15" },
-        { sprint_id: "S11", tasks_planned: 10, tasks_completed: 7, created_at: "2026-02-01" },
-        { sprint_id: "S12", tasks_planned: 10, tasks_completed: 10, created_at: "2026-02-12" },
-      ],
-      workflow_logs: [
-        // Execution consistently slow across sprints
-        ...["S10", "S11", "S12"].flatMap((sprint) =>
-          [1, 2, 3].map((i) => ({
-            sprint_id: sprint,
-            step_from: "execution",
-            step_to: "review",
-            duration_seconds: 5000 + i * 500,
-            had_rework: false,
-            checkpoint_result: "pass",
-            created_at: `2026-0${sprint === "S10" ? 1 : 2}-0${i}`,
-          })),
-        ),
-        // Decomposition checkpoint always passes
-        ...["S10", "S11"].flatMap((sprint) =>
-          [1, 2, 3].map((i) => ({
-            sprint_id: sprint,
-            step_from: "decomposition",
-            step_to: "execution",
-            duration_seconds: 120,
-            had_rework: false,
-            checkpoint_result: "pass",
-            created_at: `2026-0${sprint === "S10" ? 1 : 2}-0${i}`,
-          })),
-        ),
-      ],
-      retros: [],
-    });
-
-    const analysis = await analyzePatterns(supabase);
-    expect(analysis.sprintCount).toBe(3);
-    expect(analysis.patterns.length).toBeGreaterThan(0);
-
-    // Should detect slow execution step
-    const slowExec = analysis.patterns.find(
-      (p) => p.type === "slow_step" && p.data.step === "execution",
-    );
-    expect(slowExec).toBeDefined();
-
-    // Improving trend (completion rates going up)
-    const improving = analysis.patterns.find((p) => p.type === "improving");
-    expect(improving).toBeDefined();
-
-    // Format should work
-    const formatted = formatPatterns(analysis);
-    expect(formatted).toContain("3 sprints");
-    expect(formatted.length).toBeGreaterThan(50);
-  });
-});
+// Pattern detection tests removed (patterns.ts deleted in ARCHITECTURE-V2 Phase 4)
 
 // ── Alerts Integration ───────────────────────────────────────
 
@@ -429,13 +370,7 @@ describe("Task-Workflow-Pattern Pipeline", () => {
     expect(metrics.length).toBe(2);
     expect(metrics.every((m: any) => m.tasks_completed === 5)).toBe(true);
 
-    // 3. Run pattern analysis on the accumulated data
-    const analysis = await analyzePatterns(supabase);
-    expect(analysis.sprintCount).toBe(2);
-    // With consistent 100% completion, should detect improving or stable trend
-    expect(analysis.patterns.length).toBeGreaterThanOrEqual(0);
-
-    // 4. Run alerts — no stuck tasks, no rework
+    // 3. Run alerts — no stuck tasks, no rework
     const alerts = await runAllChecks(supabase, "S12");
     // Should have no stuck tasks (all completed)
     const stuckAlerts = alerts.filter((a) => a.type === "stuck_task");

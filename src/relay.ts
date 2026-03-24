@@ -27,12 +27,10 @@ import {
   isRateLimited,
   PROJECT_DIR,
   RELAY_DIR,
-  supabase,
   TEMP_DIR,
   UPLOADS_DIR,
 } from "./bot-context.ts";
 import { initSessions } from "./conversation-session.ts";
-import { loadFeedbackRules } from "./feedback-loop.ts";
 import { initJobManager } from "./job-manager.ts";
 import { loadComposers } from "./loader.ts";
 import { createLogger } from "./logger.ts";
@@ -233,16 +231,6 @@ if (import.meta.main) {
   log.info("Starting Claude Telegram Relay...");
   log.info(`Authorized user: ${ALLOWED_USER_ID || "ANY (not recommended)"}`);
   log.info(`Project directory: ${PROJECT_DIR || "(relay working directory)"}`);
-
-  if (supabase) {
-    loadFeedbackRules(supabase)
-      .then((rules) => {
-        log.info(
-          `Loaded ${rules.length} feedback rules (${rules.filter((r) => r.active).length} active)`,
-        );
-      })
-      .catch((e) => log.error(`Failed to load feedback rules: ${e}`));
-  }
 
   await mainBot.api.deleteWebhook({ drop_pending_updates: true });
 

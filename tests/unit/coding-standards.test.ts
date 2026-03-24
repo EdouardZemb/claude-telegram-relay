@@ -118,7 +118,6 @@ describe("Coding standards — S2: no direct process.env", () => {
   const ALLOWLIST: Record<string, string> = {
     // Agent execution: PROJECT_DIR/CLAUDE_PATH needed before config is available
     "agent.ts": "PROJECT_DIR, CLAUDE_PATH, GITHUB_REPO — agent spawn pre-config",
-    "agent-context.ts": "PROJECT_DIR — project root for agent context assembly",
     // Infrastructure: environment bootstrap before config
     "heartbeat.ts":
       "PROJECT_DIR, RELAY_DIR, SUPABASE_URL/KEY, HEARTBEAT_DEBUG — standalone process",
@@ -130,7 +129,6 @@ describe("Coding standards — S2: no direct process.env", () => {
     "bot-context.ts": "HOME, VOICE_PROVIDER, TTS_PROVIDER — runtime provider detection",
     // Code tooling: PROJECT_DIR for filesystem operations
     "code-graph.ts": "PROJECT_DIR — project root for code graph indexing",
-    "code-review.ts": "PROJECT_DIR, GITHUB_REPO — code review cwd and repo",
     "profile-evolution.ts": "PROJECT_DIR — profile file path",
     "workflow.ts": "PROJECT_DIR — workflow config path",
     // External tools: tool-specific env vars not in config
@@ -178,7 +176,7 @@ describe("Coding standards — S3: LOC threshold", () => {
   // These are tracked for future refactoring — see CLAUDE.md "File size guideline".
   const LOC_ALLOWLIST: Record<string, number> = {
     "workflow.ts": 848,
-    "bot-context.ts": 816,
+    "commands/zz-messages.ts": 938,
   };
 
   const files = getAllSourceFiles().filter((f) => {

@@ -25,10 +25,9 @@ describe("doc-utils", () => {
   describe("extractModules", () => {
     test("returns all .ts files from src/", async () => {
       const modules = await extractModules(SRC_DIR);
-      expect(modules.length).toBeGreaterThanOrEqual(39);
+      expect(modules.length).toBeGreaterThanOrEqual(30);
       expect(modules).toContain("relay.ts");
       expect(modules).toContain("agent.ts");
-      expect(modules).toContain("autonomy-scanner.ts");
       expect(modules).not.toContain("autonomy-cron.ts");
     });
 
@@ -42,7 +41,7 @@ describe("doc-utils", () => {
   describe("extractCommands", () => {
     test("extracts all bot.command registrations", async () => {
       const commands = await extractCommands(RELAY_PATH);
-      expect(commands.length).toBeGreaterThanOrEqual(29);
+      expect(commands.length).toBeGreaterThanOrEqual(27);
       expect(commands).toContain("/help");
       expect(commands).toContain("/task");
       expect(commands).toContain("/notify");
@@ -63,16 +62,16 @@ describe("doc-utils", () => {
   describe("parseClaudeMdModules", () => {
     test("extracts modules from CLAUDE.md table", async () => {
       const modules = await parseClaudeMdModules(CLAUDE_MD_PATH);
-      expect(modules.length).toBeGreaterThanOrEqual(39);
+      expect(modules.length).toBeGreaterThanOrEqual(30);
       expect(modules).toContain("relay.ts");
-      expect(modules).toContain("autonomy-scanner.ts");
+      expect(modules).toContain("conversation-session.ts");
     });
   });
 
   describe("parseClaudeMdCommands", () => {
     test("extracts commands from CLAUDE.md table", async () => {
       const commands = await parseClaudeMdCommands(CLAUDE_MD_PATH);
-      expect(commands.length).toBeGreaterThanOrEqual(29);
+      expect(commands.length).toBeGreaterThanOrEqual(27);
       expect(commands).toContain("/help");
       expect(commands).toContain("/notify");
     });

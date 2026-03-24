@@ -14,7 +14,6 @@ import { getConfig } from "./config.ts";
 import type { DocumentSearchResult } from "./documents.ts";
 import { createLogger } from "./logger.ts";
 import { getIdea } from "./memory.ts";
-import { analyzeProfile } from "./profile-evolution.ts";
 import { getTopicConfig as getTopicConfigHelper, type TopicConfig } from "./topic-config.ts";
 import { synthesize } from "./tts.ts";
 
@@ -482,47 +481,10 @@ try {
   // R6: optional IO → degrade gracefully
 }
 
-let dynamicProfileCache = "";
-let dynamicProfileLastRefresh = 0;
-const PROFILE_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+const dynamicProfileCache = "";
 
 async function getDynamicProfile(): Promise<string> {
-  if (!supabase) return "";
-  if (Date.now() - dynamicProfileLastRefresh < PROFILE_REFRESH_INTERVAL && dynamicProfileCache) {
-    return dynamicProfileCache;
-  }
-  try {
-    const insights = await analyzeProfile(supabase);
-    const parts: string[] = [];
-    if (insights.activityPattern.peakHour) {
-      parts.push(`Pic d'activite: ${insights.activityPattern.peakHour}h`);
-    }
-    if (insights.taskPreferences.topTaskTypes.length > 0) {
-      parts.push(
-        `Types de taches frequents: ${insights.taskPreferences.topTaskTypes
-          .slice(0, 3)
-          .map((t: { type: string }) => t.type)
-          .join(", ")}`,
-      );
-    }
-    if (insights.taskPreferences.avgTasksPerSprint > 0) {
-      parts.push(`Moyenne: ${insights.taskPreferences.avgTasksPerSprint} taches/sprint`);
-    }
-    if (insights.communicationStyle.prefersBrief) {
-      parts.push(`Style: concis`);
-    }
-    if (insights.activityPattern.activeDays.length > 0) {
-      parts.push(`Jours actifs: ${insights.activityPattern.activeDays.slice(0, 3).join(", ")}`);
-    }
-    if (insights.workflowPreferences.autonomyLevel) {
-      parts.push(`Autonomie: ${insights.workflowPreferences.autonomyLevel}`);
-    }
-    dynamicProfileCache =
-      parts.length > 0 ? `\nDYNAMIC PROFILE (auto-detected):\n${parts.join("\n")}` : "";
-    dynamicProfileLastRefresh = Date.now();
-  } catch {
-    // R7: optional feature → skip
-  }
+  // Profile evolution removed — return cached or empty
   return dynamicProfileCache;
 }
 

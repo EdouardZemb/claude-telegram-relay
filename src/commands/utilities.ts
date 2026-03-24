@@ -7,7 +7,6 @@
 
 import { Composer, type Context, InputFile } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import { estimateSprintCost, formatCostEstimate } from "../cost-estimate.ts";
 import { formatFeatures, setFeature } from "../feature-flags.ts";
 import { overrideGate } from "../gates.ts";
 import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
@@ -161,34 +160,17 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     await ctx.reply("Usage: /feature [list|enable <flag>|disable <flag>]", bctx.threadOpts(ctx));
   });
 
-  // /estimate
+  // /estimate — simplified (cost-estimate module removed)
   composer.command("estimate", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "estimate");
     if (blocked) {
       await ctx.reply(blocked, bctx.threadOpts(ctx));
       return;
     }
-
-    const input = ctx.match?.trim() || "";
-    const parts = input.split(/\s+/);
-    const taskCount = parseInt(parts[0] || "0", 10);
-    const pipeline = parts[1]?.toUpperCase() || "DEFAULT";
-
-    if (!taskCount || taskCount < 1) {
-      await ctx.reply(
-        "Usage: /estimate <nombre_taches> [pipeline]\nPipelines: DEFAULT, QUICK, REVIEW",
-        bctx.threadOpts(ctx),
-      );
-      return;
-    }
-
-    try {
-      const result = await estimateSprintCost(bctx.supabase, taskCount, pipeline);
-      await ctx.reply(formatCostEstimate(result), bctx.threadOpts(ctx));
-    } catch (error) {
-      log.error("Estimate error", { error: String(error) });
-      await ctx.reply("Erreur lors de l'estimation.", bctx.threadOpts(ctx));
-    }
+    await ctx.reply(
+      "Commande /estimate retiree. Utilise /cost pour consulter les couts reels par sprint.",
+      bctx.threadOpts(ctx),
+    );
   });
 
   // /rollback
