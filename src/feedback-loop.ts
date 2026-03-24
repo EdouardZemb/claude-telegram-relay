@@ -15,8 +15,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AgentRole } from "./bmad-agents.ts";
 import { createLogger } from "./logger.ts";
-import type { AgentRole } from "./orchestrator.ts";
 
 const log = createLogger("feedback-loop");
 // ── Types ────────────────────────────────────────────────────

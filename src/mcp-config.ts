@@ -4,7 +4,7 @@
  * can use and generates system prompt instructions for tool access.
  */
 
-import type { AgentRole } from "./orchestrator.ts";
+import type { AgentRole } from "./bmad-agents.ts";
 
 // ── MCP Tool Registry ────────────────────────────────────────
 

@@ -8,19 +8,12 @@
 import { execSync } from "child_process";
 import { Composer, type Context } from "grammy";
 import { cpus, freemem, hostname, loadavg, uptime as osUptime, totalmem } from "os";
-import { formatAgentTimeline, getAgentEvents } from "../agent-events.ts";
-import { formatMessageFlow, getAgentMessages, getMessageFlowSummary } from "../agent-messaging.ts";
 import { formatMonitoringStats } from "../alerts.ts";
-import { formatAgentList } from "../bmad-agents.ts";
 import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
 import { formatGraphStatsForMonitor, loadGraph } from "../code-graph.ts";
-import { getActiveSessionCount } from "../conversation-session.ts";
-import { getFeedbackRules } from "../feedback-loop.ts";
-import { formatDoubleLoopRules } from "../gate-persistence.ts";
 import { formatLlmOpsSnapshot, getLlmOpsSnapshot } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
-import { formatRecentGateEvaluations, formatTrustScores } from "../trust-scores.ts";
 
 const log = createLogger("help");
 export default function helpCommands(bctx: BotContext): Composer<Context> {
@@ -30,12 +23,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
   // /help — command reference
   composer.command("help", async (ctx) => {
     const help = [
-      "COMMANDES — Workflow BMad",
-      "",
-      "ANALYSE & PLANIFICATION",
-      "  /prd <description> -- Creer un PRD (Product Manager John)",
-      "  /plan <description> -- Decomposer en sous-taches (PM John)",
-      "  /agents -- Agents BMad disponibles et leurs roles",
+      "COMMANDES",
       "",
       "BACKLOG & SPRINT",
       "  /task <titre> -- Ajouter une tache",
@@ -44,18 +32,15 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       "  /start <id> -- Demarrer une tache",
       "  /done <id> -- Terminer une tache",
       "",
-      "EXECUTION",
-      "  /exec <id> -- Lancer l'agent Dev (Amelia)",
-      "  /orchestrate <id> [pipeline] [--blackboard] [--parallel] -- Pipeline multi-agents (full/quick/review)",
-      "  /autopipeline <id> [full|fast] -- Pipeline auto BMad complet",
-      "  /workflow -- Voir le processus BMad complet",
+      "EXPLORATION & DOCUMENTS",
+      "  /explore <sujet> -- Explorer un sujet dans le codebase",
+      "  /docs [list|search|stats] -- Gerer les documents",
       "",
       "QUALITE & AMELIORATION",
       "  /metrics [sprint] -- Metriques (Scrum Master Bob)",
       "  /retro [sprint] -- Retrospective (Bob)",
       "  /patterns -- Analyse multi-sprints (Analyste Mary)",
       "  /alerts -- Alertes proactives (QA Quinn)",
-      "  /planify [sprint] -- Analyse proactive du backlog + recommandations",
       "  /cost [sprint|total] -- Suivi couts tokens par agent/tache/sprint",
       "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
       "  /ideas [list|add|review|promote|archive] -- Gerer les idees",
@@ -65,7 +50,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       "  /project create|switch|archive -- Gerer",
       "",
       "PRODUCTION",
-      "  /estimate <n> [pipeline] -- Estimation cout sprint (DEFAULT/QUICK/REVIEW)",
+      "  /estimate <n> [pipeline] -- Estimation cout sprint",
       "  /monitor -- Monitoring production (temps reponse, spawn, erreurs)",
       "  /feature [list|enable|disable] -- Feature flags",
       "  /rollback [raison] -- Rollback au commit precedent",
@@ -86,50 +71,31 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
   // /workflow — show BMad workflow overview
   composer.command("workflow", async (ctx) => {
     const workflow = [
-      "WORKFLOW BMad — Processus Complet",
+      "WORKFLOW — Pipeline de Developpement",
       "",
-      "1. ANALYSE (Analyste Mary)",
-      "   Research, domain expertise, competitive analysis",
-      "   -> Produit un brief ou une analyse",
+      "Le pipeline SDD (Spec-Driven Development) orchestre les phases :",
       "",
-      "2. PLANIFICATION (PM John)",
-      "   /prd pour creer le PRD",
-      "   /plan pour decomposer en taches",
-      "   -> Gate 1 : PRD approuve requis",
+      "1. EXPLORATION (optionnel)",
+      "   /explore pour investiguer avant de specifier",
       "",
-      "3. ARCHITECTURE (Architecte Winston)",
-      "   Design technique, decisions ADR",
-      "   -> Gate 2 : Architecture validee",
+      "2. SPECIFICATION",
+      "   Specification formelle avec V-criteres",
       "",
-      "4. EXECUTION (Dev Amelia)",
-      "   /exec pour lancer l'implementation",
-      "   Tests obligatoires, story files atomiques",
-      "   -> Gate 3 : Code review avant merge",
+      "3. CHALLENGE ADVERSARIAL",
+      "   3 agents paralleles verifient la spec",
       "",
-      "5. QUALITE (QA Quinn)",
-      "   Tests automatises, review adversariale",
-      "   CI/CD : branche -> PR -> merge -> deploy",
+      "4. IMPLEMENTATION TDD",
+      "   Test Architect -> Implementer -> Tester",
       "",
-      "6. RETROSPECTIVE (Scrum Master Bob)",
-      "   /retro pour analyser le sprint",
-      "   /metrics pour les donnees quantitatives",
-      "   /patterns pour les tendances multi-sprints",
-      "   -> Les retros decident des ajustements",
+      "5. REVIEW & DOCUMENTATION",
+      "   Revue de code + mise a jour docs",
       "",
-      "Chaque gate peut etre bypassee explicitement.",
-      "Le processus s'ameliore via les retros.",
+      "SUIVI",
+      "  /retro pour analyser le sprint",
+      "  /metrics pour les donnees quantitatives",
+      "  /patterns pour les tendances multi-sprints",
     ].join("\n");
     await ctx.reply(workflow, threadOpts(ctx));
-  });
-
-  // /agents — list BMad agents and their capabilities
-  composer.command("agents", async (ctx) => {
-    const blocked = commandGuard(ctx, "agents");
-    if (blocked) {
-      await ctx.reply(blocked, threadOpts(ctx));
-      return;
-    }
-    await ctx.reply(formatAgentList(), threadOpts(ctx));
   });
 
   // /status — server health and system info
@@ -190,7 +156,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
     }
   });
 
-  // /monitor — production monitoring stats (S35: trust scores, evaluations, double-loop)
+  // /monitor — production monitoring stats
   composer.command("monitor", async (ctx) => {
     const blocked = commandGuard(ctx, "monitor");
     if (blocked) {
@@ -199,58 +165,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
     }
 
     const parts = [formatMonitoringStats()];
-
-    // S42: Trust scores with autonomy levels
-    parts.push("", formatTrustScores());
-
-    // S35: Recent gate evaluations and double-loop rules
-    if (supabase) {
-      const [recentEvals, dlRules] = await Promise.all([
-        formatRecentGateEvaluations(supabase),
-        formatDoubleLoopRules(supabase),
-      ]);
-      parts.push("", recentEvals, "", dlRules);
-
-      // S42: Active feedback rules summary
-      const activeRules = getFeedbackRules();
-      if (activeRules.length > 0) {
-        const promoted = activeRules.filter((r) => r.promoted).length;
-        parts.push(
-          "",
-          `Feedback rules: ${activeRules.length} actives${promoted > 0 ? `, ${promoted} promues` : ""}`,
-        );
-      }
-
-      // S38: Inter-agent communication monitoring
-      try {
-        // Find most recent pipeline run
-        const { data: latestRun } = await supabase
-          .from("pipeline_runs")
-          .select("session_id")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single();
-
-        if (latestRun?.session_id) {
-          const [events, messagesSection] = await Promise.all([
-            getAgentEvents(supabase, latestRun.session_id),
-            getAgentMessages(supabase, latestRun.session_id, "*"),
-          ]);
-
-          if (events.length > 0) {
-            parts.push("", formatAgentTimeline(events.slice(-10)));
-          }
-
-          if (messagesSection.length > 0) {
-            const summary = getMessageFlowSummary(messagesSection);
-            parts.push("", formatMessageFlow(summary));
-          }
-        }
-      } catch {
-        // R8: business error → log.warn
-        log.warn("monitor: agent events unavailable");
-      }
-    }
 
     // LLM-Ops monitoring snapshot
     if (supabase) {
@@ -262,10 +176,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
         log.warn("monitor: llm-ops snapshot unavailable");
       }
     }
-
-    // S43: Conversation session stats
-    const sessionCount = getActiveSessionCount();
-    parts.push("", `Sessions actives: ${sessionCount}`);
 
     // S39: Code graph stats
     try {

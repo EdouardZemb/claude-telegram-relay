@@ -12,7 +12,7 @@ import { createLogger } from "../logger.ts";
 import { createPipeline, getTracker, toPipelineName, updateStep } from "../pipeline-tracker.ts";
 import { runSddExplore } from "../sdd-agents.ts";
 
-const log = createLogger("exploration");
+const _log = createLogger("exploration");
 
 export default function explorationCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();

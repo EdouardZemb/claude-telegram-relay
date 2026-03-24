@@ -385,7 +385,7 @@ export default c;
       }
     });
 
-    it("loads all 14 known command files", async () => {
+    it("loads all 12 known command files", async () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
@@ -402,12 +402,10 @@ export default c;
 
         const expected = [
           "documents.ts",
-          "execution.ts",
           "exploration.ts",
           "help.ts",
           "jobs.ts",
           "memory-cmds.ts",
-          "planning.ts",
           "profile.ts",
           "project.ts",
           "quality.ts",
@@ -467,7 +465,7 @@ export default c;
         // If BotContext was not passed, factory functions would throw
         const factoryErrors = errors.filter((e) => e.includes("factory did not return a Composer"));
         expect(factoryErrors.length).toBe(0);
-        expect(count).toBeGreaterThanOrEqual(13);
+        expect(count).toBeGreaterThanOrEqual(11);
       } finally {
         console.log = origLog;
         console.error = origErr;

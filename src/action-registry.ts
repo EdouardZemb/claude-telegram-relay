@@ -143,54 +143,6 @@ const ACTIONS: ActionDefinition[] = [
     aliases: ["terminer tache", "finir tache", "tache terminee", "c'est fait"],
   },
 
-  // ─── execution.ts ───
-  {
-    command: "exec",
-    description: "Lancer l'agent Dev pour implementer une tache",
-    usage: "/exec <id>",
-    params: [{ name: "taskId", required: true, description: "ID ou prefixe de la tache" }],
-    risk: "high",
-    module: "execution",
-    requiresSupabase: true,
-    aliases: ["executer tache", "lancer agent", "implementer"],
-    backgroundEligible: true,
-  },
-  {
-    command: "orchestrate",
-    description: "Pipeline multi-agents complet",
-    usage: "/orchestrate <id> [pipeline] [--blackboard] [--parallel]",
-    params: [
-      { name: "taskId", required: true, description: "ID ou prefixe de la tache" },
-      { name: "pipeline", required: false, description: "full, quick, review ou custom" },
-    ],
-    risk: "high",
-    module: "execution",
-    requiresSupabase: true,
-    aliases: [
-      "orchestrer",
-      "pipeline multi-agents",
-      "lancer pipeline",
-      "relancer workflow",
-      "reprendre pipeline",
-      "resume pipeline",
-    ],
-    backgroundEligible: true,
-  },
-  {
-    command: "autopipeline",
-    description: "Pipeline autonome end-to-end",
-    usage: "/autopipeline <id> [full|fast]",
-    params: [
-      { name: "taskId", required: true, description: "ID ou prefixe de la tache" },
-      { name: "mode", required: false, description: "full (defaut) ou fast" },
-    ],
-    risk: "high",
-    module: "execution",
-    requiresSupabase: true,
-    aliases: ["auto pipeline", "pipeline automatique", "lancer tout"],
-    backgroundEligible: true,
-  },
-
   // ─── exploration.ts ───
   {
     command: "explore",
@@ -243,63 +195,6 @@ const ACTIONS: ActionDefinition[] = [
       "facture",
       "contrat",
     ],
-  },
-
-  // ─── planning.ts ───
-  {
-    command: "plan",
-    description: "Decomposer une demande en sous-taches",
-    usage: "/plan <description>",
-    params: [
-      { name: "request", required: true, description: "Description de ce que tu veux realiser" },
-    ],
-    risk: "medium",
-    module: "planning",
-    requiresSupabase: true,
-    aliases: ["planifier", "decomposer", "decouper en taches"],
-    backgroundEligible: true,
-  },
-  {
-    command: "prd",
-    description: "Gerer les PRD (creer, lister, voir, approuver)",
-    usage: "/prd [description|id]",
-    params: [
-      { name: "input", required: false, description: "Description pour creer, ou ID pour voir" },
-    ],
-    risk: "medium",
-    module: "planning",
-    requiresSupabase: true,
-    aliases: ["prd", "product requirement", "specification"],
-    backgroundEligible: true,
-  },
-  {
-    command: "prd_workflow",
-    description: "Workflow conversationnel PRD-to-Deploy",
-    usage: "(detecte automatiquement depuis le langage naturel)",
-    params: [
-      { name: "description", required: true, description: "Description du besoin fonctionnel" },
-    ],
-    risk: "medium",
-    module: "planning",
-    requiresSupabase: true,
-    aliases: [
-      "je voudrais ajouter",
-      "il faudrait",
-      "on a besoin",
-      "nouvelle fonctionnalite",
-      "lance l'implementation",
-    ],
-  },
-  {
-    command: "planify",
-    description: "Analyse proactive du backlog et recommandations",
-    usage: "/planify [sprint]",
-    params: [{ name: "sprintId", required: false, description: "Sprint a analyser" }],
-    risk: "low",
-    module: "planning",
-    requiresSupabase: true,
-    aliases: ["analyser backlog", "recommandations", "reordonner"],
-    backgroundEligible: true,
   },
 
   // ─── memory-cmds.ts ───

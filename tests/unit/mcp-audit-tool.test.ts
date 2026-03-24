@@ -118,15 +118,12 @@ describe("MCP audit_codebase tool", () => {
 
   // ── Placement ─────────────────────────────────────────────────
 
-  it("is placed after analyze_backlog and before orchestrate_task", () => {
+  it("is placed after analyze_backlog", () => {
     const analyzeIdx = serverCode.indexOf('"analyze_backlog"');
     const auditIdx = serverCode.indexOf('"audit_codebase"');
-    const orchIdx = serverCode.indexOf('"orchestrate_task"');
 
     expect(analyzeIdx).toBeGreaterThan(-1);
     expect(auditIdx).toBeGreaterThan(-1);
-    expect(orchIdx).toBeGreaterThan(-1);
     expect(auditIdx).toBeGreaterThan(analyzeIdx);
-    expect(auditIdx).toBeLessThan(orchIdx);
   });
 });

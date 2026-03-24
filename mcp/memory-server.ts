@@ -422,21 +422,9 @@ import { rename as fsRename, mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { decomposeTask } from "../src/agent.ts";
 import { runAllChecks } from "../src/alerts.ts";
-import { estimateSprintCost } from "../src/cost-estimate.ts";
 import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts";
 import { listFeatures, setFeature } from "../src/feature-flags.ts";
-import { formatOrchestrationResult, orchestrate } from "../src/orchestrator.ts";
-import {
-  DEFAULT_PIPELINE,
-  LIGHT_PIPELINE,
-  QUICK_PIPELINE,
-  RESEARCH_PIPELINE,
-  REVIEW_PIPELINE,
-  SOLO_PIPELINE,
-} from "../src/pipeline-selection.ts";
-import { generatePRD, getPRD, getPRDs, savePRD, updatePRDStatus } from "../src/prd.ts";
 import { analyzeBacklog } from "../src/proactive-planner.ts";
-import { buildStoryFile, enrichTaskWithStory } from "../src/story-files.ts";
 import {
   addTask,
   getBacklog,
@@ -477,7 +465,7 @@ async function enqueueMcpNotification(notif: Omit<McpNotification, "createdAt">)
 }
 
 // ── Async MCP Job Launcher ────────────────────────────────────
-// Long-running MCP tools (prd_create, orchestrate_task) use this to run
+// Long-running MCP tools use this to run
 // work in background and return immediately with a job ID.
 // Completion notifications go through the existing mcp-pending-notifications bridge.
 
@@ -621,262 +609,7 @@ server.tool(
   },
 );
 
-// ── S44: Business Logic Server (PRD Tools) ──────────────────
-
-server.tool(
-  "prd_create",
-  "Generate and save a PRD (Product Requirements Document) via Claude. Same effect as /prd create on Telegram. Sends a notification to Telegram.",
-  {
-    description: z.string().describe("Description of the feature/change to generate a PRD for"),
-    project: z.string().optional().describe("Project name (default: telegram-relay)"),
-    tags: z.array(z.string()).optional().describe("Tags array"),
-    requested_by: z.string().optional().describe("Who requested this PRD"),
-  },
-  async ({ description, project, tags, requested_by }) => {
-    try {
-      const projectName = project ?? "telegram-relay";
-
-      const jobId = launchMcpBackgroundJob(
-        "prd_create",
-        description.substring(0, 100),
-        async () => {
-          const generated = await generatePRD(description, projectName);
-          if (!generated) throw new Error("PRD generation failed (Claude CLI may be unavailable)");
-
-          const prd = await savePRD(supabase, generated, {
-            project: projectName,
-            tags,
-            requested_by,
-          });
-          if (!prd) throw new Error("Failed to save PRD in Supabase");
-
-          return `PRD cree: ${prd.title} [${prd.id.substring(0, 8)}] (${prd.project})`;
-        },
-      );
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Job lance (id: ${jobId}). PRD en cours de generation, tu recevras une notification Telegram quand ce sera fini.`,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
-  "prd_list",
-  "List PRDs, optionally filtered by project and/or status. Same as /prd list on Telegram.",
-  {
-    project: z.string().optional().describe("Filter by project name"),
-    status: z
-      .string()
-      .optional()
-      .describe("Filter by status: draft, approved, rejected, superseded"),
-  },
-  async ({ project, status }) => {
-    try {
-      const prds = await getPRDs(supabase, { project, status });
-      return { content: [{ type: "text" as const, text: JSON.stringify(prds, null, 2) }] };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
-  "prd_get",
-  "Get a specific PRD by ID or ID prefix. Same as /prd view on Telegram.",
-  {
-    prd_id: z.string().describe("PRD ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
-  },
-  async ({ prd_id }) => {
-    try {
-      const prd = await getPRD(supabase, prd_id);
-      if (!prd) {
-        return {
-          content: [
-            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
-          ],
-        };
-      }
-      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
-  "prd_approve",
-  "Approve a PRD (change status to approved) and auto-decompose into tasks as a background job. Same as /prd approve on Telegram. Sends a notification to Telegram.",
-  {
-    prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
-    auto_decompose: z
-      .boolean()
-      .optional()
-      .describe("Auto-decompose PRD into tasks after approval (default: true)"),
-  },
-  async ({ prd_id, auto_decompose }) => {
-    try {
-      const existing = await getPRD(supabase, prd_id);
-      if (!existing) {
-        return {
-          content: [
-            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
-          ],
-        };
-      }
-
-      const prd = await updatePRDStatus(supabase, existing.id, "approved");
-      if (!prd) {
-        return {
-          content: [{ type: "text" as const, text: `Error: failed to approve PRD '${prd_id}'` }],
-        };
-      }
-
-      await enqueueMcpNotification({
-        type: "task",
-        severity: "normal",
-        message: `PRD approuve: ${prd.title} [${prd.id.substring(0, 8)}]`,
-        data: { taskId: prd.id },
-      });
-
-      // Auto-decompose PRD into tasks as background job
-      const shouldDecompose = auto_decompose !== false;
-      let decomposeJobId: string | undefined;
-
-      if (shouldDecompose) {
-        const projectSlug = prd.project || "telegram-relay";
-        decomposeJobId = launchMcpBackgroundJob(
-          "prd-decompose",
-          prd.title.substring(0, 80),
-          async () => {
-            const prdDescription = `PRD: ${prd.title}\n${prd.summary || ""}\n\n${prd.content}`;
-            const subtasks = await decomposeTask(prdDescription);
-
-            if (subtasks.length === 0) {
-              throw new Error("Aucune sous-tache generee depuis le PRD.");
-            }
-
-            const added = [];
-            for (const st of subtasks) {
-              const task = await addTask(supabase, st.title, {
-                description: st.description,
-                priority: st.priority,
-                project: projectSlug,
-              });
-              if (task) {
-                if (st.acceptance_criteria) {
-                  await supabase
-                    .from("tasks")
-                    .update({
-                      acceptance_criteria: st.acceptance_criteria,
-                    })
-                    .eq("id", task.id);
-                }
-                const story = buildStoryFile(task);
-                await enrichTaskWithStory(supabase, task.id, story);
-                added.push(task);
-              }
-            }
-
-            return `${added.length} taches creees depuis le PRD "${prd.title}"`;
-          },
-        );
-      }
-
-      const result: Record<string, unknown> = { ...prd };
-      if (decomposeJobId) {
-        result.decompose_job_id = decomposeJobId;
-        result.decompose_status = "launched";
-      }
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
-  "prd_reject",
-  "Reject a PRD (change status to rejected). Same as /prd reject on Telegram. Sends a notification to Telegram.",
-  {
-    prd_id: z.string().describe("PRD ID (full UUID or prefix)"),
-  },
-  async ({ prd_id }) => {
-    try {
-      const existing = await getPRD(supabase, prd_id);
-      if (!existing) {
-        return {
-          content: [
-            { type: "text" as const, text: `Error: no PRD found with ID prefix '${prd_id}'` },
-          ],
-        };
-      }
-
-      const prd = await updatePRDStatus(supabase, existing.id, "rejected");
-      if (!prd) {
-        return {
-          content: [{ type: "text" as const, text: `Error: failed to reject PRD '${prd_id}'` }],
-        };
-      }
-
-      await enqueueMcpNotification({
-        type: "task",
-        severity: "normal",
-        message: `PRD rejete: ${prd.title} [${prd.id.substring(0, 8)}]`,
-        data: { taskId: prd.id },
-      });
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(prd, null, 2) }] };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-// ── MCP Business Tools: Sprint, Metrics, Cost, Alerts, Features, Estimate, Planner ──
+// ── MCP Business Tools: Sprint, Metrics, Cost, Alerts, Features, Planner ──
 
 server.tool(
   "get_sprint_detail",
@@ -985,7 +718,7 @@ server.tool(
   "get_cost_summary",
   "Get token usage and cost breakdown by agent and task. " +
     "Preconditions: none (root query, but more useful after get_sprint_detail to know sprint scope). " +
-    "Suggested next: get_estimate (pre-execution budgeting), analyze_backlog (cost-aware planning).",
+    "Suggested next: analyze_backlog (cost-aware planning).",
   {
     sprint: z
       .string()
@@ -1144,46 +877,10 @@ server.tool(
 );
 
 server.tool(
-  "get_estimate",
-  "Estimate cost for a pipeline execution based on agent budgets and historical data. " +
-    "Preconditions: better after get_tasks or get_sprint_detail (to know task count). " +
-    "Suggested next: task_create (plan tasks), get_cost_summary (compare with actuals).",
-  {
-    task_count: z.number().min(1).describe("Number of tasks to estimate for"),
-    pipeline: z
-      .string()
-      .optional()
-      .describe("Pipeline type: DEFAULT, QUICK, REVIEW, SOLO, LIGHT, RESEARCH (default: DEFAULT)"),
-  },
-  async ({ task_count, pipeline }) => {
-    try {
-      const result = await estimateSprintCost(supabase, task_count, pipeline || "DEFAULT");
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
   "analyze_backlog",
   "Run proactive backlog analysis: detect stuck patterns, groupable tasks, pacing issues, priority inversions, splittable tasks, pipeline recommendations, deferrable tasks. " +
     "Preconditions: better after get_tasks or get_sprint_detail (provides context for recommendations). " +
-    "Suggested next: task_create (create suggested tasks), task_update (reorder/reprioritize), get_estimate (budget for recommendations).",
+    "Suggested next: task_create (create suggested tasks), task_update (reorder/reprioritize).",
   {
     sprint: z.string().optional().describe("Sprint ID to analyze. Omit for current sprint."),
   },
@@ -1329,116 +1026,6 @@ server.tool(
           },
         ],
       };
-    }
-  },
-);
-
-// ── Orchestrate Tool ─────────────────────────────────────────
-
-const PIPELINE_MAP: Record<string, typeof DEFAULT_PIPELINE> = {
-  DEFAULT: DEFAULT_PIPELINE,
-  QUICK: QUICK_PIPELINE,
-  REVIEW: REVIEW_PIPELINE,
-  SOLO: SOLO_PIPELINE,
-  LIGHT: LIGHT_PIPELINE,
-  RESEARCH: RESEARCH_PIPELINE,
-};
-
-server.tool(
-  "orchestrate_task",
-  "Run the multi-agent BMad pipeline on a task. Chains specialized agents (analyst, pm, architect, dev, qa) to implement a task end-to-end. " +
-    "Same effect as /orchestrate on Telegram. Progress updates and final result are sent as Telegram notifications. " +
-    "Preconditions: task must exist (use task_create first). " +
-    "Suggested next: get_tasks (check result), get_cost_summary (see cost).",
-  {
-    task_id: z.string().describe("Task ID (full UUID or prefix, e.g., 'a1b2c3d4')"),
-    pipeline: z
-      .enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])
-      .optional()
-      .describe(
-        "Pipeline type. DEFAULT=full (analyst->pm->architect->dev->qa), QUICK=dev->qa, REVIEW=qa->architect, SOLO=dev, LIGHT=planner->dev->qa, RESEARCH=explorer->planner->dev->qa. Omit for auto-selection.",
-      ),
-    use_blackboard: z
-      .boolean()
-      .optional()
-      .describe(
-        "Enable blackboard for structured context passing and gate evaluation (default: false)",
-      ),
-    auto_pipeline: z
-      .boolean()
-      .optional()
-      .describe(
-        "Let the system choose the pipeline based on task analysis (default: true when pipeline is omitted)",
-      ),
-    resume_session_id: z
-      .string()
-      .optional()
-      .describe("Resume a failed pipeline from its last successful step"),
-  },
-  async ({ task_id, pipeline, use_blackboard, auto_pipeline, resume_session_id }) => {
-    try {
-      // Resolve task by ID or prefix (fast, before launching background job)
-      let resolvedTask: any = null;
-      if (task_id.length < 36) {
-        const tasks = await getBacklog(supabase);
-        resolvedTask = tasks.find((t) => t.id.startsWith(task_id));
-      } else {
-        const result = (await callSupabaseRest(`tasks?id=eq.${task_id}&select=*&limit=1`)) as any[];
-        resolvedTask = result?.[0];
-      }
-
-      if (!resolvedTask) {
-        return {
-          content: [{ type: "text" as const, text: `Error: no task found with ID '${task_id}'` }],
-        };
-      }
-
-      const selectedPipeline = pipeline ? PIPELINE_MAP[pipeline] : undefined;
-      const useAuto = auto_pipeline ?? !pipeline;
-
-      const jobId = launchMcpBackgroundJob(
-        "orchestrate",
-        resolvedTask.title.substring(0, 80),
-        async () => {
-          await enqueueMcpNotification({
-            type: "task",
-            severity: "normal",
-            message: `Pipeline demarre via MCP: ${resolvedTask.title} [${resolvedTask.id.substring(0, 8)}]`,
-            data: { taskId: resolvedTask.id },
-          });
-
-          const result = await orchestrate(supabase, resolvedTask, {
-            pipeline: selectedPipeline,
-            autoPipeline: useAuto,
-            stopOnFailure: true,
-            useBlackboard: use_blackboard ?? false,
-            resumeSessionId: resume_session_id,
-            onProgress: async (msg) => {
-              await enqueueMcpNotification({
-                type: "task",
-                severity: "normal",
-                message: msg,
-                data: { taskId: resolvedTask.id },
-              });
-            },
-          });
-
-          const formatted = formatOrchestrationResult(result);
-          return formatted;
-        },
-      );
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Job lance (id: ${jobId}). Pipeline "${pipeline || "auto"}" en cours pour "${resolvedTask.title}", tu recevras des notifications de progression sur Telegram.`,
-          },
-        ],
-      };
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text" as const, text: `Error: ${errMsg}` }] };
     }
   },
 );

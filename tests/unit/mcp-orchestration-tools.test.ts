@@ -2,7 +2,7 @@
  * Unit Tests — mcp/memory-server.ts (Orchestration MCP Tools)
  *
  * Tests for the new MCP tools: get_sprint_detail, get_metrics,
- * get_cost_summary, get_alerts, manage_feature, get_estimate, analyze_backlog.
+ * get_cost_summary, get_alerts, manage_feature, analyze_backlog.
  * Structural tests verifying tool definitions, parameter schemas,
  * dependency metadata, imports, and error handling.
  */
@@ -126,7 +126,7 @@ describe("MCP Orchestration Tools — get_cost_summary", () => {
   });
 
   it("includes dependency metadata in description", () => {
-    expect(serverCode).toContain("Suggested next: get_estimate");
+    expect(serverCode).toContain("Suggested next:");
   });
 
   it("catches errors", () => {
@@ -235,49 +235,6 @@ describe("MCP Orchestration Tools — manage_feature", () => {
   });
 });
 
-describe("MCP Orchestration Tools — get_estimate", () => {
-  it("registers get_estimate tool", () => {
-    expect(serverCode).toContain('"get_estimate"');
-    expect(serverCode).toContain("Estimate cost for a pipeline execution");
-  });
-
-  it("accepts task_count (required) and pipeline (optional)", () => {
-    expect(serverCode).toContain("task_count: z.number().min(1)");
-    expect(serverCode).toContain("pipeline: z");
-    const estimateSection = serverCode.slice(
-      serverCode.indexOf('"get_estimate"'),
-      serverCode.indexOf('"get_estimate"') + 800,
-    );
-    expect(estimateSection).toContain(".string()");
-    expect(estimateSection).toContain(".optional()");
-  });
-
-  it("calls estimateSprintCost from cost-estimate.ts", () => {
-    expect(serverCode).toContain("estimateSprintCost(supabase, task_count,");
-    expect(serverCode).toContain('from "../src/cost-estimate.ts"');
-  });
-
-  it("defaults to DEFAULT pipeline", () => {
-    expect(serverCode).toContain('pipeline || "DEFAULT"');
-  });
-
-  it("includes dependency metadata in description", () => {
-    const desc = serverCode.slice(
-      serverCode.indexOf('"get_estimate"'),
-      serverCode.indexOf('"get_estimate"') + 500,
-    );
-    expect(desc).toContain("Preconditions:");
-    expect(desc).toContain("Suggested next: task_create");
-  });
-
-  it("catches errors", () => {
-    const match = serverCode.match(
-      /server\.tool\(\s*"get_estimate"[\s\S]*?try\s*\{[\s\S]*?catch\s*\(error\)/,
-    );
-    expect(match).not.toBeNull();
-  });
-});
-
 describe("MCP Orchestration Tools — analyze_backlog", () => {
   it("registers analyze_backlog tool", () => {
     expect(serverCode).toContain('"analyze_backlog"');
@@ -329,7 +286,6 @@ describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
       "get_cost_summary",
       "get_alerts",
       "manage_feature",
-      "get_estimate",
       "analyze_backlog",
     ];
     for (const tool of tools) {
@@ -347,7 +303,6 @@ describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
       "get_cost_summary",
       "get_alerts",
       "manage_feature",
-      "get_estimate",
       "analyze_backlog",
     ];
     for (const tool of tools) {
@@ -371,18 +326,10 @@ describe("MCP Orchestration Tools — Dependency Graph Metadata", () => {
     expect(desc).toContain("get_alerts");
   });
 
-  it("get_estimate suggests task_create and get_cost_summary", () => {
-    const idx = serverCode.indexOf('"get_estimate"');
-    const desc = serverCode.slice(idx, idx + 400);
-    expect(desc).toContain("task_create");
-    expect(desc).toContain("get_cost_summary");
-  });
-
-  it("analyze_backlog suggests task_create and get_estimate", () => {
+  it("analyze_backlog suggests task_create", () => {
     const idx = serverCode.indexOf('"analyze_backlog"');
     const desc = serverCode.slice(idx, idx + 600);
     expect(desc).toContain("task_create");
-    expect(desc).toContain("get_estimate");
   });
 });
 
@@ -391,10 +338,6 @@ describe("MCP Orchestration Tools — Imports", () => {
     expect(serverCode).toContain(
       'import { getSprintCostSummary, getTotalCost } from "../src/cost-tracking.ts"',
     );
-  });
-
-  it("imports cost-estimate functions", () => {
-    expect(serverCode).toContain('import { estimateSprintCost } from "../src/cost-estimate.ts"');
   });
 
   it("imports alerts functions", () => {
@@ -414,106 +357,14 @@ describe("MCP Orchestration Tools — Imports", () => {
 
   it("preserves existing imports", () => {
     expect(serverCode).toContain('from "../src/tasks.ts"');
-    expect(serverCode).toContain('from "../src/prd.ts"');
     expect(serverCode).toContain('from "../src/code-graph.ts"');
   });
 });
 
-describe("MCP Orchestration Tools — orchestrate_task", () => {
-  it("registers orchestrate_task tool", () => {
-    expect(serverCode).toContain('"orchestrate_task"');
-    expect(serverCode).toContain("Run the multi-agent BMad pipeline on a task");
-  });
-
-  it("accepts task_id parameter", () => {
-    expect(serverCode).toContain('task_id: z.string().describe("Task ID');
-  });
-
-  it("accepts optional pipeline parameter with valid types", () => {
-    expect(serverCode).toContain(
-      '.enum(["DEFAULT", "QUICK", "REVIEW", "SOLO", "LIGHT", "RESEARCH"])',
-    );
-  });
-
-  it("accepts optional use_blackboard parameter", () => {
-    expect(serverCode).toContain("use_blackboard: z");
-    const orchestrateSection = serverCode.slice(
-      serverCode.indexOf('"orchestrate_task"'),
-      serverCode.indexOf('"orchestrate_task"') + 1500,
-    );
-    expect(orchestrateSection).toContain(".boolean()");
-  });
-
-  it("accepts optional auto_pipeline parameter", () => {
-    expect(serverCode).toContain("auto_pipeline: z");
-  });
-
-  it("accepts optional resume_session_id parameter", () => {
-    expect(serverCode).toContain("resume_session_id: z");
-  });
-
-  it("imports orchestrate and formatOrchestrationResult", () => {
-    expect(serverCode).toContain("orchestrate");
-    expect(serverCode).toContain("formatOrchestrationResult");
-    expect(serverCode).toContain('from "../src/orchestrator.ts"');
-  });
-
-  it("imports pipeline constants", () => {
-    expect(serverCode).toContain("import {");
-    expect(serverCode).toContain("DEFAULT_PIPELINE");
-    expect(serverCode).toContain("QUICK_PIPELINE");
-    expect(serverCode).toContain("SOLO_PIPELINE");
-    expect(serverCode).toContain("LIGHT_PIPELINE");
-    expect(serverCode).toContain("RESEARCH_PIPELINE");
-    expect(serverCode).toContain('from "../src/pipeline-selection.ts"');
-  });
-
-  it("defines PIPELINE_MAP for name-to-array resolution", () => {
-    expect(serverCode).toContain("PIPELINE_MAP");
-    expect(serverCode).toContain("DEFAULT: DEFAULT_PIPELINE");
-    expect(serverCode).toContain("QUICK: QUICK_PIPELINE");
-  });
-
-  it("resolves task by ID prefix", () => {
-    expect(serverCode).toContain("task_id.length < 36");
-  });
-
-  it("sends start notification via MCP pending", () => {
-    expect(serverCode).toContain("Pipeline demarre via MCP");
-  });
-
-  it("sends formatted result to Telegram", () => {
-    expect(serverCode).toContain("formatOrchestrationResult(result)");
-  });
-
-  it("uses onProgress callback for real-time updates", () => {
-    expect(serverCode).toContain("onProgress: async (msg)");
-  });
-
-  it("defaults to auto pipeline when no pipeline specified", () => {
-    expect(serverCode).toContain("const useAuto = auto_pipeline ?? !pipeline");
-  });
-
-  it("returns immediately with job ID (async execution)", () => {
-    expect(serverCode).toContain("launchMcpBackgroundJob");
-    expect(serverCode).toContain("Job lance (id:");
-  });
-
-  it("handles errors via background job notification", () => {
-    expect(serverCode).toContain("launchMcpBackgroundJob");
-    expect(serverCode).toContain('severity: "critical"');
-  });
-
-  it("includes dependency metadata in tool description", () => {
-    expect(serverCode).toContain("Preconditions: task must exist");
-    expect(serverCode).toContain("Suggested next:");
-  });
-});
-
 describe("MCP Orchestration Tools — Total Tool Count", () => {
-  it("has 28 total tools registered (4 memory + 3 project + 2 blackboard + 3 graph + 2 task + 5 prd + 7 orchestration + 1 audit + 1 orchestrate_task)", () => {
+  it("has 21 total tools registered (after removal of prd/orchestrate tools)", () => {
     const toolMatches = serverCode.match(/server\.tool\(\s*"/g);
     expect(toolMatches).not.toBeNull();
-    expect(toolMatches!.length).toBe(28);
+    expect(toolMatches!.length).toBe(21);
   });
 });

@@ -19,7 +19,6 @@ import {
   handleConfirmationCallback,
   routeIntent,
 } from "../command-router.ts";
-import type { PendingProposal } from "../conversation-session.ts";
 import {
   addConstraint,
   addIntent as addSessionIntent,
@@ -42,19 +41,6 @@ import {
   processMemoryIntents,
   type ThoughtClassification,
 } from "../memory.ts";
-import { formatPRDDetail, getPRD } from "../prd.ts";
-import {
-  buildEnrichedDescription,
-  buildRevisionKeyboard,
-  buildTriageResponse,
-  clearPendingRevision,
-  getPendingRevision,
-  isPrdWorkflowEnabled,
-  chatKey as prdChatKey,
-  revisePRD,
-  storePendingDescription,
-  triageDescription,
-} from "../prd-workflow.ts";
 import { transcribe } from "../transcribe.ts";
 import {
   buildClassificationKeyboard,
@@ -65,68 +51,6 @@ import {
 import { buildSddKeyboard, detectConvergenceInResponse } from "./sdd-flow.ts";
 
 const log = createLogger("zz-messages");
-// ── Proposal detection ───────────────────────────────────────
-
-const PROPOSAL_PATTERNS: Array<{
-  regex: RegExp;
-  actionExtractor: (m: RegExpMatchArray) => string | null;
-}> = [
-  {
-    regex:
-      /tu\s+veux\s+que\s+je\s+(?:lance|cree|genere|fasse|execute|decompose)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
-    actionExtractor: (m) => mapProposalAction(m[1]),
-  },
-  {
-    regex:
-      /(?:je\s+(?:peux|pourrais)|on\s+(?:peut|pourrait))\s+(?:lancer|creer|generer|faire|executer|decomposer)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)/i,
-    actionExtractor: (m) => mapProposalAction(m[1]),
-  },
-  {
-    regex:
-      /on\s+(?:lance|cree|genere|fait)\s+(?:le|un|une)?\s*(prd|sprint|tache|plan|implementation|backlog|retro)\s*\?/i,
-    actionExtractor: (m) => mapProposalAction(m[1]),
-  },
-];
-
-function mapProposalAction(keyword: string | undefined): string | null {
-  if (!keyword) return null;
-  const map: Record<string, string> = {
-    prd: "prd_workflow",
-    sprint: "sprint",
-    tache: "task",
-    plan: "plan",
-    implementation: "exec",
-    backlog: "backlog",
-    retro: "retro",
-  };
-  return map[keyword.toLowerCase()] || null;
-}
-
-/**
- * Detect if Claude's response contains a proposal for an action.
- * Returns a PendingProposal if found, null otherwise.
- */
-function detectProposalInResponse(response: string): PendingProposal | null {
-  const normalized = response.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  for (const { regex, actionExtractor } of PROPOSAL_PATTERNS) {
-    const m = normalized.match(regex) || response.match(regex);
-    if (m) {
-      const action = actionExtractor(m);
-      if (action) {
-        // Try to extract args (text after the action keyword)
-        const afterMatch = response.substring((m.index || 0) + m[0].length).trim();
-        const argsMatch = afterMatch.match(/(?:pour|de|sur)\s+(.+?)(?:\s*[?!.]|$)/i);
-        return {
-          action,
-          args: argsMatch?.[1]?.trim(),
-          timestamp: Date.now(),
-          sourceMessage: response.substring(0, 200),
-        };
-      }
-    }
-  }
-  return null;
-}
 
 // ── Document detection constants ──────────────────────────────
 
@@ -282,84 +206,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
-    // PRD Workflow: Check if this is a revision response
-    if (isPrdWorkflowEnabled() && bctx.supabase) {
-      const ck = prdChatKey(chatId, threadId);
-      const pendingRev = getPendingRevision(ck);
-      if (pendingRev) {
-        clearPendingRevision(ck);
-        await ctx.replyWithChatAction("typing");
-        try {
-          const prd = await getPRD(bctx.supabase, pendingRev.prdId);
-          if (prd) {
-            const revised = await revisePRD(bctx.supabase, prd, input, pendingRev.constraints);
-            if (revised) {
-              const detail = formatPRDDetail(revised);
-              const keyboard = buildRevisionKeyboard(revised);
-              if (detail.length > 4000) {
-                await bctx.sendResponse(ctx, detail);
-                await ctx.reply("Actions:", { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-              } else {
-                await ctx.reply(detail, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-              }
-            } else {
-              await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
-            }
-          } else {
-            await ctx.reply("PRD introuvable.", bctx.threadOpts(ctx));
-          }
-        } catch (error) {
-          log.error("PRD revision error", { error: String(error) });
-          await ctx.reply("Erreur lors de la revision du PRD.", bctx.threadOpts(ctx));
-        }
-        return;
-      }
-    }
-
-    // Check pending proposal confirmation
-    if (session.pendingProposal && Date.now() - session.pendingProposal.timestamp < 5 * 60 * 1000) {
-      const trimmed = input
-        .trim()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
-      const isConfirm =
-        /^(oui|ok|vas[- ]?y|go|lance|d'?accord|dac|yes|yep|ouais|parfait|allez|bien\s+sur|evidemment|confirme|j'?approuve|c'?est\s+bon|envoie|fais[- ]le|on\s+y\s+va)/.test(
-          trimmed,
-        );
-      const isReject =
-        /^(non|pas|annul|stop|attend|arrete|nan|nope|plus\s+tard|pas\s+maintenant)/.test(trimmed);
-
-      if (isConfirm) {
-        const proposal = session.pendingProposal;
-        session.pendingProposal = undefined;
-
-        // Fix #1: For prd_workflow, go directly to triage with enriched description
-        if (proposal.action === "prd_workflow" && isPrdWorkflowEnabled() && bctx.supabase) {
-          const rawDescription =
-            proposal.args || session.recentMessages.slice(-3).join("\n") || input;
-          const description = buildEnrichedDescription(rawDescription, session);
-          const triage = await triageDescription(description, bctx.supabase);
-          const { message, keyboard } = buildTriageResponse(rawDescription, triage);
-          const ck = prdChatKey(chatId, threadId);
-          storePendingDescription(ck, description);
-          await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-          return;
-        }
-
-        const cmdStr = proposal.args
-          ? `/${proposal.action} ${proposal.args}`
-          : `/${proposal.action}`;
-        const update = buildSyntheticUpdate(ctx, cmdStr);
-        await bctx.bot.handleUpdate(update as never);
-        return;
-      }
-      if (isReject) {
-        session.pendingProposal = undefined;
-        // Fall through to normal conversation
-      }
-    }
-
     // Context assembly (document search only for text messages)
     const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
     const contextPromises: [
@@ -403,29 +249,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     };
 
     if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
-      // PRD Workflow: intercept suggest_prd OR create_prd intent when workflow enabled
-      if (
-        (regexResult.detected.intent === "suggest_prd" ||
-          regexResult.detected.intent === "create_prd") &&
-        isPrdWorkflowEnabled() &&
-        bctx.supabase
-      ) {
-        addSessionIntent(
-          session,
-          regexResult.detected.intent,
-          regexResult.detected.command,
-          regexResult.detected.confidence,
-          true,
-        );
-        const rawDescription = regexResult.detected.args || input;
-        const enrichedDescription = buildEnrichedDescription(rawDescription, session);
-        const triage = await triageDescription(enrichedDescription, bctx.supabase);
-        const { message, keyboard } = buildTriageResponse(rawDescription, triage);
-        const ck = prdChatKey(chatId, threadId);
-        storePendingDescription(ck, enrichedDescription);
-        await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-        return;
-      }
       // High-confidence regex match — route to command
       addSessionIntent(
         session,
@@ -446,28 +269,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         sessionContext: sessionCtx,
       });
       if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
-        // PRD Workflow: intercept suggest_prd or create_prd from LLM
-        if (
-          (llmResult.detected.command === "prd_workflow" || llmResult.detected.command === "prd") &&
-          isPrdWorkflowEnabled() &&
-          bctx.supabase
-        ) {
-          addSessionIntent(
-            session,
-            llmResult.detected.intent,
-            llmResult.detected.command,
-            llmResult.detected.confidence,
-            true,
-          );
-          const rawDescription = llmResult.detected.args || input;
-          const enrichedDescription = buildEnrichedDescription(rawDescription, session);
-          const triage = await triageDescription(enrichedDescription, bctx.supabase);
-          const { message, keyboard } = buildTriageResponse(rawDescription, triage);
-          const ck = prdChatKey(chatId, threadId);
-          storePendingDescription(ck, enrichedDescription);
-          await ctx.reply(message, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-          return;
-        }
         addSessionIntent(
           session,
           llmResult.detected.intent,
@@ -500,12 +301,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     });
 
     const finalResponse = await processMemoryIntents(bctx.supabase, rawResponse);
-
-    // Detect proposals in Claude's response for future confirmation
-    const proposal = detectProposalInResponse(finalResponse);
-    if (proposal) {
-      session.pendingProposal = proposal;
-    }
 
     await bctx.saveMessage("assistant", finalResponse, meta);
     await options.respond(ctx, finalResponse);

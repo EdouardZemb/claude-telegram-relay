@@ -161,15 +161,15 @@ describe("indexCodebase", () => {
     const graph = indexCodebase();
     const moduleIds = graph.nodes.map((n) => n.id);
     expect(moduleIds).toContain("src/relay.ts");
-    expect(moduleIds).toContain("src/orchestrator.ts");
     expect(moduleIds).toContain("src/code-graph.ts");
+    expect(moduleIds).toContain("src/bot-context.ts");
   });
 
   it("captures cross-module imports", () => {
     const graph = indexCodebase();
-    // orchestrator.ts imports from many modules
-    const orchEdges = graph.edges.filter((e) => e.source === "src/orchestrator.ts");
-    expect(orchEdges.length).toBeGreaterThan(3);
+    // bot-context.ts imports from many modules
+    const bcEdges = graph.edges.filter((e) => e.source === "src/bot-context.ts");
+    expect(bcEdges.length).toBeGreaterThan(3);
   });
 
   it("does not include test files", () => {
@@ -475,11 +475,6 @@ describe("integration: real codebase", () => {
     graph = indexCodebase();
   });
 
-  it("orchestrator has dependencies", () => {
-    const deps = getModuleDependencies(graph, "src/orchestrator.ts");
-    expect(deps.length).toBeGreaterThan(3);
-  });
-
   it("bot-context has dependents", () => {
     const deps = getDependents(graph, "src/bot-context.ts");
     expect(deps.length).toBeGreaterThan(0);
@@ -497,8 +492,8 @@ describe("integration: real codebase", () => {
   });
 
   it("formatGraphContext works on real module", () => {
-    const ctx = formatGraphContext(graph, "src/orchestrator.ts", "architect");
-    expect(ctx).toContain("orchestrator.ts");
+    const ctx = formatGraphContext(graph, "src/bot-context.ts", "architect");
+    expect(ctx).toContain("bot-context.ts");
     expect(ctx.length).toBeGreaterThan(50);
   });
 

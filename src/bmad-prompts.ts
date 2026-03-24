@@ -141,7 +141,7 @@ export function buildAgentSystemPromptPart(agentId: string, context: AgentPrompt
   parts.push(getCommandInstructions(agentId, context));
 
   // Feedback from retros (S16-03)
-  const feedback = buildFeedbackContext(agentId as import("./orchestrator.ts").AgentRole);
+  const feedback = buildFeedbackContext(agentId as import("./bmad-agents.ts").AgentRole);
   if (feedback) {
     parts.push(feedback);
   }

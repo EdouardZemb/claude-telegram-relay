@@ -6,20 +6,9 @@
 
 import { Composer, type Context } from "grammy";
 import type { BotContext } from "../bot-context.ts";
-import {
-  cancel,
-  formatJobList,
-  get,
-  isJobManagerEnabled,
-  launch,
-  list,
-  parseBatchResult,
-} from "../job-manager.ts";
-import { createLogger } from "../logger.ts";
-import { formatPRDDetail, getPRD } from "../prd.ts";
-import { getBacklog, getCurrentSprint, type Task, updateTaskStatus } from "../tasks.ts";
+import { cancel, formatJobList, get, isJobManagerEnabled, list } from "../job-manager.ts";
+import { getBacklog, getCurrentSprint, updateTaskStatus } from "../tasks.ts";
 
-const log = createLogger("jobs");
 export default function jobsCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
 
@@ -148,134 +137,6 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
           );
         const text = `Backlog (${backlog.length} taches):\n\n${lines.join("\n")}`;
         await ctx.reply(text, bctx.threadOpts(ctx));
-      }
-      return;
-    }
-
-    if (action === "jc_prd" && param && bctx.supabase) {
-      let callbackAnswered = false;
-      try {
-        const prd = await getPRD(bctx.supabase, param);
-        if (prd) {
-          await ctx.answerCallbackQuery();
-          callbackAnswered = true;
-          const detail = formatPRDDetail(prd);
-          const shortId = prd.id.substring(0, 8);
-
-          // Truncate if too long for Telegram (4096 char limit)
-          const MAX_DISPLAY = 3800;
-          const displayText =
-            detail.length > MAX_DISPLAY
-              ? detail.substring(0, MAX_DISPLAY) +
-                `\n\n... (tronque, utilise /prd ${shortId} pour le texte complet)`
-              : detail;
-
-          // Add action buttons for draft PRDs (same as /prd command)
-          if (prd.status === "draft") {
-            const { InlineKeyboard } = await import("grammy");
-            const keyboard = new InlineKeyboard()
-              .text("Approuver", `prd_approve:${prd.id}`)
-              .text("Rejeter", `prd_reject:${prd.id}`)
-              .row()
-              .text("Modifier", `prd_revise:${prd.id}`);
-            await ctx.reply(displayText, { ...bctx.threadOpts(ctx), reply_markup: keyboard });
-          } else {
-            await ctx.reply(displayText, bctx.threadOpts(ctx));
-          }
-        } else {
-          await ctx.answerCallbackQuery({ text: "PRD introuvable." });
-          callbackAnswered = true;
-        }
-      } catch (err) {
-        log.error("[jobs] jc_prd callback error", { error: String(err) });
-        if (!callbackAnswered) {
-          try {
-            await ctx.answerCallbackQuery({ text: "Erreur lors de l'affichage du PRD." });
-          } catch {
-            // R7: optional feature → skip
-          }
-        }
-      }
-      return;
-    }
-
-    // R8/R10: Batch retry handler — relaunch failed tasks
-    if (action === "jc_batch_retry" && param) {
-      const originalJob = await get(param);
-      // R14: Guard for expired jobs (> 24h cleanup)
-      if (!originalJob) {
-        await ctx.answerCallbackQuery({
-          text: "Ce batch a expire (> 24h). Relance depuis /backlog.",
-          show_alert: true,
-        });
-        return;
-      }
-      const batch = originalJob.result ? parseBatchResult(originalJob.result) : null;
-      if (!batch || batch.failedIds.length === 0) {
-        await ctx.answerCallbackQuery({ text: "Aucune tache echouee a relancer." });
-        return;
-      }
-
-      // Resolve failed tasks from Supabase by short ID prefix
-      if (!bctx.supabase) {
-        await ctx.answerCallbackQuery({ text: "Supabase non configure." });
-        return;
-      }
-
-      const failedTasks: Task[] = [];
-      for (const shortId of batch.failedIds) {
-        const { data: matches } = await bctx.supabase
-          .from("tasks")
-          .select("*")
-          .ilike("id", `${shortId}%`)
-          .limit(1);
-        if (matches?.[0]) failedTasks.push(matches[0] as unknown as Task);
-      }
-
-      if (failedTasks.length === 0) {
-        await ctx.answerCallbackQuery({ text: "Taches echouees introuvables dans le backlog." });
-        return;
-      }
-
-      // Launch new batch for failed tasks
-      const chatId = ctx.chat?.id || 0;
-      const threadId = ctx.callbackQuery.message?.message_thread_id;
-      const { runBatchPipeline, formatPipelineResult } = await import("../auto-pipeline.ts");
-      const { sendProgressMessage } = await import("../job-manager.ts");
-
-      const launchFn = async (): Promise<string> => {
-        const onProgress = async (msg: string) => {
-          await sendProgressMessage(chatId, threadId, msg);
-        };
-        const results = await runBatchPipeline(bctx.supabase!, failedTasks, {
-          autoPipeline: true,
-          onProgress,
-        });
-        const ok = results.filter((r: { success: boolean }) => r.success).length;
-        const newFailedIds = results
-          .filter((r: { success: boolean }) => !r.success)
-          .map((r: { task: { id: string } }) => r.task.id.substring(0, 8));
-        const lines = results.map((r: Parameters<typeof formatPipelineResult>[0]) =>
-          formatPipelineResult(r),
-        );
-        return `BATCH_COMPLETE:${ok}/${results.length}:failed=${newFailedIds.join(",")}\n\n${lines.join("\n\n---\n\n")}`;
-      };
-
-      const jobId = await launch("autopipeline-batch", chatId, launchFn, {
-        messageThreadId: threadId,
-      });
-      await ctx.answerCallbackQuery({ text: "Relance en cours..." });
-      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
-      try {
-        const taskList = failedTasks
-          .map((t: Task, i: number) => `${i + 1}. ${t.title} [${t.id.substring(0, 8)}]`)
-          .join("\n");
-        await ctx.reply(
-          `Relance de ${failedTasks.length} taches echouees (job: ${jobId})\n\n${taskList}`,
-          bctx.threadOpts(ctx),
-        );
-      } catch (e) {
-        log.error("jc_batch_retry reply failed", { error: String(e) });
       }
       return;
     }

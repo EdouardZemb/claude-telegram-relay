@@ -65,7 +65,7 @@ function getAllSourceFiles(): string[] {
 // ── Barrel detection ──
 
 function isBarrelFile(filePath: string): boolean {
-  const knownBarrels = ["memory.ts", "orchestrator.ts"];
+  const knownBarrels = ["memory.ts"];
   const base = basename(filePath);
   if (!knownBarrels.includes(base)) return false;
   // Verify it's at src/ root level (not inside a subdirectory)
@@ -118,7 +118,6 @@ describe("Coding standards — S2: no direct process.env", () => {
   const ALLOWLIST: Record<string, string> = {
     // Agent execution: PROJECT_DIR/CLAUDE_PATH needed before config is available
     "agent.ts": "PROJECT_DIR, CLAUDE_PATH, GITHUB_REPO — agent spawn pre-config",
-    "orchestrator/agent-step.ts": "PROJECT_DIR — agent cwd pre-config",
     "agent-context.ts": "PROJECT_DIR — project root for agent context assembly",
     // Infrastructure: environment bootstrap before config
     "heartbeat.ts":
@@ -132,21 +131,16 @@ describe("Coding standards — S2: no direct process.env", () => {
     // Code tooling: PROJECT_DIR for filesystem operations
     "code-graph.ts": "PROJECT_DIR — project root for code graph indexing",
     "code-review.ts": "PROJECT_DIR, GITHUB_REPO — code review cwd and repo",
-    "gate-evaluator.ts": "PROJECT_DIR — gate evaluation cwd",
     "profile-evolution.ts": "PROJECT_DIR — profile file path",
     "workflow.ts": "PROJECT_DIR — workflow config path",
-    "orchestrator/pipeline.ts": "PROJECT_DIR — pipeline cwd",
     // External tools: tool-specific env vars not in config
-    "prd.ts": "CLAUDE_PATH, PROJECT_DIR — PRD generation via Claude",
     "documents.ts": "CLAUDE_PATH — document classification via Claude",
     "transcribe.ts":
       "VOICE_PROVIDER, WHISPER_LANGUAGE, WHISPER_BINARY, WHISPER_MODEL_PATH, TMPDIR — whisper config",
     "tts.ts": "TTS_PROVIDER, GROQ_API_KEY, GROQ_TTS_*, PIPER_*, TMPDIR — TTS provider config",
     "notification-prefs.ts": "USER_TIMEZONE — timezone for quiet hours",
     // Commands: timezone and thread IDs for user-facing formatting
-    "commands/execution.ts": "USER_TIMEZONE — timestamp formatting",
     "commands/tasks.ts": "SPRINT_THREAD_ID, USER_TIMEZONE — sprint routing and formatting",
-    "commands/planning.ts": "PROJECT_DIR — planning cwd",
     "commands/memory-cmds.ts": "USER_TIMEZONE — timestamp formatting",
     "commands/zz-messages.ts": "VOICE_PROVIDER — voice detection",
     // Memory: timezone for context formatting
@@ -183,11 +177,6 @@ describe("Coding standards — S3: LOC threshold", () => {
   // Temporary allowlist for files currently above threshold.
   // These are tracked for future refactoring — see CLAUDE.md "File size guideline".
   const LOC_ALLOWLIST: Record<string, number> = {
-    "orchestrator/pipeline.ts": 1107,
-    "agent-schemas.ts": 1091,
-    "commands/planning.ts": 847,
-    "gate-evaluator.ts": 927,
-    "commands/zz-messages.ts": 909,
     "workflow.ts": 848,
     "bot-context.ts": 816,
   };

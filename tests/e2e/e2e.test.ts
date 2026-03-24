@@ -54,13 +54,6 @@ describe("E2E Telegram Commands", () => {
     fw.assertContains(reply, "WORKFLOW");
   });
 
-  test("/agents returns agent list", async () => {
-    const reply = await fw.sendCommand("/agents");
-    expect(reply.length).toBeGreaterThan(0);
-    // formatAgentList returns agent descriptions
-    expect(reply).toBeTruthy();
-  });
-
   test("/monitor returns monitoring metrics", async () => {
     const reply = await fw.sendCommand("/monitor");
     expect(reply.length).toBeGreaterThan(0);

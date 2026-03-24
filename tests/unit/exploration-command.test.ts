@@ -7,11 +7,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { getAction } from "../../src/action-registry";
-import {
-  buildStructuredOutputInstructions,
-  getJsonSchemaForRole,
-  getSchemaForRole,
-} from "../../src/agent-schemas";
 import { getAgent, getAgentForCommand } from "../../src/bmad-agents";
 import { buildAgentSystemPromptPart, buildAgentTaskPromptPart } from "../../src/bmad-prompts";
 import { getTopicConfig } from "../../src/topic-config";
@@ -133,25 +128,4 @@ describe("/explore Prompt Building", () => {
     expect(taskPrompt).toContain("telegram-relay");
   });
 
-  it("has structured output instructions for explorer", () => {
-    const instructions = buildStructuredOutputInstructions("explorer" as any);
-    expect(instructions).toContain("JSON");
-    expect(instructions).toContain("etat_des_lieux");
-    expect(instructions).toContain("recommandations");
-  });
-
-  it("has JSON schema for --json-schema flag", () => {
-    const schema = getJsonSchemaForRole("explorer");
-    expect(schema).toBeDefined();
-    expect((schema as any).properties.etat_des_lieux).toBeDefined();
-    expect((schema as any).properties.options).toBeDefined();
-    expect((schema as any).properties.recommandations).toBeDefined();
-  });
-
-  it("has schema description for prompt injection", () => {
-    const schema = getSchemaForRole("explorer" as any);
-    expect(schema).toBeTruthy();
-    expect(schema).toContain("etat_des_lieux");
-    expect(schema).toContain("options");
-  });
 });

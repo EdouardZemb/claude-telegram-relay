@@ -115,25 +115,6 @@ describe("command-router", () => {
   });
 
   describe("routeIntent — high risk", () => {
-    it("sends confirmation for high-risk action with args", async () => {
-      const { ctx, replies, replyMarkups } = createMockCtx();
-      const intent: DetectedIntent = {
-        intent: "execute_task",
-        command: "exec",
-        confidence: 0.9,
-        args: "abc123",
-        action: getAction("exec"),
-        source: "regex",
-      };
-
-      const { rctx } = createRouterCtx();
-      const result = await routeIntent(ctx as any, intent, rctx);
-      expect(result.handled).toBe(true);
-      expect(result.pendingAction).toBe("exec");
-      expect(replies.some((r) => r.includes("Confirmer"))).toBe(true);
-      expect(replyMarkups.length).toBeGreaterThan(0);
-    });
-
     it("sends confirmation for rollback", async () => {
       const { ctx, replies } = createMockCtx();
       const intent: DetectedIntent = {
@@ -155,11 +136,11 @@ describe("command-router", () => {
     it("asks clarification when taskId is missing and cannot be resolved", async () => {
       const { ctx, replies } = createMockCtx();
       const intent: DetectedIntent = {
-        intent: "execute_task",
-        command: "exec",
+        intent: "start_task",
+        command: "start",
         confidence: 0.9,
         // No args — taskId missing
-        action: getAction("exec"),
+        action: getAction("start"),
         source: "regex",
       };
 
@@ -232,17 +213,17 @@ describe("command-router", () => {
     it("returns command after clarification was set by routeIntent", async () => {
       const { ctx } = createMockCtx({ chatId: 901 });
       const intent: DetectedIntent = {
-        intent: "execute_task",
-        command: "exec",
+        intent: "start_task",
+        command: "start",
         confidence: 0.9,
-        action: getAction("exec"),
+        action: getAction("start"),
         source: "regex",
       };
       const { rctx } = createRouterCtx();
       await routeIntent(ctx as any, intent, rctx);
 
       const cmd = checkPendingClarification(ctx as any, "abc123");
-      expect(cmd).toBe("/exec abc123");
+      expect(cmd).toBe("/start abc123");
     });
 
     it("clears clarification after consumption", async () => {
@@ -262,86 +243,6 @@ describe("command-router", () => {
 
       const cmd2 = checkPendingClarification(ctx as any, "autre chose");
       expect(cmd2).toBeNull();
-    });
-  });
-
-  describe("routeIntent — resume pipeline", () => {
-    it("resolves task from last failed pipeline run", async () => {
-      const mockSupa = {
-        from: (table: string) => {
-          if (table === "pipeline_runs") {
-            return {
-              select: () => ({
-                in: () => ({
-                  order: () => ({
-                    limit: () =>
-                      Promise.resolve({
-                        data: [
-                          {
-                            task_id: "abcd1234-5678-9abc-def0-1234567890ab",
-                            session_id: "sess-123",
-                          },
-                        ],
-                      }),
-                  }),
-                }),
-              }),
-            };
-          }
-          return fakeSupa.from(table);
-        },
-      } as any;
-
-      const { ctx, replies } = createMockCtx();
-      const intent: DetectedIntent = {
-        intent: "resume_pipeline",
-        command: "orchestrate",
-        confidence: 0.9,
-        args: "--resume",
-        action: getAction("orchestrate"),
-        source: "regex",
-      };
-
-      const { rctx } = createRouterCtx(mockSupa);
-      const result = await routeIntent(ctx as any, intent, rctx);
-      expect(result.handled).toBe(true);
-      // Should be high-risk confirmation with resolved task ID
-      expect(result.pendingAction).toBe("orchestrate");
-      expect(replies.some((r) => r.includes("abcd1234") && r.includes("--resume"))).toBe(true);
-    });
-
-    it("returns error when no failed pipeline found", async () => {
-      const mockSupa = {
-        from: (table: string) => {
-          if (table === "pipeline_runs") {
-            return {
-              select: () => ({
-                in: () => ({
-                  order: () => ({
-                    limit: () => Promise.resolve({ data: [] }),
-                  }),
-                }),
-              }),
-            };
-          }
-          return fakeSupa.from(table);
-        },
-      } as any;
-
-      const { ctx, replies } = createMockCtx();
-      const intent: DetectedIntent = {
-        intent: "resume_pipeline",
-        command: "orchestrate",
-        confidence: 0.9,
-        args: "--resume",
-        action: getAction("orchestrate"),
-        source: "regex",
-      };
-
-      const { rctx } = createRouterCtx(mockSupa);
-      const result = await routeIntent(ctx as any, intent, rctx);
-      expect(result.handled).toBe(true);
-      expect(replies.some((r) => r.includes("Aucun pipeline"))).toBe(true);
     });
   });
 
@@ -368,11 +269,11 @@ describe("command-router", () => {
       // First, trigger a confirmation for high-risk action
       const { ctx } = createMockCtx({ chatId: 912 });
       const intent: DetectedIntent = {
-        intent: "execute_task",
-        command: "exec",
+        intent: "rollback",
+        command: "rollback",
         confidence: 0.9,
-        args: "abc123",
-        action: getAction("exec"),
+        args: "probleme deploy",
+        action: getAction("rollback"),
         source: "regex",
       };
       const { rctx: rctx3 } = createRouterCtx();
@@ -383,8 +284,8 @@ describe("command-router", () => {
         chatId: 912,
         callbackQuery: { message: { chat: { id: 912 } } },
       });
-      const result = handleConfirmationCallback(cbCtx.ctx as any, "intent_confirm:exec");
-      expect(result).toBe("/exec abc123");
+      const result = handleConfirmationCallback(cbCtx.ctx as any, "intent_confirm:rollback");
+      expect(result).toBe("/rollback probleme deploy");
     });
   });
 });

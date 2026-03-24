@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { getJsonSchemaForRole, parseAgentOutput } from "../../src/agent-schemas";
 import { getAgent, getAgents } from "../../src/bmad-agents";
 import {
   buildAgentSystemPromptPart,
@@ -79,86 +78,6 @@ describe("BmadAgent CLI flags (T3)", () => {
     const agent = getAgent("pm")!;
     expect(agent.effort).toBe("medium");
     expect(agent.model).toBe("claude-sonnet-4-6");
-  });
-});
-
-// ── T4: JSON Schema for --json-schema flag ───────────────────
-
-describe("getJsonSchemaForRole (T4)", () => {
-  it("returns a valid schema for all 6 agent roles", () => {
-    const roles = ["analyst", "pm", "architect", "dev", "qa", "sm"];
-    for (const role of roles) {
-      const schema = getJsonSchemaForRole(role);
-      expect(schema).not.toBeNull();
-      expect((schema as any).type).toBe("object");
-      expect((schema as any).required).toBeDefined();
-      expect(Array.isArray((schema as any).required)).toBe(true);
-    }
-  });
-
-  it("returns schema for gate_evaluation", () => {
-    const schema = getJsonSchemaForRole("gate_evaluation");
-    expect(schema).not.toBeNull();
-    expect((schema as any).required).toContain("pass");
-    expect((schema as any).required).toContain("score");
-  });
-
-  it("returns schema for drift_report", () => {
-    const schema = getJsonSchemaForRole("drift_report");
-    expect(schema).not.toBeNull();
-    expect((schema as any).required).toContain("coverage_score");
-    expect((schema as any).required).toContain("overall_verdict");
-  });
-
-  it("returns null for unknown role", () => {
-    expect(getJsonSchemaForRole("unknown")).toBeNull();
-  });
-
-  it("analyst schema requires analysis and risks", () => {
-    const schema = getJsonSchemaForRole("analyst") as any;
-    expect(schema.required).toContain("analysis");
-    expect(schema.required).toContain("risks");
-  });
-
-  it("dev schema requires files_modified and summary", () => {
-    const schema = getJsonSchemaForRole("dev") as any;
-    expect(schema.required).toContain("files_modified");
-    expect(schema.required).toContain("summary");
-  });
-
-  it("qa schema requires score and findings", () => {
-    const schema = getJsonSchemaForRole("qa") as any;
-    expect(schema.required).toContain("score");
-    expect(schema.required).toContain("findings");
-  });
-});
-
-describe("parseAgentOutput with direct JSON (T4)", () => {
-  it("parses direct JSON output (from --output-format json)", () => {
-    const directJson = JSON.stringify({
-      analysis: "Test analysis",
-      risks: [{ severity: "low", description: "minor risk" }],
-      recommendations: ["do this"],
-      dependencies: [],
-      feasibility: "high",
-    });
-
-    const result = parseAgentOutput(directJson, "analyst");
-    expect(result).not.toBeNull();
-    expect(result!.role).toBe("analyst");
-  });
-
-  it("still parses <<<JSON>>> markers as fallback", () => {
-    const raw = `Some text\n<<<JSON>>>\n{"files_modified": ["a.ts"], "summary": "done", "tests_added": [], "issues_encountered": []}\n<<<END>>>\nMore text`;
-    const result = parseAgentOutput(raw, "dev");
-    expect(result).not.toBeNull();
-    expect(result!.role).toBe("dev");
-  });
-
-  it("still falls back to largest JSON object", () => {
-    const raw = `{"small": 1}\n{"score": 85, "findings": [], "summary": "ok", "tests_missing": []}`;
-    const result = parseAgentOutput(raw, "qa");
-    expect(result).not.toBeNull();
   });
 });
 

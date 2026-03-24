@@ -23,6 +23,16 @@ import type { Task } from "./tasks.ts";
 
 // ── Agent Types ──────────────────────────────────────────────
 
+export type AgentRole =
+  | "analyst"
+  | "pm"
+  | "architect"
+  | "dev"
+  | "qa"
+  | "sm"
+  | "explorer"
+  | "planner";
+
 export interface BmadAgent {
   id: string;
   name: string;

@@ -21,16 +21,6 @@ describe("action-registry", () => {
       expect(getAction("nonexistent")).toBeUndefined();
     });
 
-    it("returns correct metadata for exec", () => {
-      const action = getAction("exec");
-      expect(action).toBeDefined();
-      expect(action!.risk).toBe("high");
-      expect(action!.requiresSupabase).toBe(true);
-      expect(action!.params.length).toBeGreaterThan(0);
-      expect(action!.params[0].name).toBe("taskId");
-      expect(action!.params[0].required).toBe(true);
-    });
-
     it("returns correct metadata for help", () => {
       const action = getAction("help");
       expect(action).toBeDefined();
@@ -54,7 +44,7 @@ describe("action-registry", () => {
   describe("getAllActions", () => {
     it("returns all registered actions", () => {
       const actions = getAllActions();
-      expect(actions.length).toBeGreaterThanOrEqual(34);
+      expect(actions.length).toBeGreaterThanOrEqual(25);
     });
 
     it("covers all known commands", () => {
@@ -62,7 +52,6 @@ describe("action-registry", () => {
       const expected = [
         "help",
         "workflow",
-        "agents",
         "status",
         "monitor",
         "task",
@@ -70,14 +59,8 @@ describe("action-registry", () => {
         "sprint",
         "start",
         "done",
-        "exec",
-        "orchestrate",
-        "autopipeline",
         "explore",
         "docs",
-        "plan",
-        "prd",
-        "planify",
         "brain",
         "ideas",
         "remind",
@@ -128,9 +111,6 @@ describe("action-registry", () => {
       const high = getActionsByRisk("high");
       expect(high.length).toBeGreaterThan(0);
       const commands = high.map((a) => a.command);
-      expect(commands).toContain("exec");
-      expect(commands).toContain("orchestrate");
-      expect(commands).toContain("autopipeline");
       expect(commands).toContain("rollback");
     });
 
@@ -147,12 +127,10 @@ describe("action-registry", () => {
   describe("getActionsRequiringParam", () => {
     it("finds actions requiring taskId", () => {
       const actions = getActionsRequiringParam("taskId");
-      expect(actions.length).toBeGreaterThanOrEqual(4);
+      expect(actions.length).toBeGreaterThanOrEqual(2);
       const commands = actions.map((a) => a.command);
-      expect(commands).toContain("exec");
       expect(commands).toContain("start");
       expect(commands).toContain("done");
-      expect(commands).toContain("orchestrate");
     });
 
     it("finds actions requiring title", () => {
@@ -170,7 +148,6 @@ describe("action-registry", () => {
     it("returns all actions in readable format", () => {
       const formatted = formatActionsForLLM();
       expect(formatted).toContain("/backlog");
-      expect(formatted).toContain("/exec");
       expect(formatted).toContain("low");
       expect(formatted).toContain("high");
     });

@@ -51,18 +51,6 @@ describe("intent-detection", () => {
       expect(result.detected!.command).toBe("brain");
     });
 
-    it("detects plan intent with arg extraction", () => {
-      const result = detectIntent("planifie la feature de notifications");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("plan");
-    });
-
-    it("detects exec intent", () => {
-      const result = detectIntent("execute la tache");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("exec");
-    });
-
     it("detects done intent", () => {
       const result = detectIntent("termine la tache");
       expect(result.detected).not.toBeNull();
@@ -170,12 +158,6 @@ describe("intent-detection", () => {
       expect(result.suggestion).toBe("/backlog");
     });
 
-    it("suggestion includes args when extracted", () => {
-      const result = detectIntent("planifie la migration database");
-      expect(result.suggestion).toContain("/plan");
-      expect(result.suggestion).toContain("migration database");
-    });
-
     // ── Document search intent patterns ──
     it("detects document search from 'trouve mon'", () => {
       const result = detectIntent("trouve mon contrat d'assurance");
@@ -248,43 +230,6 @@ describe("intent-detection", () => {
       const result = detectIntent("cherche dans le code le bug");
       expect(result.detected).not.toBeNull();
       expect(result.detected!.command).not.toBe("docs");
-    });
-
-    // ── Resume pipeline intent patterns ──
-    it("detects resume intent from 'relance le workflow'", () => {
-      const result = detectIntent("relance le workflow");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("orchestrate");
-      expect(result.detected!.intent).toBe("resume_pipeline");
-      expect(result.detected!.args).toBe("--resume");
-    });
-
-    it("detects resume intent from 'reprendre le pipeline'", () => {
-      const result = detectIntent("reprendre le pipeline");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("orchestrate");
-      expect(result.detected!.args).toBe("--resume");
-    });
-
-    it("detects resume intent from 'relancer le workflow depuis l'etape ou ca a plante'", () => {
-      const result = detectIntent("relancer le workflow depuis l'etape ou ca a plante");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("orchestrate");
-      expect(result.detected!.args).toBe("--resume");
-    });
-
-    it("detects resume intent from 'reprends depuis l'echec'", () => {
-      const result = detectIntent("reprends depuis l'echec");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("orchestrate");
-      expect(result.detected!.args).toBe("--resume");
-    });
-
-    it("detects resume intent from 'resume le dernier pipeline'", () => {
-      const result = detectIntent("resume le dernier pipeline");
-      expect(result.detected).not.toBeNull();
-      expect(result.detected!.command).toBe("orchestrate");
-      expect(result.detected!.args).toBe("--resume");
     });
 
     // ── Job status intent patterns (S46) ──

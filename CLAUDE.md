@@ -17,17 +17,15 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `config.ts` | Centralized env var validation via Zod: lazy singleton getConfig(), AppConfig type, _resetConfigForTesting() for tests |
 | `topic-config.ts` | Per-topic system prompts and command allowlists for forum groups |
 | `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ |
-| `commands/help.ts` | Composer: /help, /workflow, /agents, /status, /monitor |
+| `commands/help.ts` | Composer: /help, /workflow, /status, /monitor |
 | `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
-| `commands/execution.ts` | Composer: /exec, /orchestrate (--skip-challenge), /autopipeline + gate/challenge callbacks |
-| `commands/planning.ts` | Composer: /plan, /prd, /planify + PRD validation callbacks |
 | `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
 | `commands/quality.ts` | Composer: /metrics, /retro, /patterns, /alerts, /cost + retro callbacks |
 | `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
 | `commands/project.ts` | Composer: /projects, /project |
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
-| `commands/jobs.ts` | Composer: /jobs (list, cancel, batch retry) |
+| `commands/jobs.ts` | Composer: /jobs (list, cancel) |
 | `commands/sdd-flow.ts` | Composer: SDD InlineKeyboard callbacks (sdd_ prefix), contextual keyboard construction, convergence detection |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /estimate, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
@@ -45,29 +43,15 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `memory/graph.ts` | Memory linking, chains, clustering, health stats, buildMemoryChains |
 | `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
-| `orchestrator.ts` | Barrel re-export for orchestrator sub-modules (see `src/orchestrator/`) + re-exports from deliberation.ts and pipeline-selection.ts |
-| `orchestrator/types.ts` | Types: AgentRole, AgentStepResult, OrchestratedResult, OrchestrateOptions, AGENT_COMMAND_MAP |
-| `orchestrator/agent-step.ts` | Single agent step: runAgentStep, getOrchestrationInstructions, persistAgentArtifact |
-| `orchestrator/pipeline.ts` | Main orchestrate() function: multi-agent pipeline with blackboard, gates, deliberation |
-| `orchestrator/format.ts` | Formatting: formatOrchestrationResult, buildOrchestrationSummary, logOrchestrationResult |
-| `blackboard.ts` | Shared structured workspace: versioned JSONB, optimistic locking, role authorization |
-| `deliberation.ts` | Deliberation protocol: paired reviewer examines strategic agent output |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
-| `gate-evaluator.ts` | Gate evaluation: dual verification, structured rubric scoring (4x25), rework loop |
-| `llm-router.ts` | LLM-based dynamic pipeline selection with difficulty scoring |
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, observability |
 | `logger.ts` | Structured logger: JSON (production) / colored (dev), correlation IDs, log level filtering |
-| `adversarial-verifier.ts` | Clean room spec-vs-implementation drift detection, V-criteria conformance check |
-| `agent-schemas.ts` | Typed JSON output schemas per agent role, ProtoSpec/AdversarialResult/ImpactAnalysisResult |
-| `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds |
+| `bmad-agents.ts` | 8 agent definitions with YAML templates, CLI flags, trust thresholds, AgentRole type |
 | `bmad-prompts.ts` | Context-aware prompt builder per agent role |
-| `auto-pipeline.ts` | Autonomous end-to-end pipeline with auto selection and retries |
 | `cost-tracking.ts` | Token usage tracking, multi-model cost estimation, sprint aggregation |
 | `workflow.ts` | Workflow engine: state transitions, enforcement, retry policies |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `patterns.ts` | Multi-sprint pattern analysis, workflow improvement proposals |
-| `prd.ts` | PRD management: draft → approved/rejected |
-| `prd-workflow.ts` | Conversational PRD-to-Deploy workflow with bounded revision |
 | `code-review.ts` | Adversarial code review before merge |
 | `feedback-loop.ts` | Double-loop learning: retro + gate analysis → agent prompt enrichment |
 | `story-files.ts` | Structured task specs (acceptance criteria, test stubs, steps) |
@@ -86,8 +70,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
 | `cost-estimate.ts` | Pre-implementation cost estimation based on agent budgets |
 | `mcp-config.ts` | Per-role MCP tool configuration and allowlists |
-| `pipeline-selection.ts` | Dynamic pipeline selection: keywords, constants, adaptive selection |
-| `pipeline-state.ts` | Pipeline checkpoint/resume: persists state, enables resume from last success |
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
@@ -95,9 +77,6 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
 | `command-router.ts` | Routes intents to commands: risk confirmation, parameter extraction |
 | `trust-scores.ts` | Per-role trust scores: confidence tracking, autonomy levels |
-| `gate-persistence.ts` | Gate evaluation persistence, double-loop learning |
-| `agent-events.ts` | Agent event log (event sourcing): lifecycle tracking, timeline |
-| `agent-messaging.ts` | Inter-agent messaging: structured messages, clarification, conflict detection |
 | `conversation-session.ts` | Conversation sessions: per-chat tracking, constraint extraction, phase detection |
 | `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
 | `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
@@ -112,15 +91,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/sprint` | View current sprint + progress bar |
 | `/start <id>` | Mark task in_progress |
 | `/done <id>` | Mark task complete |
-| `/exec <id>` | Launch Claude Code agent (requires Gate 1) |
-| `/orchestrate <id>` | Full BMad multi-agent pipeline (--blackboard for gated SDD flow) |
-| `/autopipeline <id>` | Autonomous end-to-end pipeline |
 | `/docs` | Document management (list, search, stats, delete, categories) |
 | `/explore <query>` | Launch Explorer agent to investigate a topic in the codebase |
-| `/plan <request>` | Decompose request into subtasks |
-| `/planify` | Proactive planner: backlog reordering, pacing |
-| `/prd` | PRD management (create, list, view, approve, reject) |
-| `/prd_workflow` | Conversational PRD-to-Deploy workflow |
 | `/project` | Project management (create, switch, archive, topic) |
 | `/projects` | List all projects |
 | `/profile` | User profile (view, update, insights) |
@@ -132,8 +104,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/status` | System health check |
 | `/speak <text>` | Text-to-speech |
 | `/remind <msg>` | Set reminder |
-| `/workflow` | BMad workflow overview |
-| `/agents` | List BMad agents |
+| `/workflow` | Development workflow overview |
 | `/export` | Export tasks/metrics |
 | `/brain` | Memory synthesis: patterns, health, ideas, suggestions. Sub-command: /brain health |
 | `/ideas` | Ideas pipeline: list, add, review, promote, archive |
@@ -154,22 +125,11 @@ Edge Functions: `embed` (auto-embeddings on insert), `search` (semantic search),
 
 ### MCP Memory Server (`mcp/`)
 
-Local MCP server (`.mcp.json`, stdio) exposing 21 tools: memory CRUD, task/PRD management, code graph queries, sprint/metrics/cost/alerts, feature flags, backlog analysis. Notification bridge via `mcp-pending-notifications.json`.
+Local MCP server (`.mcp.json`, stdio) exposing 21 tools: memory CRUD, task management, code graph queries, sprint/metrics/cost/alerts, feature flags, backlog analysis. Notification bridge via `mcp-pending-notifications.json`.
 
-### BMad Workflow
+### Development Workflow
 
-**Gates:**
-1. PRD approval required before /exec
-2. Architecture validation
-3. Code review (CI + adversarial review, 3+ findings required)
-
-**Pipelines:**
-- DEFAULT: analyst → pm → architect → dev → qa (complex features, difficulty > 0.6)
-- LIGHT: planner → dev → qa (medium tasks, difficulty 0.3-0.6, planner = analyst+pm fusion)
-- QUICK: dev → qa (auto-selected for bugs, fixes, docs, simple P3 tasks)
-- SOLO: dev (trivial changes, difficulty < 0.3: typos, labels, config tweaks)
-- REVIEW: qa → architect (auto-selected for review/audit/refactor tasks)
-- RESEARCH: explorer → planner → dev → qa (web research, benchmarks, state of the art via Tavily)
+The orchestration TypeScript modules (orchestrator/, blackboard, deliberation, gate-evaluator, pipeline-selection, etc.) have been removed in favour of the SDD (Spec-Driven Development) pipeline managed via `.claude/skills/` and `.claude/agents/`.
 
 Workflow steps (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
@@ -190,16 +150,15 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    72 TypeScript modules (core logic)
-  commands/             13 Composer modules (Telegram command handlers)
+src/                    68 TypeScript modules (core logic)
+  commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
-  orchestrator/         4 sub-modules (types, agent-step, pipeline, format)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  3870 tests (unit + integration + E2E)
+tests/                  2618 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -227,7 +186,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (3870 tests, all must pass before merge)
+- Tests: `bun test` (2618 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -235,7 +194,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
-- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: pipeline.ts (1107), agent-schemas.ts (1091), planning.ts (847), gate-evaluator.ts (927), zz-messages.ts (909), workflow.ts (848), bot-context.ts (816) — deferred to future vagues
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: workflow.ts (848), bot-context.ts (816) — deferred to future vagues
 
 ## Setup
 

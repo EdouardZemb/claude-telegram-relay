@@ -70,17 +70,6 @@ describe("Module Imports: BMad System", () => {
     expect(mod.checkGatesWithOverrides).toBeFunction();
   });
 
-  it("imports orchestrator module", async () => {
-    const mod = await import("../../src/orchestrator");
-    expect(mod.orchestrate).toBeFunction();
-    expect(mod.formatOrchestrationResult).toBeFunction();
-    expect(mod.DEFAULT_PIPELINE).toBeDefined();
-    expect(mod.QUICK_PIPELINE).toBeDefined();
-    expect(mod.REVIEW_PIPELINE).toBeDefined();
-    // parallelReview was removed in S18-01
-    expect((mod as any).parallelReview).toBeUndefined();
-  });
-
   it("imports story-files module", async () => {
     const mod = await import("../../src/story-files");
     expect(mod.buildStoryFile).toBeFunction();
@@ -150,15 +139,6 @@ describe("Module Imports: Utilities", () => {
   it("imports transcribe module", async () => {
     const mod = await import("../../src/transcribe");
     expect(mod.transcribe).toBeFunction();
-  });
-
-  it("imports prd module", async () => {
-    const mod = await import("../../src/prd");
-    expect(mod.generatePRD).toBeFunction();
-    expect(mod.savePRD).toBeFunction();
-    expect(mod.getPRDs).toBeFunction();
-    expect(mod.updatePRDStatus).toBeFunction();
-    expect(mod.formatPRDList).toBeFunction();
   });
 
   it("imports profile-evolution module", async () => {

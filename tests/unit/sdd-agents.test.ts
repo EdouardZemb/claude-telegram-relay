@@ -113,7 +113,6 @@ describe("sdd-agents", () => {
         "code-review",
         "conversation-session",
         "trust-scores",
-        "gate-persistence",
         "agent-messaging",
         "feedback-loop",
       ];

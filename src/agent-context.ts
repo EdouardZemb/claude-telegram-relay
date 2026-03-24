@@ -7,11 +7,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readFileSync } from "fs";
 import { join } from "path";
+import type { AgentRole } from "./bmad-agents.ts";
 import { findAffectedModules, formatGraphContext, getGraph } from "./code-graph.ts";
 import { buildTaskContext } from "./document-sharding.ts";
 import { createLogger } from "./logger.ts";
 import { buildMemoryChains, findSimilarPastTasks } from "./memory.ts";
-import type { AgentRole } from "./orchestrator.ts";
 import { getCachedTrustScore, getCachedTrustScores } from "./trust-scores.ts";
 
 const log = createLogger("agent-context");

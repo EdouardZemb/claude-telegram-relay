@@ -109,26 +109,6 @@ const INTENT_PATTERNS: IntentPattern[] = [
     patterns: [/\b(idees?|suggestions?|propositions?)\b/i],
   },
   {
-    intent: "plan_task",
-    command: "plan",
-    patterns: [
-      /\b(planifie|decompose|decoupe|organise)\s+(\w+\s+)?(tache|feature|fonctionnalite)\b/i,
-      /\b(planifie|decompose|decoupe)\s+/i,
-    ],
-    argExtractor: (text) => {
-      const match = text.match(/(?:planifie|decompose|decoupe)\s+(?:la\s+)?(.+)/i);
-      return match?.[1]?.trim();
-    },
-  },
-  {
-    intent: "execute_task",
-    command: "exec",
-    patterns: [
-      /\b(execute|implemente)\s+(la\s+)?tache\b/i,
-      /\b(lance)\s+(l'?agent|l'?execution|l'?implementation)\b/i,
-    ],
-  },
-  {
     intent: "view_projects",
     command: "projects",
     patterns: [/\b(projets?|liste\s+des\s+projets?|quels?\s+projets?)\b/i],
@@ -152,19 +132,6 @@ const INTENT_PATTERNS: IntentPattern[] = [
     intent: "rollback",
     command: "rollback",
     patterns: [/\b(rollback|revenir?\s+en\s+arriere|annuler?\s+(le\s+)?deploy)\b/i],
-  },
-  {
-    intent: "resume_pipeline",
-    command: "orchestrate",
-    patterns: [
-      // "relance le workflow", "reprends le pipeline", "resume l'execution"
-      /\b(relance[rz]?|reprend[sz]?|reprendre|resume[rz]?)\s+(le\s+|la\s+|l'?)?(workflow|pipeline|orchestration|execution|implementation)\b/i,
-      // "relance depuis l'echec", "reprendre ou ca a plante"
-      /\b(relance[rz]?|reprend[sz]?|reprendre)\s+.{0,40}\b(echec|plante|echoue|crashe?)\b/i,
-      // "relance le dernier pipeline", "reprendre le dernier workflow"
-      /\b(relance[rz]?|reprend[sz]?|reprendre|resume[rz]?)\s+(le\s+)?dernier\s+(pipeline|workflow|execution)\b/i,
-    ],
-    argExtractor: () => "--resume",
   },
   {
     intent: "search_document",
@@ -200,69 +167,6 @@ const INTENT_PATTERNS: IntentPattern[] = [
         }
       }
       return "search";
-    },
-  },
-  {
-    intent: "view_prd",
-    command: "prd",
-    patterns: [
-      // "montre-moi le PRD", "affiche le PRD", "voir le PRD"
-      /\b(montre|affiche|voir|show)\s+(?:moi\s+)?(?:le\s+)?prd\b/i,
-      // "le PRD c495", "prd c495951a"
-      /\bprd\s+[a-f0-9]{4,8}\b/i,
-      // "liste les PRDs", "quels PRDs", "les PRDs"
-      /\b(list[ée]?r?|voir)\s+(?:les?\s+)?prds?\b/i,
-      /\b(quels?|combien\s+de)\s+prds?\b/i,
-    ],
-    argExtractor: (text) => {
-      // Extract hex ID if present
-      const idMatch = text.match(/\b([a-f0-9]{4,8})\b/i);
-      if (idMatch) return idMatch[1];
-      // Check if listing
-      if (/\b(list[ée]?r?|quels?|combien)\b/i.test(text)) return "list";
-      return undefined;
-    },
-  },
-  {
-    intent: "create_prd",
-    command: "prd",
-    patterns: [
-      /\b(cree|creer|genere|generer|redige|rediger)\s+(?:un\s+)?prd\b/i,
-      /\bprd\s+(pour|sur|de)\s+/i,
-    ],
-    argExtractor: (text) => {
-      const match = text.match(/(?:prd|PRD)\s+(?:pour|sur|de)\s+(.+)/i);
-      if (match) return match[1].replace(/\s*[?!.]\s*$/, "").trim();
-      const match2 = text.match(/(?:cree|genere|redige)\s+(?:un\s+)?prd\s*:?\s+(.+)/i);
-      if (match2) return match2[1].replace(/\s*[?!.]\s*$/, "").trim();
-      return undefined;
-    },
-  },
-  {
-    intent: "suggest_prd",
-    command: "prd_workflow",
-    patterns: [
-      /\b(je\s+voudrais|j'?aimerais|il\s+faudrait|on\s+devrait|on\s+pourrait)\s+(ajouter|creer|implementer|developper|faire|mettre\s+en\s+place)\s+/i,
-      /\b(il\s+faudrait\s+que\s+le\s+bot|le\s+bot\s+devrait|le\s+systeme\s+devrait)\s+/i,
-      /\b(on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)/i,
-      /\b(nouvelle\s+fonctionnalite|nouvelle\s+feature|nouveau\s+module|nouvelle\s+commande)\b/i,
-      /\b(implemente|developpe|code|lance\s+l'?implementation\s+de?)\s+/i,
-      /\b(lance|lancer|cree|creer|genere|generer|fais|faire)\s+(?:le|un)\s+prd\s+(pour|de|sur)\s+/i,
-      /\b(lance|lancer)\s+(?:le|un)\s+prd\b/i,
-    ],
-    argExtractor: (text) => {
-      const patterns = [
-        /(?:lance|lancer|cree|creer|genere|generer|fais|faire)\s+(?:le|un)\s+prd\s+(?:pour|de|sur)\s+(.+)/i,
-        /(?:je\s+voudrais|j'?aimerais|il\s+faudrait|on\s+devrait|on\s+pourrait)\s+(?:ajouter|creer|implementer|developper|faire|mettre\s+en\s+place)\s+(.+)/i,
-        /(?:il\s+faudrait\s+que\s+le\s+bot|le\s+bot\s+devrait|le\s+systeme\s+devrait)\s+(.+)/i,
-        /(?:on\s+a\s+besoin\s+d[e']\s*|il\s+nous\s+faut\s+|il\s+manque\s+)(.+)/i,
-        /(?:implemente|developpe|code|lance\s+l'?implementation\s+de?)\s+(.+)/i,
-      ];
-      for (const p of patterns) {
-        const m = text.match(p);
-        if (m?.[1]) return m[1].replace(/\s*[?!.]\s*$/, "").trim();
-      }
-      return text;
     },
   },
   {

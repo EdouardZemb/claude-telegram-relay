@@ -14,9 +14,6 @@ const SRC_DIR = join(import.meta.dir, "../../src");
 const MIGRATED_MODULES = [
   // Pilotes (already migrated)
   "relay.ts",
-  "orchestrator/pipeline.ts",
-  "orchestrator/agent-step.ts",
-  "orchestrator/format.ts",
   "agent.ts",
   // Vague 1 — Modules critiques haute frequence
   "memory/core.ts",
@@ -31,22 +28,16 @@ const MIGRATED_MODULES = [
   "bot-context.ts",
   // Vague 2 — Infrastructure et agents
   "tts.ts",
-  "gate-evaluator.ts",
   "workflow.ts",
   "loader.ts",
-  "prd.ts",
-  "blackboard.ts",
-  "adversarial-verifier.ts",
   // Vague 3 — Modules legers
   "tasks.ts",
   "commands/utilities.ts",
-  "llm-router.ts",
   "document-sharding.ts",
   "llm-ops.ts",
   "cost-tracking.ts",
   "notification-queue.ts",
   "projects.ts",
-  "pipeline-state.ts",
   "job-manager.ts",
   "commands/documents.ts",
   "commands/memory-cmds.ts",
@@ -54,24 +45,19 @@ const MIGRATED_MODULES = [
   "trust-scores.ts",
   "gates.ts",
   "agent-context.ts",
-  "agent-events.ts",
   "feedback-loop.ts",
   "story-files.ts",
   "transcribe.ts",
   "intent-detection.ts",
   "conversation-session.ts",
-  "gate-persistence.ts",
   "code-review.ts",
   "bmad-prompts.ts",
-  "commands/execution.ts",
   "commands/help.ts",
-  "commands/jobs.ts",
 ];
 
 /**
  * Filter code lines: exclude comments and string literals containing "console.".
- * R16: The regex must ignore console.* inside string literals to avoid false positives
- * (e.g., gate-persistence.ts has "log les erreurs avec console.error" in a template string).
+ * R16: The regex must ignore console.* inside string literals to avoid false positives.
  */
 function getCodeLines(content: string): string[] {
   return content.split("\n").filter((line) => {
@@ -187,13 +173,3 @@ describe("Logger migration — V8: loader.ts no [loader] prefix", () => {
   });
 });
 
-describe("Logger migration — R16: gate-persistence.ts string literal not flagged", () => {
-  it("gate-persistence.ts has console.error only in string literals", () => {
-    const content = readFileSync(join(SRC_DIR, "gate-persistence.ts"), "utf-8");
-    const codeLines = getCodeLines(content);
-    const realConsoleCalls = codeLines.filter((line) =>
-      hasRealConsoleCall(line, /\bconsole\.(log|error|warn)\b/),
-    );
-    expect(realConsoleCalls).toEqual([]);
-  });
-});

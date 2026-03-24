@@ -5,14 +5,6 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-  type ExplorerOutput,
-  formatStructuredOutput,
-  getJsonSchemaForRole,
-  getSchemaForRole,
-  parseAgentOutput,
-  validateAgentOutput,
-} from "../../src/agent-schemas";
 import { buildAgentSystemPrompt, getAgent, getAgentForCommand } from "../../src/bmad-agents";
 import { buildMcpToolInstructions, getMcpToolsForRole, isToolAllowed } from "../../src/mcp-config";
 
@@ -64,97 +56,6 @@ describe("Explorer Agent Definition", () => {
         (a) => a.toLowerCase().includes("read-only") || a.toLowerCase().includes("never modify"),
       ),
     ).toBe(true);
-  });
-});
-
-// ── Output Schema ───────────────────────────────────────────────
-
-describe("Explorer Output Schema", () => {
-  const validOutput: ExplorerOutput = {
-    role: "explorer",
-    etat_des_lieux: "Le module relay.ts fait 243 lignes et utilise le pattern Composer.",
-    options: [
-      {
-        label: "Option A",
-        description: "Refactorer en micro-modules",
-        pros: ["separation des responsabilites"],
-        cons: ["complexite accrue"],
-      },
-    ],
-    recommandations: [
-      {
-        action: "Extraire le middleware auth dans un fichier dedie",
-        effort: "small",
-        impact: "medium",
-        files: ["src/relay.ts"],
-      },
-    ],
-    effort_estimate: {
-      total: "2-3 heures",
-      breakdown: ["1h extraction middleware", "1h tests", "30min validation"],
-    },
-    references: ["src/relay.ts:42", "src/loader.ts:10"],
-  };
-
-  it("has schema description for explorer role", () => {
-    const schema = getSchemaForRole("explorer" as any);
-    expect(schema).toBeTruthy();
-    expect(schema).toContain("etat_des_lieux");
-    expect(schema).toContain("recommandations");
-    expect(schema).toContain("effort_estimate");
-    expect(schema).toContain("references");
-  });
-
-  it("has JSON Schema for --json-schema flag", () => {
-    const jsonSchema = getJsonSchemaForRole("explorer");
-    expect(jsonSchema).toBeDefined();
-    expect((jsonSchema as any).type).toBe("object");
-    expect((jsonSchema as any).required).toContain("etat_des_lieux");
-    expect((jsonSchema as any).required).toContain("options");
-    expect((jsonSchema as any).required).toContain("recommandations");
-  });
-
-  it("validates correct explorer output", () => {
-    expect(validateAgentOutput(validOutput, "explorer" as any)).toBe(true);
-  });
-
-  it("rejects output missing etat_des_lieux", () => {
-    const invalid = { ...validOutput, etat_des_lieux: undefined };
-    expect(validateAgentOutput(invalid, "explorer" as any)).toBe(false);
-  });
-
-  it("rejects output missing options array", () => {
-    const invalid = { ...validOutput, options: "not an array" };
-    expect(validateAgentOutput(invalid, "explorer" as any)).toBe(false);
-  });
-
-  it("rejects output missing recommandations array", () => {
-    const invalid = { ...validOutput, recommandations: null };
-    expect(validateAgentOutput(invalid, "explorer" as any)).toBe(false);
-  });
-
-  it("parses explorer output from JSON string", () => {
-    const raw = JSON.stringify(validOutput);
-    const parsed = parseAgentOutput(raw, "explorer" as any);
-    expect(parsed).toBeDefined();
-    expect(parsed!.role).toBe("explorer");
-    expect((parsed as ExplorerOutput).etat_des_lieux).toBe(validOutput.etat_des_lieux);
-  });
-
-  it("parses explorer output from marker-wrapped JSON", () => {
-    const raw = `Some preamble text\n<<<JSON>>>\n${JSON.stringify(validOutput)}\n<<<END>>>\nSome epilogue`;
-    const parsed = parseAgentOutput(raw, "explorer" as any);
-    expect(parsed).toBeDefined();
-    expect(parsed!.role).toBe("explorer");
-  });
-
-  it("formats explorer output for display", () => {
-    const formatted = formatStructuredOutput(validOutput);
-    expect(formatted).toContain("Etat des lieux:");
-    expect(formatted).toContain("Options:");
-    expect(formatted).toContain("Recommandations:");
-    expect(formatted).toContain("Effort:");
-    expect(formatted).toContain("References:");
   });
 });
 
