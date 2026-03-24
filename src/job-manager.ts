@@ -377,6 +377,8 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
               }
             }
             // OK (legacy) and other verdicts: no buttons
+          } else if (sddPhase === "doc") {
+            // Terminal phase: no continuation buttons (R11)
           }
           if (!hasButtons) hasButtons = kb.inline_keyboard?.length > 0;
         }

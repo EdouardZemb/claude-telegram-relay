@@ -15,9 +15,10 @@ import { assembleHandoffContext } from "../conversation-handoff.ts";
 import { isJobManagerEnabled, launch } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
 import { getRecentMessages } from "../memory.ts";
-import { formatStatusBar, getTracker, updateStep } from "../pipeline-tracker.ts";
+import { formatStatusBar, getTracker, type SddPhase, updateStep } from "../pipeline-tracker.ts";
 import {
   runSddChallenge,
+  runSddDoc,
   runSddExplore,
   runSddImplement,
   runSddReview,
@@ -138,6 +139,15 @@ export function buildSddKeyboard(
       hasButtons = true;
       break;
 
+    case "review":
+      kb.text("Documenter", `sdd_doc:${name}`);
+      hasButtons = true;
+      break;
+
+    case "doc":
+      // Terminal phase: no continuation buttons
+      return undefined;
+
     default:
       return undefined;
   }
@@ -220,10 +230,11 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
       case "spec":
       case "challenge":
       case "implement":
-      case "review": {
+      case "review":
+      case "doc": {
         // Agent-backed phases: launch via job-manager (R9, R13)
         const jobType = `sdd-${action}:${name}`;
-        const phase = action as "explore" | "spec" | "challenge" | "implement" | "review";
+        const phase = action as SddPhase;
 
         await updateStep(chatId, threadId, phase, { status: "running" });
 
@@ -255,6 +266,8 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
             agentFn = () => runSddChallenge(name, bctx);
           } else if (action === "implement") {
             agentFn = () => runSddImplement(name, bctx);
+          } else if (action === "doc") {
+            agentFn = () => runSddDoc(name, bctx);
           } else {
             // review — pass prUrl from implement step (R14)
             agentFn = () => runSddReview(name, bctx, tracker.steps.implement.prUrl);

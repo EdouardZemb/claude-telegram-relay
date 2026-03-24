@@ -38,6 +38,7 @@ import type { HandoffSummary } from "../../src/conversation-handoff.ts";
 // Now import the module under test
 import {
   runSddChallenge,
+  runSddDoc,
   runSddExplore,
   runSddImplement,
   runSddReview,
@@ -428,6 +429,13 @@ describe("sdd-agents", () => {
   // ── runSddReview ───────────────────────────────────────────
 
   describe("runSddReview", () => {
+    it("defaults to CHANGES_REQUESTED when no explicit verdict", async () => {
+      spawnClaudeResults = [{ stdout: "Review complete. No issues.", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_REVIEW_CHANGES_REQUESTED:/);
+    });
+
     it("V19: returns SDD_REVIEW_FAILED on error", async () => {
       spawnClaudeResults = [{ stdout: "", stderr: "Review error", exitCode: 1 }];
 
@@ -536,6 +544,80 @@ describe("sdd-agents", () => {
 
       expect(spawnSyncCalls).toHaveLength(0);
       delete process.env.GITHUB_REPO;
+    });
+  });
+
+  // ── runSddDoc ─────────────────────────────────────────────
+
+  describe("runSddDoc", () => {
+    it("V6: returns SDD_DOC_OK when spawnClaude returns exitCode=0 and stdout non-empty", async () => {
+      spawnClaudeResults = [
+        { stdout: "Documentation updated. CLAUDE.md revised.", stderr: "", exitCode: 0 },
+      ];
+
+      const result = await runSddDoc("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_DOC_OK:/);
+    });
+
+    it("V7: returns SDD_DOC_FAILED when spawnClaude returns exitCode!=0", async () => {
+      spawnClaudeResults = [{ stdout: "", stderr: "timeout", exitCode: 1 }];
+
+      const result = await runSddDoc("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_DOC_FAILED:/);
+    });
+
+    it("V7b: returns SDD_DOC_FAILED when spawnClaude returns empty stdout with exitCode=0", async () => {
+      spawnClaudeResults = [{ stdout: "", stderr: "", exitCode: 0 }];
+
+      const result = await runSddDoc("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_DOC_FAILED:/);
+    });
+
+    it("V8: returns SDD_DOC_FAILED when spawnClaude throws exception", async () => {
+      // Override mock to throw
+      mock.module("../../src/agent.ts", () => ({
+        spawnClaude: async () => {
+          throw new Error("network error");
+        },
+      }));
+
+      const result = await runSddDoc("test-feature", makeBctx());
+      expect(result).toMatch(/^SDD_DOC_FAILED:/);
+
+      // Restore normal mock
+      mock.module("../../src/agent.ts", () => ({
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        spawnClaude: async (opts: any) => {
+          spawnClaudeCalls.push({
+            prompt: opts.prompt,
+            systemPrompt: opts.systemPrompt,
+            options: opts,
+          });
+          const result = spawnClaudeResults[spawnCallIndex] || {
+            stdout: "",
+            stderr: "no mock",
+            exitCode: 1,
+          };
+          spawnCallIndex++;
+          return result;
+        },
+      }));
+    });
+
+    it("V9: prompt passed to spawnClaude contains pipeline name", async () => {
+      spawnClaudeResults = [{ stdout: "Doc updated.", stderr: "", exitCode: 0 }];
+
+      await runSddDoc("test-feature", makeBctx());
+
+      expect(spawnClaudeCalls).toHaveLength(1);
+      expect(spawnClaudeCalls[0].prompt).toContain("test-feature");
+    });
+
+    it("result message contains pipeline name", async () => {
+      spawnClaudeResults = [{ stdout: "Documentation done.", stderr: "", exitCode: 0 }];
+
+      const result = await runSddDoc("my-pipeline", makeBctx());
+      expect(result).toContain("my-pipeline");
     });
   });
 });

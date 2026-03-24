@@ -611,6 +611,27 @@ describe("job-manager", () => {
       expect(kb).toBeUndefined();
     });
 
+    it("V13: returns undefined for sdd-doc job with SDD_DOC_OK result (terminal phase)", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "sdd-doc:foo",
+        result: "SDD_DOC_OK: foo — documentation mise a jour",
+      });
+      // Terminal phase: no continuation buttons
+      const hasButtons = kb && kb.inline_keyboard?.flat().length > 0;
+      expect(hasButtons).toBeFalsy();
+    });
+
+    it("V13b: returns undefined for sdd-doc job with SDD_DOC_FAILED result", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "sdd-doc:foo",
+        result: "SDD_DOC_FAILED: some error",
+      });
+      const hasButtons = kb && kb.inline_keyboard?.flat().length > 0;
+      expect(hasButtons).toBeFalsy();
+    });
+
     it("returns keyboard for orchestrate with PR and taskId", () => {
       const kb = getCompletionKeyboard({
         ...baseJob,
@@ -636,6 +657,7 @@ describe("job-manager", () => {
     it("sends to originating chat on completion when bot is initialized", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let sentMessage: any = null;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       const fakeBotInstance = {
         api: {
           // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -666,6 +688,7 @@ describe("job-manager", () => {
     it("sends error notification for failed jobs", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let sentMessage: any = null;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       const fakeBotInstance = {
         api: {
           // biome-ignore lint/suspicious/noExplicitAny: test mock
