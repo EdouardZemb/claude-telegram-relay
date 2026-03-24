@@ -385,7 +385,7 @@ export default c;
       }
     });
 
-    it("loads all 13 known command files", async () => {
+    it("loads all 14 known command files", async () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
@@ -411,6 +411,7 @@ export default c;
           "profile.ts",
           "project.ts",
           "quality.ts",
+          "sdd-flow.ts",
           "tasks.ts",
           "utilities.ts",
           "zz-messages.ts",

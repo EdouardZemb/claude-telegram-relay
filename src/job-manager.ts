@@ -303,7 +303,55 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
       hasButtons = true;
       break;
     default:
-      return undefined;
+      if (job.type.startsWith("sdd-")) {
+        // SDD pipeline jobs: parse phase and pipeline name from type (F-SS-1)
+        // Format: sdd-{phase}:{pipeline-name}
+        // Result format: SDD_{PHASE}_{VERDICT}: ...
+        const typeColonIdx = job.type.indexOf(":");
+        const sddPhaseFromType =
+          typeColonIdx !== -1
+            ? job.type.substring(4, typeColonIdx) // strip "sdd-", take until ":"
+            : job.type.substring(4); // strip "sdd-" only (legacy format)
+        const sddName =
+          typeColonIdx !== -1 ? job.type.substring(typeColonIdx + 1) : sddPhaseFromType;
+
+        const sddMatch = job.result?.match(/^SDD_(\w+)_(\w[\w-]*?):/);
+        if (sddMatch) {
+          const sddPhase = sddMatch[1].toLowerCase();
+          const sddVerdict = sddMatch[2];
+          // Build contextual buttons based on phase and verdict
+          if (sddPhase === "explore") {
+            if (sddVerdict === "GO") {
+              kb.text("Discuter les resultats", `sdd_discuss:${sddName}`);
+              kb.text("Specifier", `sdd_spec:${sddName}`);
+            } else if (sddVerdict === "PIVOT") {
+              kb.text("Re-explorer", `sdd_explore:${sddName}`);
+              kb.text("Discuter", `sdd_discuss:${sddName}`);
+            }
+            // DROP: no buttons
+          } else if (sddPhase === "spec") {
+            kb.text("Challenger", `sdd_challenge:${sddName}`);
+            kb.text("Implementer", `sdd_implement:${sddName}`);
+          } else if (sddPhase === "challenge") {
+            if (sddVerdict === "GO" || sddVerdict === "OK") {
+              kb.text("Implementer", `sdd_implement:${sddName}`);
+            } else if (sddVerdict === "GO_WITH_CHANGES") {
+              kb.text("Implementer avec corrections", `sdd_implement:${sddName}`);
+              kb.text("Corriger la spec", `sdd_spec:${sddName}`);
+            } else if (sddVerdict === "NO-GO") {
+              kb.text("Retravailler la spec", `sdd_spec:${sddName}`);
+            }
+          } else if (sddPhase === "implement") {
+            kb.text("Review", `sdd_review:${sddName}`);
+            kb.text("Corriger", `sdd_implement:${sddName}`);
+          } else if (sddPhase === "review") {
+            // Post-review: no further SDD buttons
+          }
+          hasButtons = kb.inline_keyboard?.length > 0;
+        }
+      } else {
+        return undefined;
+      }
   }
 
   return hasButtons ? kb : undefined;

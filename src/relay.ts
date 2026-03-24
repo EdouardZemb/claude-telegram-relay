@@ -38,6 +38,7 @@ import { loadComposers } from "./loader.ts";
 import { createLogger } from "./logger.ts";
 import { loadPrefs } from "./notification-prefs.ts";
 import { startQueue } from "./notification-queue.ts";
+import { initPipelineTracker } from "./pipeline-tracker.ts";
 
 const log = createLogger("relay");
 
@@ -147,6 +148,7 @@ if (import.meta.main) {
   await startQueue(mainBot);
   initJobManager(mainBot);
   await initSessions();
+  await initPipelineTracker();
   await loadPrefs();
 
   // Graceful shutdown

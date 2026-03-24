@@ -62,6 +62,7 @@ import {
   registerPendingClassification,
   storePendingUpload,
 } from "./documents.ts";
+import { buildSddKeyboard, detectConvergenceInResponse } from "./sdd-flow.ts";
 
 const log = createLogger("zz-messages");
 // ── Proposal detection ───────────────────────────────────────
@@ -508,6 +509,22 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     await bctx.saveMessage("assistant", finalResponse, meta);
     await options.respond(ctx, finalResponse);
+
+    // SDD convergence detection: if Claude signals decisions, offer SDD keyboard (R10, R11)
+    const convergence = detectConvergenceInResponse(finalResponse);
+    if (convergence) {
+      const { getTracker } = await import("../pipeline-tracker.ts");
+      const tracker = await getTracker(chatId, threadId);
+      if (tracker) {
+        const keyboard = buildSddKeyboard("discuss", tracker.name);
+        if (keyboard) {
+          await ctx.reply("Convergence detectee. Actions disponibles :", {
+            ...bctx.threadOpts(ctx),
+            reply_markup: keyboard,
+          });
+        }
+      }
+    }
   }
 
   // ── Text messages ──────────────────────────────────────────

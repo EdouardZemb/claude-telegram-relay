@@ -127,6 +127,7 @@ describe("Coding standards — S2: no direct process.env", () => {
     "notification-queue.ts":
       "RELAY_DIR, TELEGRAM_USER_ID, USER_TIMEZONE, TELEGRAM_GROUP_ID, SPRINT/DEV_THREAD_ID — notification routing",
     "conversation-session.ts": "RELAY_DIR — session persistence directory",
+    "pipeline-tracker.ts": "RELAY_DIR — SDD pipeline persistence directory",
     "bot-context.ts": "HOME, VOICE_PROVIDER, TTS_PROVIDER — runtime provider detection",
     // Code tooling: PROJECT_DIR for filesystem operations
     "code-graph.ts": "PROJECT_DIR — project root for code graph indexing",
