@@ -7,8 +7,10 @@
  * Phase 2 Architecture V2 — independent Composer, auto-loaded by loader.ts.
  */
 
+import { spawnSync } from "bun";
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
+import { getConfig } from "../config.ts";
 import { assembleHandoffContext } from "../conversation-handoff.ts";
 import { isJobManagerEnabled, launch } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
@@ -23,6 +25,17 @@ import {
 } from "../sdd-agents.ts";
 
 const log = createLogger("sdd-flow");
+
+// ── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Extract PR number (as string) from a GitHub PR URL.
+ * Returns undefined if URL doesn't match expected pattern.
+ */
+function extractPrNumber(url: string): string | undefined {
+  const match = url.match(/\/pull\/(\d+)/);
+  return match?.[1];
+}
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -140,7 +153,8 @@ export function buildSddKeyboard(
  * Used by getCompletionKeyboard in job-manager.ts.
  */
 export function parseSddResultPrefix(result: string): { phase: string; verdict: string } | null {
-  const match = result.match(/^SDD_(\w+)_(\w[\w-]*?):/);
+  // Use explicit phase names to avoid greedy match eating multi-part verdicts like CHANGES_REQUESTED
+  const match = result.match(/^SDD_(EXPLORE|DISCUSS|SPEC|CHALLENGE|IMPLEMENT|REVIEW)_([\w-]+?):/);
   if (!match) return null;
   return { phase: match[1].toLowerCase(), verdict: match[2] };
 }
@@ -242,8 +256,8 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
           } else if (action === "implement") {
             agentFn = () => runSddImplement(name, bctx);
           } else {
-            // review
-            agentFn = () => runSddReview(name, bctx);
+            // review — pass prUrl from implement step (R14)
+            agentFn = () => runSddReview(name, bctx, tracker.steps.implement.prUrl);
           }
 
           const jobId = await launch(jobType, chatId, agentFn, { messageThreadId: threadId });
@@ -260,6 +274,81 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
           log.error("SDD job launch error", { error: String(error), action, name });
           await updateStep(chatId, threadId, phase, { status: "failed" });
           await ctx.reply(`Erreur lors du lancement du job ${jobType}.`, bctx.threadOpts(ctx));
+        }
+        break;
+      }
+
+      case "merge_ask": {
+        // R9: show confirmation with PR number if prUrl available
+        const prUrl = tracker.steps.implement.prUrl;
+        if (!prUrl) {
+          await ctx.reply("PR URL introuvable, mergez manuellement.", bctx.threadOpts(ctx));
+          break;
+        }
+        const prNumber = extractPrNumber(prUrl);
+        if (!prNumber) {
+          await ctx.reply("PR URL invalide, mergez manuellement.", bctx.threadOpts(ctx));
+          break;
+        }
+        const confirmKb = new InlineKeyboard()
+          .text("Confirmer le merge", `sdd_merge_ok:${name}`)
+          .text("Annuler", `sdd_merge_no:${name}`);
+        await ctx.reply(`Confirmer le merge de PR #${prNumber} en squash ?`, {
+          ...bctx.threadOpts(ctx),
+          reply_markup: confirmKb,
+        });
+        break;
+      }
+
+      case "merge_no": {
+        // R10: edit message and clear keyboard
+        try {
+          await ctx.editMessageText("Merge annule.");
+        } catch {
+          await ctx.reply("Merge annule.", bctx.threadOpts(ctx));
+        }
+        break;
+      }
+
+      case "merge_ok": {
+        // R11: guard — GITHUB_REPO must be configured
+        const githubRepo = getConfig().githubRepo;
+        if (!githubRepo) {
+          await ctx.reply("GITHUB_REPO non configure.", bctx.threadOpts(ctx));
+          break;
+        }
+        const prUrlForMerge = tracker.steps.implement.prUrl;
+        if (!prUrlForMerge) {
+          await ctx.reply("PR URL introuvable, mergez manuellement.", bctx.threadOpts(ctx));
+          break;
+        }
+        const prNumForMerge = extractPrNumber(prUrlForMerge);
+        if (!prNumForMerge) {
+          await ctx.reply("PR URL invalide, mergez manuellement.", bctx.threadOpts(ctx));
+          break;
+        }
+        // R12: spawnSync gh pr merge
+        const mergeResult = spawnSync([
+          "gh",
+          "pr",
+          "merge",
+          prNumForMerge,
+          "--squash",
+          "--delete-branch",
+          "-R",
+          githubRepo,
+        ]);
+        if (mergeResult.exitCode === 0) {
+          await ctx.reply(
+            `PR #${prNumForMerge} mergee en squash et branche supprimee.`,
+            bctx.threadOpts(ctx),
+          );
+        } else {
+          const stderr = new TextDecoder()
+            .decode(mergeResult.stderr ?? new Uint8Array())
+            .trim()
+            .substring(0, 200);
+          await ctx.reply(`Erreur merge : ${stderr}`, bctx.threadOpts(ctx));
         }
         break;
       }

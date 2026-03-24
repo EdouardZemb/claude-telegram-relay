@@ -7,10 +7,10 @@ import {
   formatStatusBar,
   getTracker,
   initPipelineTracker,
-  toPipelineName,
-  updateStep,
   type PipelineTracker,
   type SddPhase,
+  toPipelineName,
+  updateStep,
 } from "../../src/pipeline-tracker.ts";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-pipeline-tracker");
@@ -383,6 +383,59 @@ describe("pipeline-tracker", () => {
       expect(content).not.toContain("from './agent-schemas");
       expect(content).not.toContain('from "./pipeline-state');
       expect(content).not.toContain("from './pipeline-state");
+    });
+  });
+
+  // ── VC1, VC2: prUrl field ──────────────────────────────────
+
+  describe("prUrl field (VC1, VC2)", () => {
+    it("VC1: updateStep accepts prUrl field and persists it in memory", async () => {
+      await createPipeline(12345, undefined, "test");
+      await updateStep(12345, undefined, "implement", {
+        prUrl: "https://github.com/owner/repo/pull/42",
+      });
+      const tracker = await getTracker(12345, undefined);
+      expect(tracker!.steps.implement.prUrl).toBe("https://github.com/owner/repo/pull/42");
+    });
+
+    it("VC2: prUrl field persists to disk and survives reload", async () => {
+      await createPipeline(12345, undefined, "test");
+      await updateStep(12345, undefined, "implement", {
+        prUrl: "https://github.com/owner/repo/pull/42",
+      });
+
+      // Clear in-memory and reload from disk
+      _clearForTests();
+      const tracker = await getTracker(12345, undefined);
+      expect(tracker!.steps.implement.prUrl).toBe("https://github.com/owner/repo/pull/42");
+    });
+
+    it("prUrl is optional — existing trackers without it still load", async () => {
+      const entries = [
+        {
+          key: "12345:main",
+          tracker: {
+            chatId: 12345,
+            name: "old-pipeline",
+            steps: {
+              explore: { phase: "explore", status: "pending" },
+              discuss: { phase: "discuss", status: "pending" },
+              spec: { phase: "spec", status: "pending" },
+              challenge: { phase: "challenge", status: "pending" },
+              implement: { phase: "implement", status: "ok" },
+              review: { phase: "review", status: "pending" },
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      ];
+      await writeFile(PIPELINES_FILE, JSON.stringify(entries));
+      _clearForTests();
+
+      const tracker = await getTracker(12345, undefined);
+      expect(tracker).not.toBeNull();
+      expect(tracker!.steps.implement.prUrl).toBeUndefined();
     });
   });
 

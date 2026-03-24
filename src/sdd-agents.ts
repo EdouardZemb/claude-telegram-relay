@@ -5,6 +5,7 @@
  * Imports restricted to agent.ts, conversation-handoff.ts, logger.ts (R13).
  */
 
+import { spawnSync } from "bun";
 import { writeFile as _writeFileDefault, mkdir, readFile } from "fs/promises";
 import { dirname, join } from "path";
 import { spawnClaude } from "./agent.ts";
@@ -31,6 +32,24 @@ export function setWriteFileHook(
 function writeFile(path: string, content: string): Promise<void> {
   if (_writeFileHook) return _writeFileHook(path, content);
   return _writeFileDefault(path, content);
+}
+
+/**
+ * Optional test hook: replace spawnSync calls for testing.
+ * In production this is undefined and the real spawnSync is used.
+ */
+let _spawnSyncHook: ((args: string[]) => { exitCode: number | null }) | undefined;
+
+/** @internal — for tests only */
+export function setSpawnSyncHook(
+  fn: ((args: string[]) => { exitCode: number | null }) | undefined,
+): void {
+  _spawnSyncHook = fn;
+}
+
+function execSpawnSync(args: string[]): { exitCode: number | null } {
+  if (_spawnSyncHook) return _spawnSyncHook(args);
+  return spawnSync(args);
 }
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
@@ -320,10 +339,15 @@ export async function runSddImplement(name: string, bctx: BotContext): Promise<s
       return `SDD_IMPLEMENT_FAILED: ${error.substring(0, 500)}`;
     }
 
-    // Try to extract PR number from output
+    // Extract full PR URL from agent output (F-DA-1: include URL for later extraction by extractPrUrl)
+    const prUrlFromStdout = result.stdout.match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/)?.[0];
+    if (prUrlFromStdout) {
+      return `SDD_IMPLEMENT_OK: ${name} — ${prUrlFromStdout}`;
+    }
+
+    // Fallback: try to extract PR number only
     const prMatch = result.stdout.match(/PR\s*#?(\d+)/i);
     const prInfo = prMatch ? `PR#${prMatch[1]}` : "PR created";
-
     return `SDD_IMPLEMENT_OK: ${name} — ${prInfo}`;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -333,7 +357,11 @@ export async function runSddImplement(name: string, bctx: BotContext): Promise<s
 }
 
 /** Run the SDD Review phase. Reviewer agent examines implementation. */
-export async function runSddReview(name: string, bctx: BotContext): Promise<string> {
+export async function runSddReview(
+  name: string,
+  bctx: BotContext,
+  prUrl?: string,
+): Promise<string> {
   try {
     const agentDef = await readAgentFile("reviewer.md");
     const specRef = `docs/specs/SPEC-${name}.md`;
@@ -349,7 +377,11 @@ export async function runSddReview(name: string, bctx: BotContext): Promise<stri
       `- Lis la spec ${specRef} et le rapport d'implementation ${implRef}`,
       "- Verifie la conformite de l'implementation avec la spec",
       "- Verifie que les V-criteres sont couverts par des tests",
-      "- Produis un rapport de review",
+      "- Produis un rapport de review complet",
+      "- A la fin de ton rapport, ecris sur une ligne seule :",
+      "  VERDICT: APPROVED",
+      "  ou VERDICT: CHANGES_REQUESTED",
+      "  (APPROVED si l'implementation est conforme, CHANGES_REQUESTED si des corrections sont requises)",
     ].join("\n");
 
     const result = await spawnClaude({
@@ -365,7 +397,43 @@ export async function runSddReview(name: string, bctx: BotContext): Promise<stri
       return `SDD_REVIEW_FAILED: ${error.substring(0, 500)}`;
     }
 
-    return `SDD_REVIEW_OK: ${name} — review complete`;
+    // Extract verdict — use last occurrence to avoid false positives from quoted criteria (F-EC-1)
+    const verdictMatches = [...result.stdout.matchAll(/VERDICT:\s*(APPROVED|CHANGES_REQUESTED)/gi)];
+    const lastMatch = verdictMatches.at(-1);
+    const extractedVerdict = lastMatch ? lastMatch[1].toUpperCase() : null;
+    log.info("runSddReview verdict extracted", { name, extractedVerdict });
+
+    // Default to CHANGES_REQUESTED if no verdict found (conservative)
+    const verdict = extractedVerdict === "APPROVED" ? "APPROVED" : "CHANGES_REQUESTED";
+
+    // If APPROVED and prUrl provided: call gh pr review --approve (R7)
+    if (verdict === "APPROVED" && prUrl) {
+      const prNumber = prUrl.match(/\/pull\/(\d+)/)?.[1];
+      const githubRepo = process.env.GITHUB_REPO || "";
+      if (prNumber && githubRepo) {
+        const reviewResult = execSpawnSync([
+          "gh",
+          "pr",
+          "review",
+          prNumber,
+          "--approve",
+          "--body",
+          "Approuve par reviewer SDD",
+          "-R",
+          githubRepo,
+        ]);
+        if (reviewResult.exitCode !== 0) {
+          log.error("gh pr review --approve failed", {
+            name,
+            prNumber,
+            exitCode: reviewResult.exitCode,
+          });
+          // R7: log but continue — verdict Telegram remains APPROVED
+        }
+      }
+    }
+
+    return `SDD_REVIEW_${verdict}: ${name}`;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error("runSddReview exception", { name, error: msg });

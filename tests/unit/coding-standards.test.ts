@@ -142,6 +142,9 @@ describe("Coding standards — S2: no direct process.env", () => {
     // Memory: timezone for context formatting
     "memory/core.ts": "USER_TIMEZONE — memory timestamp formatting",
     "memory/classification.ts": "USER_TIMEZONE — classification timestamp formatting",
+    // SDD agents: GITHUB_REPO for gh CLI calls (consistent with agent.ts pattern)
+    "sdd-agents.ts":
+      "GITHUB_REPO — GitHub CLI pr review call (no full config needed in agent context)",
   };
 
   const files = getAllSourceFiles().filter((f) => {

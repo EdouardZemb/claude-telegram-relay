@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdir, rm } from "fs/promises";
+import { join } from "path";
 import {
   _resetForTests,
   cancel,
@@ -13,6 +15,11 @@ import {
   launch,
   list,
 } from "../../src/job-manager.ts";
+import {
+  _clearForTests as _clearTrackerForTests,
+  createPipeline,
+  getTracker,
+} from "../../src/pipeline-tracker.ts";
 
 // Mock notification-queue to avoid side effects
 const _originalEnqueue = await import("../../src/notification-queue.ts");
@@ -357,6 +364,7 @@ describe("job-manager", () => {
 
   describe("initJobManager", () => {
     it("accepts a bot instance without error", () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       const fakeBotInstance = { api: { sendMessage: async () => {} } } as any;
       expect(() => initJobManager(fakeBotInstance)).not.toThrow();
     });
@@ -377,6 +385,138 @@ describe("job-manager", () => {
 
       const job = await get(id);
       expect(job!.messageThreadId).toBeUndefined();
+    });
+  });
+
+  describe("SDD pipeline (VC3-VC5)", () => {
+    const baseJob: Job = {
+      id: "sdd12345",
+      type: "sdd-review:my-feature",
+      status: "completed",
+      chatId: 123,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      result: null,
+      error: null,
+    };
+
+    it("VC3: extended regex matches APPROVED and CHANGES_REQUESTED", () => {
+      // Test indirectly via getCompletionKeyboard: APPROVED adds merge button
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_APPROVED: my-feature",
+      });
+      expect(kb).toBeDefined();
+      const allData = kb!.inline_keyboard
+        .flat()
+        .map((b) => (b as { callback_data?: string }).callback_data)
+        .filter(Boolean);
+      expect(allData).toContain("sdd_merge_ask:my-feature");
+    });
+
+    it("VC3 non-regression: existing GO/OK tokens still match", () => {
+      // implement phase with OK verdict should still have Review/Corriger buttons
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        type: "sdd-implement:my-feature",
+        result: "SDD_IMPLEMENT_OK: my-feature — PR created",
+      });
+      expect(kb).toBeDefined();
+    });
+
+    it("VC4: getCompletionKeyboard for sdd-review APPROVED returns sdd_merge_ask button", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_APPROVED: my-feature",
+      });
+      expect(kb).toBeDefined();
+      const allData = kb!.inline_keyboard
+        .flat()
+        .map((b) => (b as { callback_data?: string }).callback_data)
+        .filter(Boolean);
+      expect(allData).toContain("sdd_merge_ask:my-feature");
+    });
+
+    it("VC5: getCompletionKeyboard for sdd-review CHANGES_REQUESTED has no merge button", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_CHANGES_REQUESTED: my-feature",
+      });
+      const allData = (kb?.inline_keyboard ?? [])
+        .flat()
+        .map((b) => (b as { callback_data?: string }).callback_data)
+        .filter(Boolean);
+      expect(allData).not.toContain("sdd_merge_ask:my-feature");
+    });
+  });
+
+  describe("SDD prUrl persistence (VC6)", () => {
+    const TEST_RELAY_DIR_VC6 = join(import.meta.dir, "..", ".test-jm-relay-vc6");
+    const origRelayDir = process.env.RELAY_DIR;
+
+    beforeEach(async () => {
+      process.env.RELAY_DIR = TEST_RELAY_DIR_VC6;
+      _resetForTests();
+      _clearTrackerForTests();
+      try {
+        await rm(TEST_RELAY_DIR_VC6, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+      await mkdir(TEST_RELAY_DIR_VC6, { recursive: true });
+      await createPipeline(12345, 678, "my-feature");
+    });
+
+    afterEach(async () => {
+      process.env.RELAY_DIR = origRelayDir;
+      _resetForTests();
+      _clearTrackerForTests();
+      try {
+        await rm(TEST_RELAY_DIR_VC6, { recursive: true, force: true });
+      } catch {
+        // cleanup best effort
+      }
+    });
+
+    it("VC6: sendJobCompletionNotification persists prUrl for sdd-implement jobs", async () => {
+      const fakeBotInstance = {
+        api: {
+          sendMessage: async () => {},
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+      initJobManager(fakeBotInstance);
+
+      await launch(
+        "sdd-implement:my-feature",
+        12345,
+        async () => "SDD_IMPLEMENT_OK: my-feature — https://github.com/owner/repo/pull/42",
+        { messageThreadId: 678 },
+      );
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      const tracker = await getTracker(12345, 678);
+      expect(tracker).not.toBeNull();
+      expect(tracker!.steps.implement.prUrl).toBe("https://github.com/owner/repo/pull/42");
+    });
+
+    it("VC6: no prUrl persistence for non-sdd-implement jobs", async () => {
+      const fakeBotInstance = {
+        api: { sendMessage: async () => {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+      initJobManager(fakeBotInstance);
+
+      await launch("exec", 12345, async () => "done — https://github.com/owner/repo/pull/99", {
+        messageThreadId: 678,
+      });
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      // implement prUrl should remain undefined (no-op for non-sdd-implement jobs)
+      const tracker = await getTracker(12345, 678);
+      expect(tracker!.steps.implement.prUrl).toBeUndefined();
     });
   });
 
@@ -494,13 +634,16 @@ describe("job-manager", () => {
 
   describe("direct notification", () => {
     it("sends to originating chat on completion when bot is initialized", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       let sentMessage: any = null;
       const fakeBotInstance = {
         api: {
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
           sendMessage: async (chatId: any, text: string, opts?: any) => {
             sentMessage = { chatId, text, opts };
           },
         },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
       } as any;
 
       initJobManager(fakeBotInstance);
@@ -521,13 +664,16 @@ describe("job-manager", () => {
     });
 
     it("sends error notification for failed jobs", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
       let sentMessage: any = null;
       const fakeBotInstance = {
         api: {
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
           sendMessage: async (chatId: any, text: string, opts?: any) => {
             sentMessage = { chatId, text, opts };
           },
         },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
       } as any;
 
       initJobManager(fakeBotInstance);
