@@ -19,8 +19,23 @@ import { type Task, updateTaskStatus } from "./tasks.ts";
 
 const log = createLogger("agent");
 
-const CLAUDE_PATH = getConfig().claudePath || "claude";
-const PROJECT_DIR = getConfig().projectDir || process.cwd();
+// Lazy getters — getConfig() must not be called at module top-level
+// because it throws when required env vars are absent (e.g. in CI tests).
+// try/catch: graceful fallback when required env vars are missing (test env).
+function getClaudePath(): string {
+  try {
+    return getConfig().claudePath || "claude";
+  } catch {
+    return "claude";
+  }
+}
+function getProjectDir(): string {
+  try {
+    return getConfig().projectDir || process.cwd();
+  } catch {
+    return process.cwd();
+  }
+}
 
 // ── SpawnClaude — Centralized CLI spawn (S28-T1) ─────────────
 
@@ -128,7 +143,7 @@ export async function spawnClaudeWithCascade(
  * that handles cascade routing.
  */
 async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaudeResult> {
-  const args: string[] = [CLAUDE_PATH];
+  const args: string[] = [getClaudePath()];
 
   // System prompt (--append-system-prompt) before task prompt
   if (options.systemPrompt) {
@@ -192,7 +207,7 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
     const proc = spawn(args, {
       stdout: "pipe",
       stderr: "pipe",
-      cwd: options.cwd || PROJECT_DIR,
+      cwd: options.cwd || getProjectDir(),
       env: { ...process.env },
     });
 
@@ -227,7 +242,13 @@ export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnCla
   return spawnClaudeCore(options);
 }
 
-const GITHUB_REPO = getConfig().githubRepo || "EdouardZemb/claude-telegram-relay";
+function getGithubRepo(): string {
+  try {
+    return getConfig().githubRepo || "EdouardZemb/claude-telegram-relay";
+  } catch {
+    return "EdouardZemb/claude-telegram-relay";
+  }
+}
 const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 
 export interface AgentResult {
@@ -243,7 +264,7 @@ export interface AgentResult {
 }
 
 function git(...args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const result = spawnSync(["git", ...args], { cwd: PROJECT_DIR });
+  const result = spawnSync(["git", ...args], { cwd: getProjectDir() });
   return {
     ok: result.exitCode === 0,
     stdout: new TextDecoder().decode(result.stdout).trim(),
@@ -352,8 +373,8 @@ async function waitForCIChecks(
 
   while (Date.now() - startTime < maxWaitMs) {
     const result = spawnSync(
-      ["gh", "pr", "checks", branchName, "-R", GITHUB_REPO, "--json", "name,state,bucket"],
-      { cwd: PROJECT_DIR },
+      ["gh", "pr", "checks", branchName, "-R", getGithubRepo(), "--json", "name,state,bucket"],
+      { cwd: getProjectDir() },
     );
     const output = new TextDecoder().decode(result.stdout).trim();
 
@@ -493,7 +514,7 @@ export async function executeTask(
       git("add", "-A");
 
       // Pre-commit validation: typecheck + unit tests (R1, R2)
-      const validation = runPreCommitValidation(PROJECT_DIR);
+      const validation = runPreCommitValidation(getProjectDir());
       if (!validation.passed) {
         log.error("Pre-commit validation failed, aborting commit", { errors: validation.errors });
         git("checkout", "master");
@@ -534,7 +555,7 @@ export async function executeTask(
           "pr",
           "create",
           "-R",
-          GITHUB_REPO,
+          getGithubRepo(),
           "--title",
           safeTitle,
           "--body",
@@ -544,7 +565,7 @@ export async function executeTask(
           "--head",
           branchName,
         ],
-        { cwd: PROJECT_DIR },
+        { cwd: getProjectDir() },
       );
       const prOutput = new TextDecoder().decode(prResult.stdout).trim();
       const prStderr = new TextDecoder().decode(prResult.stderr).trim();
