@@ -57,6 +57,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
+| `sdd-task-sync.ts` | SDD-backlog sync: PHASE_TO_TASK_STATUS mapping, syncTaskStatusForPhase best-effort sync (no downgrade, errors logged) |
 | `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases, categories |
 | `inline-menus.ts` | Progressive inline menu system: category grouping, dynamic keyboards, onboarding, quality/notify navigation |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
