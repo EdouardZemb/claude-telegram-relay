@@ -29,8 +29,10 @@ Thumbs.db
 .vscode/
 *.swp
 
-# Claude Code
-.claude/
+# Claude Code — ignore tout sauf agents et skills
+.claude/*
+!.claude/agents/
+!.claude/skills/
 
 # SSH keys
 deploy_key*
