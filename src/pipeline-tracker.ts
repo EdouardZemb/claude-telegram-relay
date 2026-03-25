@@ -282,6 +282,69 @@ export function formatStatusBar(tracker: PipelineTracker): string {
   return lines.join("\n");
 }
 
+// ── Conversational phases eligible for prompt context injection ──
+
+/** Phases where the user is actively conversing and Claude needs pipeline awareness */
+const CONVERSATIONAL_PHASES: Set<SddPhase> = new Set(["explore", "discuss"]);
+
+/**
+ * Format pipeline context for injection into the system prompt.
+ * Returns a concise text block when a conversational phase (explore, discuss) is active.
+ * Returns empty string when:
+ * - tracker is null (no active pipeline)
+ * - no conversational phase is currently running
+ *
+ * Designed for Option C (enrichissement zz-messages.ts): the output is concatenated
+ * with memoryContext before being passed to buildPrompt().
+ */
+export function formatPipelineContextForPrompt(tracker: PipelineTracker | null): string {
+  if (!tracker) return "";
+
+  // Find the currently running conversational phase
+  let activePhase: SddPhase | null = null;
+  for (const phase of ALL_PHASES) {
+    if (tracker.steps[phase].status === "running" && CONVERSATIONAL_PHASES.has(phase)) {
+      activePhase = phase;
+      break;
+    }
+  }
+
+  if (!activePhase) return "";
+
+  const lines: string[] = [];
+  lines.push(`PIPELINE SDD ACTIF: "${tracker.name}"`);
+  lines.push(`Phase en cours: ${PHASE_LABELS[activePhase]}`);
+
+  // List completed artifacts
+  const completedArtifacts: string[] = [];
+  for (const phase of ALL_PHASES) {
+    const step = tracker.steps[phase];
+    if (step.status === "ok" && step.artifact) {
+      const shortArtifact = step.artifact.split("/").pop() || step.artifact;
+      const summaryPart = step.summary ? ` (${step.summary})` : "";
+      completedArtifacts.push(`${PHASE_LABELS[phase]}: ${shortArtifact}${summaryPart}`);
+    }
+  }
+  if (completedArtifacts.length > 0) {
+    lines.push(`Artefacts: ${completedArtifacts.join(", ")}`);
+  }
+
+  // Phase-specific guidance
+  if (activePhase === "discuss") {
+    lines.push(
+      "Objectif: guider la discussion vers des decisions formalisables en spec. " +
+        "Quand la conversation converge, utilise le format Decisions: / Prochaine etape:",
+    );
+  } else if (activePhase === "explore") {
+    lines.push(
+      "Objectif: explorer le sujet en profondeur avant de formaliser. " +
+        "Identifier les alternatives, contraintes et risques.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Initialize the pipeline tracker by pre-loading from disk.
  * Call once at startup (pattern: initSessions in conversation-session.ts).

@@ -27,6 +27,7 @@ import {
   processMemoryIntents,
   type ThoughtClassification,
 } from "../memory.ts";
+import { formatPipelineContextForPrompt, getTracker } from "../pipeline-tracker.ts";
 import { transcribe } from "../transcribe.ts";
 import {
   buildSyntheticUpdate,
@@ -249,12 +250,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     // Conversation fallback with action awareness
     const actionContext = `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`;
 
+    // Pipeline context injection: enrich prompt with SDD pipeline state when active
+    const chatId = ctx.chat?.id || 0;
+    const tracker = await getTracker(chatId, threadId);
+    const pipelineContext = formatPipelineContextForPrompt(tracker);
+
     const promptText = options.promptPrefix ? `${options.promptPrefix}${input}` : input;
     const documentContext = formatDocumentContext(docResults) || undefined;
+    const enrichedMemoryContext = pipelineContext
+      ? pipelineContext + "\n" + memoryContext + actionContext
+      : memoryContext + actionContext;
     const enrichedPrompt = bctx.buildPrompt(
       promptText,
       relevantContext,
-      memoryContext + actionContext,
+      enrichedMemoryContext,
       recentMessages,
       topicName,
       dynProfile,
@@ -273,9 +282,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     // SDD convergence detection: if Claude signals decisions, offer SDD keyboard (R10, R11)
     const convergence = detectConvergenceInResponse(finalResponse);
     if (convergence) {
-      const { getTracker } = await import("../pipeline-tracker.ts");
-      const chatId = ctx.chat?.id || 0;
-      const tracker = await getTracker(chatId, threadId);
       if (tracker) {
         const keyboard = buildSddKeyboard("discuss", tracker.name);
         if (keyboard) {

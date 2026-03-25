@@ -20,7 +20,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/help.ts` | Composer: /help (interactive category menu + menu_ callbacks), /workflow, /status, /monitor |
 | `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start (onboarding + task start), /done + task_ callbacks |
 | `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
-| `commands/quality.ts` | Composer: /metrics (+ quality nav keyboard), /retro, /alerts, /cost + retro callbacks |
+| `commands/quality.ts` | Composer: /metrics (+ quality nav keyboard), /retro, /patterns, /alerts, /cost + retro callbacks |
 | `commands/profile.ts` | Composer: /profile, /notify (inline prefs keyboard + notify_ callbacks) |
 | `commands/project.ts` | Composer: /projects, /project |
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
@@ -29,7 +29,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/command-router.ts` | Routing helpers: actionVerb, buildClarificationQuestion, routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate |
 | `commands/sdd-flow.ts` | Composer: SDD InlineKeyboard callbacks (sdd_ prefix), contextual keyboard construction, convergence detection |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
-| `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |
+| `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing and SDD pipeline context injection |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
@@ -54,7 +54,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `tts.ts` | Text-to-speech via Piper (local) |
 | `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence, batch result parsing, progress messaging |
 | `feature-flags.ts` | Feature flags: file-based toggle, hot-reload |
-| `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
+| `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting, pipeline context injection for prompts |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
 | `sdd-task-sync.ts` | SDD-backlog sync: PHASE_TO_TASK_STATUS mapping, syncTaskStatusForPhase best-effort sync (no downgrade, errors logged) |
@@ -132,7 +132,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    50 TypeScript modules (core logic)
+src/                    51 TypeScript modules (core logic)
   commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
 dashboard/              Kanban board (server.ts + index.html)
@@ -140,7 +140,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1975 tests (unit + integration + E2E)
+tests/                  2029 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup, per-file coverage check
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -168,7 +168,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1975 tests, all must pass before merge)
+- Tests: `bun test` (2029 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -176,7 +176,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
-- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: zz-messages.ts (~880, includes inlined command-router)
+- File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently all files under threshold
 - Coding standards (enforced in `tests/unit/coding-standards.test.ts` and CI): S1 no direct `console` calls (use createLogger), S2 no direct `process.env` (use getConfig), S3 LOC threshold 800, S4 architectural boundaries, S5 barrel convention, S6 createLogger mandatory for modules with logic, S7 no circular imports (DFS detection), S8 per-file coverage minimum 30% (`scripts/check-coverage.sh`), S9 process.env allowlist size cap (max 20). Details: `docs/specs/SPEC-enforcement-standards-agents.md`
 
 ## Setup
