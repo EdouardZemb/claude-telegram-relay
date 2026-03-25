@@ -82,6 +82,9 @@ jobs:
             echo "Coverage OK: ${LINES}% >= 60%"
           fi
 
+      - name: Per-file coverage check
+        run: bash scripts/check-coverage.sh
+
   e2e:
     needs: [check]
     runs-on: [self-hosted, linux]

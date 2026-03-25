@@ -121,7 +121,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 - `claude-heartbeat` — Autonomous pulse every 10min (alert checks, memory archival, morning digest)
 - `claude-system-alerts` — System health monitoring (every 15min)
 
-**GitHub Actions** (self-hosted runner): `ci.yml` (PR checks: typecheck, tests, doc freshness, E2E) and `deploy.yml` (master: git pull, pm2 restart, smoke test, auto-rollback).
+**GitHub Actions** (self-hosted runner): `ci.yml` (PR checks: typecheck, tests, doc freshness, per-file coverage, E2E) and `deploy.yml` (master: git pull, pm2 restart, smoke test, auto-rollback).
 
 **Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards.
 
@@ -136,8 +136,8 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1820 tests (unit + integration + E2E)
-scripts/                Deployment, token rotation, setup
+tests/                  1910 tests (unit + integration + E2E)
+scripts/                Deployment, token rotation, setup, per-file coverage check
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
 docs/explorations/      Exploration reports (EXPLORE-{name}.md)
@@ -164,7 +164,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1820 tests, all must pass before merge)
+- Tests: `bun test` (1910 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
@@ -173,6 +173,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged
 - File size guideline: source files > 800 LOC (excluding barrels and tests) are candidates for refactoring into sub-modules. Currently above threshold: zz-messages.ts (~880, includes inlined command-router)
+- Coding standards (enforced in `tests/unit/coding-standards.test.ts` and CI): S1 no direct `console` calls (use createLogger), S2 no direct `process.env` (use getConfig), S3 LOC threshold 800, S4 architectural boundaries, S5 barrel convention, S6 createLogger mandatory for modules with logic, S7 no circular imports (DFS detection), S8 per-file coverage minimum 30% (`scripts/check-coverage.sh`), S9 process.env allowlist size cap (max 20). Details: `docs/specs/SPEC-enforcement-standards-agents.md`
 
 ## Setup
 

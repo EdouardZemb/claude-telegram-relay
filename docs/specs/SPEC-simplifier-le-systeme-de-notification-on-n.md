@@ -1,106 +1,91 @@
 ---
 name: simplifier-le-systeme-de-notification-on-n
-description: Suppression des mécanismes de notification inactifs (quiet hours, morning digest, batching avec seuil et persistence JSON) du système S26.
-status: draft
-created_at: "2026-03-24"
-exploration: docs/explorations/EXPLORE-simplifier-le-systeme-de-notification-on-n-utilise-pas-le-digest-ni-les-quiet-hours.md
+description: Suppression du code mort dans notification-queue.ts (batching, quiet hours, digest du matin, persistance JSON) — envoi immédiat systématique, interface enqueue() inchangée
+status: ready
+phase: 1-implement
+exploration: docs/explorations/EXPLORE-simplifier-le-systeme-de-notification-on-n-2.md
+generated_at: "2026-03-24"
 ---
 
-# SPEC — Simplifier le système de notification (suppression digest, quiet hours, batching)
+# SPEC — Simplifier le système de notification
 
-## 1. Objectif
+## Section 1 — Objectif
 
-Supprimer les mécanismes de notification inactifs en production (quiet hours, morning digest, batching avec seuil et persistence JSON de queue) du système S26. Le comportement observable reste inchangé : `enqueue()` envoie immédiatement les notifications autorisées. Réduction estimée : ~200-250 LOC actives supprimées, complexité architecturale réduite.
-
-**Pourquoi maintenant** : la config production (`quietStart: 0, quietEnd: 0`, `batchThreshold: 100`) neutralise explicitement ces features ; le service `claude-heartbeat` (seul appelant de `flushMorningDigest`) est arrêté. Le code est factuellement inactif mais crée une illusion de fonctionnalité.
+Supprimer ~220 LOC de code mort dans `src/notification-queue.ts` (batching par timer, quiet hours, digest du matin, persistance JSON de la queue), en remplaçant `enqueue()` par un envoi immédiat via `sendStandalone()`. L'interface publique `enqueue()` reste inchangée pour les 9 callsites existants. Le principe directeur est YAGNI : la configuration production (`quietStart=0`, `quietEnd=0`, `batchThreshold=100`) confirme que ces features ne s'activent jamais.
 
 ---
 
-## 2. Règles métier
+## Section 2 — Règles métier
 
 | # | Règle | Source | Exemple |
 |---|-------|--------|---------|
-| R1 | L'interface `enqueue(item: Omit<NotificationItem, "id"\|"createdAt">): Promise<void>` est conservée identique — 9 callsites inchangés dans 8 fichiers | Exploration §3 — contrainte callsites | `enqueue({type:"task", severity:"normal", message:"..."})` |
-| R2 | Si `isTypeEnabled(type) === false`, la notification est silencieusement ignorée (skip) | Comportement existant à préserver | type "idea" désactivé → aucun envoi |
-| R3 | Tous les autres cas (y compris `severity === "critical"` et types en mode `immediate`) → envoi immédiat via `sendStandalone()` | Exploration §5 — nouveau comportement | notification task normale → envoi direct |
-| R4 | `getInlineKeyboard(item)` est conservé tel quel — produit les boutons inline par type | Exploration §3 — actif réutilisable | task backlog → boutons "Demarrer" + "Voir details" |
-| R5 | `consumeMcpPending()` est conservé — lit `mcp-pending-notifications.json` et appelle `enqueue()` pour chaque item valide | Exploration §3 contrainte | bridge MCP → notif Telegram |
-| R6 | `startQueue(bot)` est conservé mais simplifié : initialise le bot, lance un timer périodique pour `consumeMcpPending()` uniquement (plus de flush de queue, plus de loadQueue) | Exploration §6 Q1 | démarrage relay → timer MCP check actif |
-| R7 | `isTypeEnabled()` et `isImmediate()` sont conservés dans `notification-prefs.ts` (utilisés par `/notify on/off/immediate`) | Exploration §3 — actifs réutilisables | |
-| R8 | `NotificationPrefs` est réduit : supprimer `quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold` — ne conserver que `types: Record<NotificationType, TypePrefs>` | Exploration §6 — à supprimer | |
-| R9 | `/notify` conserve les sous-commandes `status`, `on TYPE`, `off TYPE`, `TYPE immediate` — supprime `quiet Xh-Yh` et `TYPE batch` (concept de batching disparu) | Exploration §6 | `/notify task off` → fonctionne ; `/notify quiet 22h-8h` → handler absent |
-| R10 | `formatPrefs()` est adapté : affiche uniquement la liste des types (actif/immédiat/désactivé), sans section quiet hours ni batch | Dérivé R8 + R9 | `/notify status` → "PREFERENCES NOTIFICATIONS\nTypes :\n  task : immediat..." |
-| R11 | Fonctions supprimées de `notification-queue.ts` : `formatDigest`, `formatMorningDigest`, `flushMorningDigest`, `flush`, `sendDigest`, `getQueue`, `loadQueue`, `saveQueue`, `TYPE_PRIORITY`, `TYPE_LABELS` ; constante `QUEUE_FILE` supprimée ; état mutable `queue[]` supprimé | Exploration §6 — à supprimer | |
-| R12 | Fonctions supprimées de `notification-prefs.ts` : `isQuietHours` | Exploration §6 — à supprimer | |
-| R13 | `heartbeat.ts` adapté : supprimer le bloc "Morning digest flush" (lignes 604-614), les imports `flushMorningDigest`, `isQuietHours`, `loadPrefs` (usage digest), `getQueue`, `loadQueue` ; conserver `enqueue` (utilisé pour alertes aux lignes 625 et 667) | Exploration §3 #3 | |
-| R14 | `relay.ts` adapté : supprimer l'appel séparé `await loadPrefs()` (ligne 152) — déjà appelé dans `startQueue` | Exploration §3 #4 | |
+| R1 | `enqueue()` envoie immédiatement via `sendStandalone()` si le type est activé — sans batching, sans quiet hours, sans persistance queue | Config prod : batchThreshold=100 jamais atteint ; EXPLORE-2 §4 Option B | `enqueue({type:"task",...})` → `sendStandalone()` |
+| R2 | `enqueue()` ignore silencieusement les types désactivés (`isTypeEnabled()` = false) | Comportement existant conservé — L342-343 notification-queue.ts | `types.idea.enabled=false` → return sans envoi |
+| R3 | L'interface publique `enqueue(item: Omit<NotificationItem, "id"\|"createdAt">)` reste inchangée — les 9 callsites ne sont pas modifiés | EXPLORE-2 §6 "Les callsites enqueue() restent inchangés" | tasks.ts, memory-cmds.ts, job-manager.ts, memory/core.ts, memory/classification.ts, heartbeat.ts |
+| R4 | `consumeMcpPending()` est conservée et appelle `sendStandalone()` directement pour chaque item pending (sans passer par la queue) | EXPLORE-2 §6 "conserver avec un timer dédié" | Lit `mcp-pending-notifications.json`, envoie chaque item, vide le fichier |
+| R5 | `startQueue()` démarre un timer de 60 s appelant uniquement `consumeMcpPending()` — plus de timer flush ni de logique quiet hours | EXPLORE-2 §6 "timer dédié minimal pour consumeMcpPending()" | `setInterval(consumeMcpPending, 60_000)` |
+| R6 | `TypePrefs` est simplifiée à `{ enabled: boolean }` — le champ `immediate` est supprimé ainsi que `isImmediate()` | Conséquence de R1 : tous les envois étant immédiats, `immediate` n'a plus d'effet | — |
+| R7 | `NotificationPrefs` perd `quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold` | Ces champs correspondent aux features supprimées (R1, R5) | Interface allégée |
+| R8 | La commande `/notify` expose uniquement : `status`, `on TYPE`, `off TYPE` — les sous-commandes `quiet`, `batch`, `immediate` sont supprimées | Conséquence de R6+R7 ; aucun utilisateur ne les utilise (config prod) | Help : "Usage: /notify [status\|on TYPE\|off TYPE]" |
+| R9 | `heartbeat.ts` supprime les 5 imports liés au digest/quiet (`flushMorningDigest`, `getQueue`, `isQuietHours`, `loadPrefs`, `loadQueue`) et la logique digest du matin (L609-616) | EXPLORE-2 §3 : service heartbeat non démarré en PM2 ; logique caduque après R1 | — |
+| R10 | `relay.ts` supprime l'appel redondant `loadPrefs()` (L147) — `startQueue()` l'appelle déjà | EXPLORE-2 §3 relay.ts : appel en double | — |
+| R11 | `config/notification-prefs.json` est réduit aux champs persistants : objet `types` (dict type→`{enabled}`) | Conséquence de R6+R7 | `{"types":{"task":{"enabled":true},...}}` |
 
 ---
 
-## 3. Données d'entrée
+## Section 3 — Données d'entrée
 
-| Source | Type | Accès | Champs |
-|--------|------|-------|--------|
-| Callsites `enqueue()` (8 fichiers) | `Omit<NotificationItem, "id"\|"createdAt">` | Appel direct fonction | `type: NotificationType`, `severity: "critical"\|"normal"`, `message: string`, `data?: { taskId?, taskStatus?, prUrl?, ideaId?, alertType? }` |
-| Fichier MCP bridge | JSON array `mcp-pending-notifications.json` | `consumeMcpPending()` via `readFile` | `type`, `severity`, `message`, `data`, `createdAt` |
-| Config prefs | JSON `config/notification-prefs.json` | `loadPrefs()` | `types: Record<NotificationType, TypePrefs>` (champs obsolètes ignorés au chargement) |
-| Commande `/notify` | string `ctx.match` | Handler Telegram | `"status"`, `"on TYPE"`, `"off TYPE"`, `"TYPE immediate"` |
-
----
-
-## 4. Données de sortie
-
-**Notification Telegram directe** :
-- Appel `bot.api.sendMessage(chatId, message, opts)` — immédiat à chaque `enqueue()` valide
-- `opts.reply_markup` = inline keyboard si `getInlineKeyboard(item)` retourne une valeur
-- `opts.message_thread_id` = threadId déterminé par `getThreadId(type)` si groupId configuré
-
-**Config prefs persistée** (après `/notify on/off/immediate`) :
-- Fichier `config/notification-prefs.json` — structure simplifiée :
-```json
-{
-  "types": {
-    "task":  { "enabled": true,  "immediate": false },
-    "pr":    { "enabled": true,  "immediate": false },
-    "idea":  { "enabled": true,  "immediate": false },
-    "alert": { "enabled": true,  "immediate": true  }
-  }
-}
-```
-
-**Réponse `/notify status`** :
-```
-PREFERENCES NOTIFICATIONS
-
-Types :
-  task : batch
-  pr : batch
-  idea : batch
-  alert : immediat
-```
-(Note : "batch" n'est plus qu'un label d'affichage indiquant que le type n'est pas en mode immédiat — les deux modes envoient maintenant immédiatement)
+| Source | Type | Accès | Champs utilisés |
+|--------|------|-------|-----------------|
+| Callsite `enqueue()` | `Omit<NotificationItem, "id"\|"createdAt">` | Paramètre fonction | `type`, `severity`, `message`, `data?` |
+| `config/notification-prefs.json` | JSON → `NotificationPrefs` | `loadPrefs()` au démarrage | `types[type].enabled` uniquement après simplification |
+| `mcp-pending-notifications.json` | JSON Array | `consumeMcpPending()` poll 60s | `type`, `severity`, `message`, `data`, `createdAt` |
+| Env vars | string | Process env | `TELEGRAM_GROUP_ID`, `TELEGRAM_USER_ID`, `SPRINT_THREAD_ID`, `DEV_THREAD_ID` |
 
 ---
 
-## 5. Fichiers concernés
+## Section 4 — Données de sortie
+
+**Sortie principale : envoi Telegram immédiat**
+
+```
+sendStandalone(fullItem)
+  → botInstance.api.sendMessage(chatId, message, { reply_markup?, message_thread_id? })
+```
+
+**Comportements de sortie :**
+- Type activé + botInstance présent → message Telegram envoyé avec boutons inline contextuels (`getInlineKeyboard()`)
+- Type désactivé → aucune sortie (return silencieux)
+- `botInstance` null (tests, avant `startQueue`) → return silencieux sans erreur
+- Erreur Telegram → `log.error`, pas de throw
+
+**Exemple de sortie pour `type="task"`, `taskStatus="in_progress"` :**
+```
+Message : "Tache T42 passee en review"
+Boutons  : [Terminer] [Voir details]
+Thread   : sprintThreadId (si groupe configuré)
+```
+
+---
+
+## Section 5 — Fichiers concernés
 
 | Fichier | Action | Raison |
 |---------|--------|--------|
-| `src/notification-queue.ts` | Modifier | Supprimer : `queue[]`, `QUEUE_FILE`, `loadQueue`, `saveQueue`, `flush`, `flushMorningDigest`, `formatDigest`, `formatMorningDigest`, `sendDigest`, `getQueue`, `TYPE_PRIORITY`, `TYPE_LABELS` ; Simplifier `enqueue` (always sendStandalone si non-disabled) ; Simplifier `startQueue` (timer MCP only, plus de loadQueue) |
-| `src/notification-prefs.ts` | Modifier | Supprimer : `isQuietHours`, champs `quietStart`/`quietEnd`/`batchIntervalMs`/`batchThreshold` dans `NotificationPrefs` et `DEFAULT_PREFS` ; Adapter `formatPrefs` (types only) |
-| `src/commands/profile.ts` | Modifier | Supprimer sous-commandes `/notify` : `quiet Xh-Yh` (handler + message d'aide) ; `TYPE batch` (handler) |
-| `src/heartbeat.ts` | Modifier | Supprimer bloc digest (lignes 604-614) + imports `flushMorningDigest`, `isQuietHours`, `loadPrefs`, `getQueue`, `loadQueue` |
-| `src/relay.ts` | Modifier | Supprimer l'appel séparé `await loadPrefs()` (ligne 152) et l'import `loadPrefs` si devenu inutilisé |
-| `tests/unit/notification-queue.test.ts` | Modifier | Supprimer : tests `formatDigest`, `formatMorningDigest`, `flush` avec batching ; Adapter : `enqueue` (simplifier beforeEach — plus de batchThreshold) ; Conserver : `getInlineKeyboard`, `stopQueue` |
-| `tests/unit/notification-prefs.test.ts` | Modifier | Supprimer : tests `isQuietHours` et assertions sur `batchThreshold`/`quietStart`/`quietEnd` ; Adapter : `formatPrefs` (retirer attentes quiet/batch) ; Conserver : `loadPrefs`, `savePrefs`, `isTypeEnabled`, `isImmediate` |
-| `config/notification-prefs.json` | Modifier | Simplifier : supprimer champs obsolètes (`quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold`) |
+| `src/notification-queue.ts` | Modifier (~473 → ~230 LOC) | Supprimer batching, quiet hours, digest, persistance queue ; simplifier `enqueue()` et `consumeMcpPending()` |
+| `src/heartbeat.ts` | Modifier | Supprimer 5 imports + bloc digest du matin L609-616 (service non actif en PM2) |
+| `src/relay.ts` | Modifier | Supprimer appel `loadPrefs()` redondant L147 |
+| `src/commands/profile.ts` | Modifier | Supprimer sous-commandes `/notify quiet`, `/notify TYPE batch`, `/notify TYPE immediate` + mettre à jour le help |
+| `config/notification-prefs.json` | Modifier | Supprimer champs `quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold` et champ `immediate` par type |
+| `tests/unit/notification-queue.test.ts` | Modifier | Supprimer suites `formatDigest`, `formatMorningDigest`, `flush` ; adapter suite `enqueue` à l'envoi immédiat |
 
 ---
 
-## 6. Patterns existants
+## Section 6 — Patterns existants
 
-**Pattern `sendStandalone()` — envoi direct Telegram** (`src/notification-queue.ts:130-147`)
+**1. `sendStandalone()` — cœur de l'envoi (à réutiliser directement dans `enqueue()`)**
 ```typescript
+// src/notification-queue.ts L233-250
 async function sendStandalone(item: NotificationItem): Promise<void> {
   if (!botInstance) return;
   const chatId = groupId || process.env.TELEGRAM_USER_ID || "";
@@ -117,101 +102,103 @@ async function sendStandalone(item: NotificationItem): Promise<void> {
   }
 }
 ```
-→ La nouvelle `enqueue()` appellera toujours `sendStandalone` (sauf skip).
+Devient le seul chemin d'envoi — appelé directement par `enqueue()` et `consumeMcpPending()`.
 
-**Pattern `consumeMcpPending()` — bridge MCP** (`src/notification-queue.ts:311-337`)
-→ Conservé intégralement. Pattern file-bridge : lit JSON, enfile chaque item valide, vide le fichier.
-
-**Pattern `getInlineKeyboard()` — keyboards par type** (`src/notification-queue.ts:85-120`)
-→ Conservé intégralement. Dispatche par type : task/pr/idea/alert → keyboards spécifiques.
-
-**Pattern `isTypeEnabled()` / `isImmediate()`** (`src/notification-prefs.ts:78-84`)
-→ Conservé. Lecture depuis cache `cachedPrefs`, fallback sur defaults.
-
-**Pattern tests reset prefs** (`tests/unit/notification-queue.test.ts:168-180`)
+**2. `isTypeEnabled()` — filtre type (à conserver tel quel)**
 ```typescript
+// src/notification-queue.ts L82-84
+export function isTypeEnabled(type: NotificationType): boolean {
+  return getPrefs().types[type]?.enabled ?? true;
+}
+```
+
+**3. `getInlineKeyboard()` — boutons contextuels (à conserver tel quel)**
+```typescript
+// src/notification-queue.ts L188-223
+export function getInlineKeyboard(item: NotificationItem): InlineKeyboard | undefined { ... }
+```
+4 types couverts : task (start/done + view), pr (url), idea (promote + archive), alert (view task + sprint + dismiss).
+
+**4. `consumeMcpPending()` — bridge MCP (à simplifier : remplacer `queue.push` + `saveQueue()` par `sendStandalone()`)**
+```typescript
+// src/notification-queue.ts L414-440 — logique de polling à conserver
+// Remplacer :  queue.push(fullItem); ... await saveQueue();
+// Par :        await sendStandalone(fullItem);
+```
+
+**5. Pattern `beforeEach` dans les tests (à adapter)**
+```typescript
+// tests/unit/notification-queue.test.ts L169-181
 beforeEach(async () => {
-  const prefs = getDefaultPrefs();
-  prefs.quietStart = 0; prefs.quietEnd = 0; prefs.batchThreshold = 100;
-  await savePrefs(prefs); await loadPrefs();
-  while (getQueue().length > 0) getQueue().pop();
+  const prefs = getDefaultPrefs(); // TypePrefs simplifiée après R6
+  await savePrefs(prefs);
+  await loadPrefs();
 });
 ```
-→ Après simplification : supprimer les champs obsolètes ; plus besoin de `while getQueue().pop()`.
 
 ---
 
-## 7. Contraintes
+## Section 7 — Contraintes
 
-1. **Interface `enqueue()` immuable** : signature `(item: Omit<NotificationItem, "id"|"createdAt">): Promise<void>` inchangée — 9 callsites dans 8 fichiers (`job-manager.ts`, `heartbeat.ts`, `prd-workflow.ts`, `memory/core.ts`, `memory/classification.ts`, `commands/memory-cmds.ts`, `commands/execution.ts`, `commands/tasks.ts`).
+**Ne pas casser :**
+- Les 9 callsites `enqueue()` dans `tasks.ts` (×2), `memory-cmds.ts` (×3), `job-manager.ts` (×1), `memory/core.ts` (×1), `memory/classification.ts` (×1), `heartbeat.ts` (×2) — **aucune modification**
+- Les callbacks `notif_*` dans `src/commands/utilities.ts` — **non touchés**
+- `isTypeEnabled()` et `getInlineKeyboard()` — interfaces et comportements inchangés, exports maintenus
+- Les 6 tests `getInlineKeyboard` et le test `stopQueue` → conserver sans modification
 
-2. **Callbacks `notif_*` dans `utilities.ts` non touchés** : les handlers `notif_start`, `notif_done`, `notif_view`, `notif_viewtask`, `notif_promote`, `notif_archive`, `notif_dismiss`, `notif_sprint` sont indépendants du mécanisme de batching — aucune modification.
-
-3. **`consumeMcpPending()` conservé** : seul mécanisme actif pour les notifications émises par le serveur MCP. Le timer dans `startQueue()` est le seul déclencheur.
-
-4. **`bun test` doit passer** : les 3870+ tests existants doivent passer après modification. Les tests supprimés sont ceux couvrant des fonctions supprimées (formatDigest, isQuietHours, etc.).
-
-5. **heartbeat.ts doit compiler** : le service est arrêté mais le code doit passer le typecheck. Supprimer toutes références aux fonctions supprimées.
-
-6. **Pas de migration de données** : le fichier `notification-queue.json` (s'il existe) est simplement ignoré après la suppression de `loadQueue()`. En production la queue est vide, donc pas de perte.
-
-7. **Backward compat config** : `loadPrefs()` doit ignorer silencieusement les champs `quietStart/quietEnd/batchIntervalMs/batchThreshold` présents dans un fichier de config existant (comportement déjà assuré par le spread `{...DEFAULT_PREFS, ...parsed}`).
+**Limites techniques :**
+- `botInstance` est null lors des tests unitaires (startQueue jamais appelé) → `sendStandalone()` retourne silencieusement ; les tests `enqueue` restent valides sans mock bot
+- Si heartbeat.ts est redémarré **avant** ce nettoyage → compilation KO sur les imports supprimés ; la modification heartbeat.ts est donc bloquante pour tout redémarrage du service
+- Le fichier `mcp-pending-notifications.json` peut ne pas exister → `consumeMcpPending()` doit conserver le `try/catch` silencieux existant (R6 dans le code actuel)
+- Imports `fs/promises` : supprimer `rename` et les références à `QUEUE_FILE` ; conserver `readFile`/`writeFile` pour `loadPrefs`, `savePrefs`, `consumeMcpPending`
 
 ---
 
-## 8. Critères de validation
+## Section 8 — Critères de validation
 
 | # | Critère | Vérification | Niveau |
 |---|---------|--------------|--------|
-| V1 | `enqueue({type:"task", severity:"normal", message:"x"})` ne lève pas d'erreur et appelle `sendStandalone` immédiatement | Unit test : mock `sendStandalone`, vérifier appel | unit |
-| V2 | Une notification de type désactivé (`isTypeEnabled === false`) n'appelle pas `sendStandalone` | Unit test : disable type, enqueue, mock sendStandalone → 0 appels | unit |
-| V3 | Une notification `severity === "critical"` appelle `sendStandalone` même si type non-immediate | Unit test : mock sendStandalone, vérifier appel | unit |
-| V4 | `getQueueSize()` retourne toujours 0 (plus de queue interne) | Unit test : after enqueue, getQueueSize() === 0 | unit |
-| V5 | `isTypeEnabled("idea")` retourne `false` après `savePrefs({...idea: {enabled:false}})` | Unit test prefs | unit |
-| V6 | `isImmediate("alert")` retourne `true` par défaut ; `isImmediate("task")` retourne `false` | Unit test prefs | unit |
-| V7 | `getInlineKeyboard({type:"task", data:{taskId:"x", taskStatus:"backlog"}})` retourne un keyboard défini | Unit test | unit |
-| V8 | `getInlineKeyboard({type:"task"})` retourne `undefined` (pas de data) | Unit test | unit |
-| V9 | `/notify status` affiche les 4 types sans mention de "Quiet hours" ni "Batch interval" | Unit test : formatPrefs output ne contient pas "Quiet" ni "Batch" | unit |
-| V10 | `/notify off idea` désactive les notifications idea (`isTypeEnabled("idea") === false`) | Unit test : handler profile.ts + isTypeEnabled | unit |
-| V11 | `/notify on task` active les notifications task | Unit test : handler profile.ts + isTypeEnabled | unit |
-| V12 | `/notify task immediate` met `immediate=true` pour task | Unit test : handler profile.ts + isImmediate | unit |
-| V13 | `/notify quiet 22h-8h` ne correspond à aucun handler (réponse "Usage:" par défaut) | Unit test command routing | unit |
-| V14 | `/notify task batch` ne correspond à aucun handler (réponse "Usage:" par défaut) | Unit test command routing | unit |
-| V15 | `consumeMcpPending()` lit le fichier MCP, enqueue les items valides, vide le fichier | Unit test : mock readFile/writeFile | unit |
-| V16 | `consumeMcpPending()` ignore silencieusement si le fichier MCP n'existe pas | Unit test : mock readFile → throw ENOENT | unit |
-| V17 | `startQueue(bot)` démarre un timer qui appelle `consumeMcpPending()` périodiquement ; `stopQueue()` l'arrête | Integration test : mock setInterval/clearInterval | integration |
-| V18 | `loadPrefs()` ignore les champs `quietStart/quietEnd/batchIntervalMs/batchThreshold` présents dans le fichier JSON existant | Unit test : writeFile avec ces champs + loadPrefs + getPrefs | unit |
-| V19 | `tsc --noEmit` passe sans erreur après modification de tous les fichiers | CI typecheck | integration |
-| V20 | `bun test` passe sans erreur (≥3870 tests) | CI run | integration |
-| V21 | `heartbeat.ts` ne référence plus `flushMorningDigest`, `isQuietHours`, `getQueue`, `loadQueue` | `grep` sur heartbeat.ts | integration |
+| V1 | `enqueue()` avec type activé et botInstance=null ne lève pas d'erreur | `await enqueue({type:"task", severity:"normal", message:"x"})` → no throw | unit |
+| V2 | `enqueue()` avec type désactivé ne lève pas d'erreur et n'envoie rien | `types.idea.enabled=false` + enqueue idea → no throw | unit |
+| V3 | `enqueue()` assigne `id` (UUID) et `createdAt` (timestamp) à chaque item | Test existant "assigns unique IDs and timestamps" passe (comportement conservé) | unit |
+| V4 | Les fonctions `formatDigest`, `formatMorningDigest`, `flushMorningDigest`, `flush`, `isQuietHours`, `saveQueue`, `loadQueue`, `isImmediate` n'existent plus dans le module | `grep` sur ces noms dans `notification-queue.ts` → 0 résultats export/function | unit |
+| V5 | `getInlineKeyboard()` retourne les boutons corrects pour chaque type (task/pr/idea/alert) | 6 tests suite `getInlineKeyboard` passent sans modification | unit |
+| V6 | `NotificationPrefs` ne contient plus `quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold` | TypeScript compile sans erreur ; grep sur ces champs dans `notification-queue.ts` → 0 résultats | unit |
+| V7 | `formatPrefs()` n'affiche plus "Quiet hours" ni "Batch" | `formatPrefs(getDefaultPrefs())` ne contient pas les chaînes "Quiet" et "Batch" | unit |
+| V8 | `startQueue()` démarre exactement 1 timer (consumeMcpPending 60s), `stopQueue()` l'arrête proprement | Test `stopQueue` existant passe ; inspection code confirme unique `setInterval` | unit |
+| V9 | `heartbeat.ts` compile sans les imports supprimés | `bun tsc --noEmit` (ou équivalent bun typecheck) passe | unit |
+| V10 | `/notify quiet 22h-8h` répond avec le message d'aide mis à jour (sous-commande supprimée) | Test integration : `ctx.match = "quiet 22h-8h"` → reply contient "Usage: /notify" | integration |
+| V11 | `/notify on task` et `/notify off task` fonctionnent et persistent dans les prefs | Test integration : toggle + `getPrefs().types.task.enabled` correct | integration |
+| V12 | `config/notification-prefs.json` ne contient plus `quietStart`, `quietEnd`, `batchIntervalMs`, `batchThreshold`, `immediate` | `grep` sur fichier config → 0 résultats pour ces clés | unit |
+| V13 | `bun test` (1820 tests) passe en CI après toutes les modifications | CI vert sur PR | integration |
 
 ---
 
-## 9. Coverage et zones d'ombre
+## Section 9 — Coverage et zones d'ombre
 
-### Matrice des dimensions
+### Matrice de couverture des dimensions
 
-| Dimension | Couverture | Notes |
-|-----------|------------|-------|
-| **Problème** | Complet | Config prod (`0h-0h`, `batchThreshold:100`) + service heartbeat arrêté prouvent l'inactivité. Décision GO confirmée par l'exploration. |
-| **Périmètre** | Complet | 2 modules core, 3 fichiers dépendants, 2 fichiers de tests, 1 config JSON. Callbacks `notif_*` (utilities.ts) hors périmètre — explicitement préservés. |
-| **Validation** | Complet | 21 V-critères couvrant : enqueue directe, filtrage type, keyboards, prefs CRUD, /notify commands, MCP bridge, typecheck, CI. |
-| **Technique** | Complet | Suppression pure de code mort + simplification de `enqueue()`. Aucune nouvelle dépendance. Interface publique inchangée. |
+| Dimension | Couvert | Non couvert |
+|-----------|---------|-------------|
+| **Problème** | Code mort identifié (formatDigest, quiet hours, batching, persistance) confirmé par config prod et deux explorations | — |
+| **Périmètre** | 6 fichiers à modifier, 9 callsites protégés, MCP bridge conservé, tests à adapter | Redémarrage heartbeat service (hors scope — service arrêté) |
+| **Validation** | 13 V-critères : unit (V1-V9, V12), integration (V10-V11, V13) | Mock botInstance pour test d'envoi effectif (hors scope) |
+| **Technique** | Simplification `enqueue()`, `consumeMcpPending()` modifiée, timer 60s, `TypePrefs` simplifiée | Performance timer 60s vs 300s (non mesuré — bot personnel, volume faible) |
 
 ### Alternatives évaluées
 
 | Option | Verdict | Raison |
 |--------|---------|--------|
-| A — Status quo | Rejetée | Maintient ~200 LOC de logique inactive, architecture trompeuse |
-| **B — Suppression ciblée** (retenue) | **GO** | Préserve interface `enqueue()`, supprime inactif, risque faible |
-| C — Envoi pur (supprimer les 2 modules) | Non retenue | Refactor plus large, risque de casser callsites, gain marginal vs B |
+| A — Status quo | Écarté | Dette croissante, timer inutile toutes les 5 min, code incompréhensible pour tout nouveau contributeur |
+| **B — Suppression ciblée digest+quiet (retenu)** | **GO** | ~-220 LOC, interface `enqueue()` inchangée, risque technique minimal, réversibilité totale via git |
+| C — Suppression totale de la queue | Écarté | Nécessite modification des 9 callsites + refactoring MCP bridge, risque plus élevé pour gain marginal |
 
-### Zones d'ombre résiduelles
+### Zones d'ombre
 
-1. **`relay.ts` ligne 152 `loadPrefs()`** : la règle R14 prescrit sa suppression car `startQueue` l'appelle déjà. À vérifier en lecture que ce n'est pas un appel intentionnel post-`initPipelineTracker`. Risque faible (appel idempotent).
+1. **Timer MCP 60s vs 300s** : L'exploration recommande 60s sans benchmark précis. Le heartbeat étant arrêté, le seul consommateur est `relay.ts` via `startQueue()`. 60s est une valeur raisonnable pour un bot personnel — ajustable post-implémentation.
 
-2. **heartbeat.ts : `isQuietHours` autres usages ?** : l'exploration a identifié l'usage lignes 608-614 (bloc digest). L'implémenteur doit vérifier qu'il n'y a pas d'autre usage de `isQuietHours` dans heartbeat.ts hors de ce bloc avant suppression de l'import.
+2. **`severity` dans NotificationItem** : Après R1 (envoi toujours immédiat), le champ `severity: "critical"|"normal"` n'est plus utilisé dans `enqueue()`. Il est conservé dans le type pour compatibilité des callsites (ils passent `severity`) mais devient sémantiquement inerte. Refactoring complet de `NotificationItem` est hors scope.
 
-3. **Suppression de `getQueue()` et `getQueueSize()`** : `getQueueSize()` est exporté et peut être utilisé hors des fichiers explorés (ex: monitoring). Vérifier via `grep getQueueSize` avant suppression. `getQueue()` est utilisé dans heartbeat.ts (ligne 608) — supprimé avec le bloc digest.
+3. **Tests `enqueue` post-simplification** : Sans mock de `botInstance`, les tests vérifient l'absence d'erreur et les règles de filtrage type, mais pas l'envoi effectif. Un mock partiel pour vérifier que `sendStandalone` est appelé serait une amélioration future (hors scope de ce ticket).
 
-4. **`formatPrefs()` libellé "batch"** : après suppression du batching, le statut d'un type non-`immediate` sera toujours affiché "batch" dans `formatPrefs()`. Ce libellé est trompeur mais acceptable pour la V1 — note à documenter en commentaire code ou à changer en "normal".
+4. **`loadQueue()` dans heartbeat.ts** : L'import `loadQueue` est présent (L64) mais après simplification, `loadQueue()` n'existera plus. Ce nettoyage est couvert par R9 et vérifié par V9.

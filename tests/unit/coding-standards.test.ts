@@ -9,6 +9,11 @@
  * S3: LOC threshold (800 lines max)
  * S4: Architectural boundaries (services don't import from commands/)
  * S5: Barrel convention (sub-directories have barrel files)
+ * S6: createLogger mandatory (all non-barrel, non-type-only files)
+ * S7: No circular imports (DFS cycle detection on import graph)
+ * S9: process.env allowlist size cap (S2 allowlist must not grow unbounded)
+ *
+ * S8 (per-file coverage threshold) is enforced via scripts/check-coverage.sh in CI.
  *
  * See CLAUDE.md section Conventions for the full standards reference.
  */
@@ -16,7 +21,7 @@
 import { describe, expect, it } from "bun:test";
 import { Glob } from "bun";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { basename, dirname, join } from "path";
+import { basename, dirname, join, normalize } from "path";
 
 const SRC_DIR = join(import.meta.dir, "../../src");
 
@@ -306,4 +311,279 @@ describe("Coding standards — S5: barrel convention", () => {
       expect(nonBarrelLines).toEqual([]);
     });
   }
+});
+
+// ── S6: createLogger mandatory ────────────────────────────────
+
+describe("Coding standards — S6: createLogger mandatory", () => {
+  const CREATE_LOGGER_PATTERN = /createLogger/;
+
+  // Files excluded from the createLogger requirement:
+  // - logger.ts: implements createLogger itself
+  // - result.ts: pure types, no side-effects
+  // - config.ts: types + config singleton, no logging needed
+  // - semaphore.ts: generic utility, no side-effects needing logging
+  // - Barrels: re-exports only
+  // - .d.ts: type declarations
+  const EXCLUDED = new Set(["logger.ts", "result.ts", "config.ts", "semaphore.ts"]);
+
+  // Files that are declarative/data-only or thin wrappers without internal logging needs.
+  // Each entry has a justification. If a file gains runtime logic, remove it from this list.
+  const TYPES_ONLY_ALLOWLIST: Record<string, string> = {
+    // Declarative/data-only modules
+    "action-registry.ts": "Declarative registry of command metadata — no runtime logic",
+    "topic-config.ts": "Declarative topic configuration — no runtime logic",
+    "heartbeat-prompt.ts": "Prompt builder returning strings — no side-effects",
+    "doc-utils.ts": "Pure parsing utilities — no side-effects needing logging",
+    // Pure functions querying Supabase — errors handled by caller
+    "alerts.ts":
+      "Pure async functions returning Alert[] — no internal side-effects needing logging",
+    // Utility with graceful degradation — no logging needed
+    "feature-flags.ts": "Simple file-based toggle — no side-effects needing logging",
+    // Command composers: thin wrappers delegating to logged modules via bctx
+    "commands/jobs.ts": "Thin Composer delegating to job-manager.ts — logging in dependency",
+    "commands/profile.ts":
+      "Thin Composer delegating to notification-queue.ts — logging in dependency",
+    "commands/project.ts": "Thin Composer delegating to projects.ts — logging in dependency",
+    "commands/tasks.ts": "Thin Composer delegating to tasks.ts — logging in dependency",
+  };
+
+  const files = getAllSourceFiles().filter((f) => {
+    if (f.endsWith(".d.ts")) return false;
+    if (EXCLUDED.has(basename(f))) return false;
+    if (isBarrelFile(f)) return false;
+    if (TYPES_ONLY_ALLOWLIST[f]) return false;
+    return true;
+  });
+
+  for (const file of files) {
+    it(`${file} uses createLogger`, () => {
+      const content = readFileSync(join(SRC_DIR, file), "utf-8");
+      const hasLogger = CREATE_LOGGER_PATTERN.test(content);
+      if (!hasLogger) {
+        // Provide a helpful error message
+        expect(hasLogger).toBe(
+          true,
+          // `${file} must import or call createLogger (see S6 standard)`
+        );
+      }
+    });
+  }
+
+  // Verify allowlisted files are still data/types-only (no createLogger = no runtime logic)
+  for (const [file, reason] of Object.entries(TYPES_ONLY_ALLOWLIST)) {
+    it(`S6 allowlist: ${file} is still types/data-only (${reason})`, () => {
+      const filePath = join(SRC_DIR, file);
+      if (!existsSync(filePath)) return; // file may have been deleted
+      const content = readFileSync(filePath, "utf-8");
+      // If the file now uses createLogger, it has runtime logic and should be removed from the allowlist
+      expect(CREATE_LOGGER_PATTERN.test(content)).toBe(false);
+    });
+  }
+});
+
+// ── S7: No circular imports ───────────────────────────────────
+
+describe("Coding standards — S7: no circular imports", () => {
+  /**
+   * Resolve an import specifier relative to the importing file.
+   * Handles: ./foo -> foo.ts or foo/index.ts
+   */
+  function resolveImport(fromFile: string, importPath: string): string | null {
+    const fromDir = dirname(fromFile);
+    let resolved = normalize(join(fromDir, importPath));
+
+    // Strip .ts/.js extension for normalization, then re-add .ts
+    if (resolved.endsWith(".ts")) return resolved;
+    if (resolved.endsWith(".js")) {
+      resolved = resolved.replace(/\.js$/, "");
+    }
+
+    // Try direct .ts
+    if (existsSync(join(SRC_DIR, resolved + ".ts"))) {
+      return resolved + ".ts";
+    }
+    // Try index.ts (directory import)
+    if (existsSync(join(SRC_DIR, resolved, "index.ts"))) {
+      return normalize(join(resolved, "index.ts"));
+    }
+    // File doesn't exist in src/ — external or non-existent, skip
+    return null;
+  }
+
+  /**
+   * Build the import graph: file -> list of resolved imports within src/
+   */
+  function buildImportGraph(): Map<string, string[]> {
+    const files = getAllSourceFiles().filter((f) => !f.endsWith(".d.ts"));
+    const fileSet = new Set(files);
+    const graph = new Map<string, string[]>();
+
+    for (const file of files) {
+      const content = readFileSync(join(SRC_DIR, file), "utf-8");
+      const codeLines = getCodeLines(content);
+      const imports: string[] = [];
+
+      for (const line of codeLines) {
+        // Reset regex lastIndex for each line
+        const re = /(?:import|export)\s+.*?from\s+['"](\.[^'"]+)['"]/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(line)) !== null) {
+          const resolved = resolveImport(file, m[1]);
+          if (resolved && fileSet.has(resolved) && resolved !== file) {
+            imports.push(resolved);
+          }
+        }
+      }
+
+      graph.set(file, [...new Set(imports)]); // deduplicate
+    }
+
+    return graph;
+  }
+
+  /**
+   * DFS cycle detection. Returns all cycles found as arrays of file paths.
+   */
+  function findCycles(graph: Map<string, string[]>): string[][] {
+    const WHITE = 0,
+      GRAY = 1,
+      BLACK = 2;
+    const color = new Map<string, number>();
+    const parent = new Map<string, string>();
+    const cycles: string[][] = [];
+
+    for (const node of graph.keys()) color.set(node, WHITE);
+
+    function dfs(u: string): void {
+      color.set(u, GRAY);
+      for (const v of graph.get(u) || []) {
+        if (color.get(v) === GRAY) {
+          // Found cycle — reconstruct path
+          const cycle = [v, u];
+          let cur = parent.get(u);
+          while (cur && cur !== v) {
+            cycle.push(cur);
+            cur = parent.get(cur);
+          }
+          cycle.push(v);
+          cycles.push(cycle.reverse());
+        } else if (color.get(v) === WHITE) {
+          parent.set(v, u);
+          dfs(v);
+        }
+      }
+      color.set(u, BLACK);
+    }
+
+    for (const node of graph.keys()) {
+      if (color.get(node) === WHITE) {
+        dfs(node);
+      }
+    }
+
+    return cycles;
+  }
+
+  it("import graph has no cycles", () => {
+    const graph = buildImportGraph();
+    const cycles = findCycles(graph);
+
+    if (cycles.length > 0) {
+      const cycleDescriptions = cycles.map((cycle) => cycle.join(" -> ")).join("\n  ");
+      expect(cycles.length).toBe(
+        0,
+        // `Circular imports detected:\n  ${cycleDescriptions}`
+      );
+    }
+  });
+
+  it("import graph has nodes (sanity check)", () => {
+    const graph = buildImportGraph();
+    // We expect at least 40 source files
+    expect(graph.size).toBeGreaterThanOrEqual(40);
+  });
+
+  it("import graph has edges (sanity check)", () => {
+    const graph = buildImportGraph();
+    let totalEdges = 0;
+    for (const deps of graph.values()) {
+      totalEdges += deps.length;
+    }
+    // We expect at least 50 import edges across the codebase
+    expect(totalEdges).toBeGreaterThanOrEqual(50);
+  });
+
+  // V4: Robustness test — verify the DFS algorithm detects cycles on a mock graph
+  it("findCycles detects A -> B -> A cycle in mock graph", () => {
+    const mockGraph = new Map<string, string[]>();
+    mockGraph.set("a.ts", ["b.ts"]);
+    mockGraph.set("b.ts", ["a.ts"]);
+    const cycles = findCycles(mockGraph);
+    expect(cycles.length).toBeGreaterThan(0);
+    // Verify the cycle contains both nodes
+    const cycleNodes = new Set(cycles[0]);
+    expect(cycleNodes.has("a.ts")).toBe(true);
+    expect(cycleNodes.has("b.ts")).toBe(true);
+  });
+
+  it("findCycles detects A -> B -> C -> A cycle in mock graph", () => {
+    const mockGraph = new Map<string, string[]>();
+    mockGraph.set("a.ts", ["b.ts"]);
+    mockGraph.set("b.ts", ["c.ts"]);
+    mockGraph.set("c.ts", ["a.ts"]);
+    const cycles = findCycles(mockGraph);
+    expect(cycles.length).toBeGreaterThan(0);
+  });
+
+  it("findCycles returns empty for acyclic mock graph", () => {
+    const mockGraph = new Map<string, string[]>();
+    mockGraph.set("a.ts", ["b.ts"]);
+    mockGraph.set("b.ts", ["c.ts"]);
+    mockGraph.set("c.ts", []);
+    const cycles = findCycles(mockGraph);
+    expect(cycles.length).toBe(0);
+  });
+});
+
+// ── S9: process.env allowlist size cap ────────────────────────
+
+describe("Coding standards — S9: process.env allowlist size cap", () => {
+  // This is a meta-test that enforces a cap on the S2 allowlist size.
+  // The cap prevents the allowlist from growing unbounded, which would
+  // dilute the value of the S2 standard.
+  //
+  // Current state: 18 ALLOWLIST entries + 2 EXCLUDED_BY_DESIGN = 20 total.
+  // Any increase MUST be justified with a comment in S2's ALLOWLIST.
+  const MAX_TOTAL_ENV_EXCEPTIONS = 20;
+
+  // Re-read the S2 allowlist and excluded-by-design sets.
+  // We parse the test file itself to count entries — this is intentionally meta.
+  it("S2 allowlist + excluded-by-design does not exceed cap", () => {
+    const testContent = readFileSync(join(import.meta.dir, "coding-standards.test.ts"), "utf-8");
+
+    // Count ALLOWLIST entries (lines matching "key": "value" pattern inside ALLOWLIST block)
+    const allowlistMatch = testContent.match(
+      /const ALLOWLIST:\s*Record<string,\s*string>\s*=\s*\{([\s\S]*?)\};/,
+    );
+    const allowlistEntries = allowlistMatch
+      ? (allowlistMatch[1].match(/"[^"]+"\s*:/g) || []).length
+      : 0;
+
+    // Count EXCLUDED_BY_DESIGN entries
+    const excludedMatch = testContent.match(/EXCLUDED_BY_DESIGN\s*=\s*new\s+Set\(\[([\s\S]*?)\]\)/);
+    const excludedEntries = excludedMatch ? (excludedMatch[1].match(/"[^"]+"/g) || []).length : 0;
+
+    const total = allowlistEntries + excludedEntries;
+
+    expect(total).toBeLessThanOrEqual(MAX_TOTAL_ENV_EXCEPTIONS);
+    // If this test fails, you added a new process.env exception without reducing existing ones.
+    // Either migrate an existing file to use getConfig() first, or increase MAX_TOTAL_ENV_EXCEPTIONS
+    // with a justification comment.
+  });
+
+  it("MAX cap matches documented value (sanity)", () => {
+    // Ensure the cap is not silently increased beyond a reasonable bound
+    expect(MAX_TOTAL_ENV_EXCEPTIONS).toBeLessThanOrEqual(25);
+  });
 });

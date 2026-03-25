@@ -15,210 +15,232 @@ Agents: 3/3 reussis
 
 ---
 
-**[BLOQUANT] F-DA-1 — `batchIntervalMs` supprimé mais intervalle timer MCP non spécifié**
-- Source : R8 (suppression `batchIntervalMs`) × R6 (`startQueue` simplifié avec timer périodique)
-- Description : Le timer de `startQueue` utilise actuellement `prefs.batchIntervalMs` (valeur : 5 min, ligne 358 de `notification-queue.ts`). R8 supprime ce champ de `NotificationPrefs`. R6 dit "lance un timer périodique pour `consumeMcpPending()` uniquement" sans spécifier l'intervalle de remplacement. L'implémenteur doit hardcoder une valeur mais la spec ne la définit pas.
-- Impact : Blocage d'implémentation — l'implémenteur arbitre seul une valeur structurante (trop court = spam I/O, trop long = latence MCP).
-- Evidence : `}, prefs.batchIntervalMs);` (notification-queue.ts:358) — supprimer le champ sans préciser le remplacement laisse le timer sans intervalle défini.
+**[BLOQUANT] F-DA-1 — `formatPrefs()` uses deleted fields but no rule covers its update**
+
+- **Source :** R6 (supprime `TypePrefs.immediate`), R7 (supprime 4 champs `NotificationPrefs`), absent de R1-R11
+- **Description :** La fonction `formatPrefs()` (L104-118, `notification-queue.ts`) référence explicitement `prefs.quietStart`, `prefs.quietEnd`, `prefs.batchIntervalMs`, `prefs.batchThreshold`, et `tp.immediate`. R6 et R7 suppriment ces champs des interfaces. Aucune règle métier (R1-R11) ne couvre la réécriture de `formatPrefs()`.
+- **Impact :** Sans mise à jour, la compilation TypeScript échoue avec TS2339 sur chaque référence à ces champs. Bloquant pour V9 (typecheck). Le seul signal est V7 ("ne contient plus 'Quiet hours' ni 'Batch'") — mais V7 teste un critère comportemental, pas une instruction d'implémentation. L'implémenteur peut manquer ce fichier.
+- **Evidence :** `const status = tp.enabled ? (tp.immediate ? "immediat" : "batch") : "desactive";` (L114) — `tp.immediate` sera un champ inexistant après R6.
 
 ---
 
-**[MAJEUR] F-DA-2 — Import `isQuietHours` dans `notification-queue.ts` oublié dans les suppressions**
-- Source : Section 5 (fichiers concernés) × R12 (suppression de `isQuietHours` dans notification-prefs.ts)
-- Description : `notification-queue.ts` importe `isQuietHours` à la ligne 23. R12 prescrit sa suppression de `notification-prefs.ts`. R11 liste les fonctions à supprimer de `notification-queue.ts` (qui inclut le code qui appelle `isQuietHours` aux lignes 255 et 355) mais ne mentionne pas explicitement la suppression de l'import ligne 23. Si l'implémenteur supprime les usages mais oublie l'import devenu mort, `tsc` échoue — V19 ratée.
-- Impact : Critère V19 (`tsc --noEmit` passe) potentiellement raté si l'implémenteur suit la spec à la lettre sans aller au-delà.
+**[MAJEUR] F-DA-2 — `DEFAULT_PREFS` non mentionné malgré les suppressions R6+R7**
+
+- **Source :** R6, R7, Section 5 (fichiers concernés)
+- **Description :** La constante `DEFAULT_PREFS` (L41-52) contient `quietStart: 20`, `quietEnd: 9`, `batchIntervalMs: 5 * 60 * 1000`, `batchThreshold: 5`, et `immediate: false` dans chaque entrée de `types`. R6 et R7 suppriment ces champs des types `TypePrefs` et `NotificationPrefs`. `DEFAULT_PREFS` doit être mis à jour en conséquence — mais aucune règle ni aucun fichier dans Section 5 ne le mentionne.
+- **Impact :** Erreur TypeScript TS2322 à la déclaration de `DEFAULT_PREFS` si les types sont simplifiés sans mettre à jour la constante.
 
 ---
 
-**[MAJEUR] F-DA-3 — R14 × R6 : `loadPrefs` dans `startQueue` simplifié implicite mais non garanti**
-- Source : R14 ("supprimer `await loadPrefs()` de relay.ts — déjà appelé dans startQueue") × R6 (description de `startQueue` simplifié)
-- Description : R14 justifie la suppression dans relay.ts par le fait que `startQueue` appelle déjà `loadPrefs`. Mais R6 décrit la version simplifiée comme "initialise le bot, lance un timer périodique pour consumeMcpPending() uniquement" — sans mentionner `loadPrefs`. Un implémenteur scrupuleux qui simplifie `startQueue` selon R6 peut supprimer l'appel `loadPrefs` (qui est aujourd'hui associé à `loadQueue` et à la logique batch). Si R14 et R6 s'appliquent conjointement, les prefs ne sont jamais chargées au démarrage — `isTypeEnabled()` retourne toujours les defaults.
-- Impact : Notifications ignorées ou envoyées à tort selon les defaults si l'utilisateur a modifié ses prefs.
+**[MAJEUR] F-DA-3 — Callsites `enqueue()` : spec annonce 9 mais la somme est 10**
+
+- **Source :** Section 7 "Contraintes" — "Les 9 callsites enqueue() dans tasks.ts (×2), memory-cmds.ts (×3), job-manager.ts (×1), memory/core.ts (×1), memory/classification.ts (×1), heartbeat.ts (×2)"
+- **Description :** La liste fournie par la spec totalise 2+3+1+1+1+2 = **10 callsites**, pas 9. Confirmé par grep sur le codebase.
+- **Impact :** Mineure sur l'implémentation (tous les callsites sont listés), mais potentiellement trompeuse pour la vérification : un implémenteur qui se fie au chiffre "9" pourrait s'arrêter à 9 et considérer le travail terminé alors qu'il en reste un. V13 (bun test) détecterait une regression, mais la phase de vérification manuelle est compromise.
 
 ---
 
-**[MAJEUR] F-DA-4 — Libellé "batch" trompeur dans `/notify status` sans résolution mandatée**
-- Source : Section 4 (sortie `/notify status`) × Zone d'ombre §9 #4
-- Description : La spec affiche explicitement "batch" pour les types non-immédiats dans `/notify status`, alors que le batching est supprimé. La spec elle-même documente ce problème en zone d'ombre ("libellé trompeur mais acceptable pour V1") sans l'ériger en règle à corriger. L'output livré au user dit "task : batch" mais les notifications partent instantanément.
-- Impact : UX mensongère validée par la spec. Un utilisateur qui voit "batch" attendra un regroupement qui n'arrivera jamais.
+**[MAJEUR] F-DA-4 — `getQueueSize()` et `getQueue()` deviennent des fonctions toujours-vides sans être adressées**
+
+- **Source :** Section 5 (fichiers concernés) — aucune mention ; Section 7 "Non touchés" — absent
+- **Description :** Après simplification, `enqueue()` envoie directement (R1) et `consumeMcpPending()` envoie directement (R4). La variable `queue` ne sera plus jamais peuplée. Les exports `getQueueSize()` (retourne toujours 0) et `getQueue()` (retourne toujours `[]`) deviennent sémantiquement trompeurs. La spec ne décide pas : supprimer, conserver, ou documenter leur état.
+- **Impact :** Si des tests vérifient `getQueueSize() > 0` après un `enqueue()`, ils échoueront. Si conservées silencieusement, elles induiront en erreur les futurs mainteneurs.
 
 ---
 
-**[MINEUR] F-DA-5 — Zone d'ombre #3 contradictoire sur le sort de `getQueueSize`**
-- Source : R11 (liste suppressions) × Zone d'ombre §9 #3 × V4 (critère test)
-- Description : Zone d'ombre #3 écrit "Suppression de `getQueue()` et `getQueueSize()`" (laissant entendre que les deux sont supprimés). Mais R11 ne liste pas `getQueueSize` dans les fonctions supprimées, et V4 prescrit de le conserver avec retour de 0. La formulation groupée dans la zone d'ombre crée une ambiguïté réelle sur le sort de `getQueueSize`.
-- Impact : L'implémenteur qui supprime `getQueueSize` par analogie avec `getQueue` casse V4 et les tests qui l'utilisent.
+**[MINEUR] F-DA-5 — R4 n'explicite pas la conservation du filtre `isTypeEnabled()` dans `consumeMcpPending()`**
+
+- **Source :** R4 — "appelle `sendStandalone()` directement pour chaque item pending"
+- **Description :** La version actuelle de `consumeMcpPending()` (L421) contient `if (!isTypeEnabled(item.type)) continue;` avant d'ajouter à la queue. R4 dit seulement "envoie chaque item" — sans préciser si le filtre type est conservé. Le Pattern 6 (Section 6) dit seulement "remplacer `queue.push` + `saveQueue()` par `sendStandalone()`", omettant le `continue`.
+- **Impact :** L'implémenteur pourrait simplifier en supprimant le filtre, causant l'envoi de notifications de types désactivés via le bridge MCP, en contradiction avec R2.
 
 ---
 
-**[MINEUR] F-DA-6 — `getPrefs()` orphelin dans `startQueue` après suppression `batchIntervalMs`**
-- Source : R6 × R8 × notification-queue.ts:350
-- Description : Actuellement `startQueue` appelle `const prefs = getPrefs()` uniquement pour lire `prefs.batchIntervalMs`. Après suppression de ce champ (R8), cet appel n'a plus d'utilité. La spec ne mentionne pas la suppression de cet appel `getPrefs()` dans la simplification de `startQueue`.
-- Impact : Import `getPrefs` potentiellement inutilisé dans `notification-queue.ts` après simplification — mineur (compilateur ou linter le signalera).
+**[MINEUR] F-DA-6 — R1 ne documente pas explicitement la suppression du bypass `severity:"critical"`**
+
+- **Source :** R1 — "`enqueue()` envoie immédiatement via `sendStandalone()` si le type est activé"
+- **Description :** Le comportement actuel (L352) bypass quiet hours et batching pour `severity:"critical"`. Après R1, tous les envois sont immédiats — le bypass `critical` disparaît silencieusement. La zone d'ombre §9.2 reconnaît que `severity` devient inerte, mais aucune règle n'informe l'implémenteur que `item.severity === "critical" || isImmediate(item.type)` doit être supprimé.
+- **Impact :** L'implémenteur peut conserver la condition par précaution, laissant du code mort non prévu par la spec.
 
 ---
 
-**[MINEUR] F-DA-7 — `TYPE_LABELS` référencé implicitement dans les keyboards mais listé en suppression**
-- Source : R11 (supprime `TYPE_LABELS`) × R4 (`getInlineKeyboard` conservé)
-- Description : R11 liste `TYPE_LABELS` dans les fonctions/constantes supprimées. Sans lecture complète du code, il est impossible de confirmer que `getInlineKeyboard` (conservé par R4) n'utilise pas `TYPE_LABELS` en interne. La spec conserve `getInlineKeyboard` intégralement (§6 "Conservé intégralement") mais supprime potentiellement une de ses dépendances.
-- Impact : Si `TYPE_LABELS` est utilisé dans `getInlineKeyboard`, sa suppression casse une fonction conservée.
+**[MINEUR] F-DA-7 — V10 trop faible pour valider le nouveau message d'aide `/notify`**
+
+- **Source :** V10 — "reply contient 'Usage: /notify'"
+- **Description :** Le message actuel est `"Usage: /notify [status|quiet Xh-Yh|on TYPE|off TYPE|TYPE immediate|TYPE batch]"`. Après R8, il doit être `"Usage: /notify [status|on TYPE|off TYPE]"`. V10 vérifie seulement la présence de `"Usage: /notify"` — une implémentation qui garde l'ancien message passerait le critère.
+- **Impact :** Le critère ne détecte pas une suppression incomplète des sous-commandes dans le help text. Une sous-commande `quiet` encore documentée induirait les utilisateurs en erreur.
 
 ---
 
 ### Statistiques
 
-- Bloquants : 1
+- Bloquants : **1** (F-DA-1 — `formatPrefs()` compile failure)
+- Majeurs : **3** (F-DA-2 DEFAULT_PREFS, F-DA-3 callsite count, F-DA-4 getQueueSize vestigial)
+- Mineurs : **3** (F-DA-5 isTypeEnabled dans R4, F-DA-6 severity behavior, F-DA-7 V10 faible)
+
+---
+
+## Verdict de l'agent: GO_WITH_CHANGES
+
+Les problèmes bloquants (F-DA-1) et majeurs (F-DA-2, F-DA-3) sont des omissions d'implémentation concrètes qui causeront des erreurs TypeScript si non adressées. Le scope reste clair et les changements correctifs sont mineurs : ajouter `formatPrefs()` et `DEFAULT_PREFS` aux règles métier et aux fichiers Section 5, corriger le compte callsites de 9→10, et décider explicitement du sort de `getQueueSize()`/`getQueue()`.
+
+---
+
+## Edge Case Hunter — Rapport
+
+Maintenant j'ai tout ce qu'il me faut. Voici mon rapport :
+
+---
+
+## Edge Case Hunter — Rapport
+
+### Findings
+
+---
+
+**[BLOQUANT] F-EC-1 — V3 directement incompatible avec la suppression de `getQueue()`**
+- Scénario : V3 affirme "Test existant 'assigns unique IDs and timestamps' passe (comportement conservé)". Le test actuel (L209-215) fait `const q = getQueue(); expect(q[0].id).not.toBe(q[1].id)` — il inspecte la queue pour vérifier les IDs. Après simplification, `enqueue()` appelle directement `sendStandalone()` sans peupler de queue. `getQueue()` retourne `[]`. Les assertions `q[0].id` causent un crash (`undefined`).
+- Source : V3 "comportement conservé" × test L209-215 × R1 (envoi direct, pas de queue)
+- Impact : Contradiction structurelle — soit V3 est faux ("le test ne passe pas tel quel"), soit `getQueue()` doit être conservée avec état. L'implémenteur ne peut satisfaire V3 sans réécrire le test, mais la spec lui dit que c'est "comportement conservé".
+- Fréquence estimée : Certain (toute implémentation fidèle déclenche ce bug)
+
+---
+
+**[BLOQUANT] F-EC-2 — `loadPrefs()` orphaned : R5 ne le mentionne pas, R10 retire le seul appel restant**
+- Scénario : R5 décrit `startQueue()` simplifié comme : "démarre un timer de 60s appelant uniquement `consumeMcpPending()`". `loadPrefs()` n'est pas mentionné. R10 retire `loadPrefs()` de `relay.ts` car "startQueue() l'appelle déjà". Si l'implémenteur suit R5 à la lettre (uniquement le setInterval), puis applique R10 (retire relay.ts), alors `loadPrefs()` n'est plus jamais appelé au démarrage.
+- Source : R5 (description startQueue sans loadPrefs) × R10 (suppression relay.ts) — déjà signalé F-DA-3 dans review précédente, non résolu dans cette version mise à jour
+- Impact : `getPrefs()` retourne `DEFAULT_PREFS` en permanence ; customisations utilisateur ignorées silencieusement. `/notify off task` configuré par l'utilisateur → ignoré → notifications non désirées envoyées.
+- Fréquence estimée : Certain à chaque redémarrage bot si déjà configuré
+
+---
+
+**[MAJEUR] F-EC-3 — `formatPrefs()` TypeScript error sur `tp.immediate` après R6**
+- Scénario : R6 supprime le champ `immediate` de `TypePrefs`. La fonction `formatPrefs()` (L114) contient : `const status = tp.enabled ? (tp.immediate ? "immediat" : "batch") : "desactive"`. Après R6, `tp.immediate` n'existe plus → erreur TypeScript à la compilation.
+- Source : R6 (suppression `immediate`) × `formatPrefs()` L114 × V9 (typecheck doit passer)
+- Impact : `bun tsc --noEmit` (V9) échoue. V7 vérifie le contenu de la sortie mais ne documente pas la réécriture de la logique d'affichage après suppression de `immediate`.
+- Fréquence estimée : Certain (bloc de compilation)
+
+---
+
+**[MAJEUR] F-EC-4 — Test `beforeEach` des suites `enqueue` et `flush` référence des champs supprimés par R7**
+- Scénario : Les `beforeEach` aux L169-181 et L219-227 font `prefs.quietStart = 0; prefs.batchThreshold = 100;`. R7 retire ces champs de `NotificationPrefs`. TypeScript signalera une erreur d'assignation sur des propriétés inexistantes.
+- Source : R7 (suppression quietStart, batchThreshold) × test L173-176 et L221-224 × Section 5 "adapter suite enqueue"
+- Impact : La spec dit "adapter suite enqueue" sans préciser que `beforeEach` doit être réécrit. L'implémenteur qui adapte seulement les `it()` laisse le `beforeEach` cassé → V13 (`bun test`) échoue.
+- Fréquence estimée : Fréquent (implémenteur concentré sur les assertions, oublie le setup)
+
+---
+
+**[MAJEUR] F-EC-5 — Race condition `consumeMcpPending()` : double envoi si timer overlap**
+- Scénario : `setInterval(consumeMcpPending, 60_000)`. Si un appel prend > 60s (rate limit Telegram, I/O lente, gros fichier MCP), le deuxième tick démarre avant que le premier ait écrit `[]` dans `mcp-pending-notifications.json`. Les deux exécutions lisent le même contenu → `sendStandalone()` appelé deux fois pour chaque item.
+- Source : R4 (consumeMcpPending appelle sendStandalone directement) × R5 (timer 60s) — non documenté dans contraintes techniques ni zones d'ombre
+- Impact : Duplicata de notifications Telegram. Pas de mécanisme de verrouillage fichier documenté.
+- Fréquence estimée : Rare (bot personnel, volume faible)
+
+---
+
+**[MAJEUR] F-EC-6 — Suite `enqueue` : assertions `getQueueSize() === 1/2` invalides après envoi direct**
+- Scénario : Même si la suite `flush` est supprimée (Section 5), le test L183-185 (`it("adds normal items to queue"`) vérifie `expect(getQueueSize()).toBe(1)` après `enqueue()`. Après simplification, `enqueue()` envoie directement sans queue → `getQueueSize()` retourne `0` → assertion échoue.
+- Source : V3 (adapter enqueue) × test L183-186 × R1 (envoi direct)
+- Impact : La spec ne liste pas ce test comme à supprimer ni à adapter explicitement. L'implémenteur qui adapte selon V1/V2/V3 peut oublier cette assertion orpheline.
+- Fréquence estimée : Fréquent (test présent dans la suite)
+
+---
+
+**[MINEUR] F-EC-7 — `severity: "critical"` sémantiquement inerte sans documentation callsites**
+- Scénario : `job-manager.ts` (L474-478) et `heartbeat.ts` (L359, L632) passent `severity: "critical"` pour des alertes critiques avec l'attente d'un envoi prioritaire. Après R1, `severity` n'a plus d'effet sur le routage.
+- Source : Zone d'ombre §9 #2 (documentée) × callsites job-manager.ts L478, heartbeat.ts L359
+- Impact : Dégradation silencieuse du contrat ; une alerte critique rate limit ou échec batch traitement identiquement à une normale. Documenté comme "hors scope" mais sans note dans les callsites.
+
+---
+
+**[MINEUR] F-EC-8 — Migration `config/notification-prefs.json` existant : champs anciens survivent en mémoire**
+- Scénario : Après déploiement, le fichier JSON existant contient `immediate: true` pour `alert`. `loadPrefs()` fait `{ ...DEFAULT_PREFS.types, ...parsed.types }`. Si `parsed.types.alert = { enabled: true, immediate: true }`, le champ `immediate` reste dans l'objet JS (TypeScript ne le voit pas mais `JSON.stringify` le persiste). V12 vérifie le fichier config après modification manuelle, pas après un `savePrefs()` post-chargement.
+- Source : R11 (config réduite) × V12 × `loadPrefs()` L63 merge strategy
+- Impact : Champs zombies persistant dans le JSON après restart ; confusion lors d'une inspection manuelle.
+
+---
+
+**[MINEUR] F-EC-9 — Item `type` invalide dans `mcp-pending-notifications.json` envoyé sans validation**
+- Scénario : Si un agent MCP écrit `{ type: "unknown", ... }` dans le fichier pending, `isTypeEnabled("unknown")` retourne `true` (défaut `?? true` à L83). `sendStandalone()` est appelé avec un type hors `NotificationType`.
+- Source : R4 (consumeMcpPending appelle sendStandalone directement) × L82-84 (`?? true` fallback)
+- Impact : Message Telegram envoyé avec type invalide ; `getInlineKeyboard()` retourne `undefined` (ok), `getThreadId()` retourne `sprintThreadId` (ok par défaut). Comportement silencieusement incorrect.
+
+---
+
+**[MINEUR] F-EC-10 — `getQueueSize()` : sort ambigu entre V4 (silencieux) et tests existants**
+- Scénario : V4 liste les fonctions à supprimer mais n'inclut pas `getQueueSize()`. Pourtant, après suppression de la variable `queue[]`, `getQueueSize()` devrait retourner 0 en permanence. Les tests L185, 198, 232, 235, 240 testent `getQueueSize() > 0` — ils doivent être adaptés mais ne sont pas listés pour modification.
+- Source : V4 (liste suppressions sans getQueueSize) × tests L185-240 × R (suppression queue[])
+
+---
+
+### Statistiques
+- Bloquants : 2
+- Majeurs : 4
+- Mineurs : 4
+
+---
+
+## Verdict de l'agent: GO_WITH_CHANGES
+
+Les deux BLOQUANTs sont des contradictions directes dans la spec (V3 incompatible avec suppression de `getQueue()` ; `loadPrefs()` orphaned par R5×R10) qui garantissent un échec d'implémentation si suivis à la lettre. Les MAJEURs 3 et 4 (erreurs TypeScript sur `tp.immediate` et `prefs.quietStart`) bloquent la compilation. Ces 4 points doivent être résolus avant implémentation.
+
+---
+
+## Simplicity Skeptic — Rapport
+
+## Simplicity Skeptic — Rapport
+
+### Findings
+
+**[MAJEUR] F-SS-1 — `formatDigest`/`sendDigest` supprimées implicitement mais ambiguïté sur leur sort**
+- Source : Section 5 / R4 + V4
+- Description : La spec indique de supprimer les suites de tests `formatDigest` et `formatMorningDigest`. Mais `formatDigest` est appelée par `sendDigest` (privée). Si `sendDigest` disparaît (envoi toujours immédiat via R1), `formatDigest` devient orpheline. La spec ne précise pas si ces fonctions sont elles-mêmes supprimées du module ou conservées comme utilitaires de formatage — risque de code mort non nettoyé.
+- Alternative : Préciser explicitement dans R4 si `formatDigest`/`sendDigest` disparaissent du module entièrement.
+- Codebase : `notification-queue.ts` L252-338
+
+**[MAJEUR] F-SS-2 — Justification "heartbeat non actif" trompeuse pour R9**
+- Source : Section 2 R9, Section 7 "Contraintes"
+- Description : R9 justifie la suppression de 5 imports dans `heartbeat.ts` par "service non démarré en PM2". Mais `heartbeat.ts` utilise aussi `enqueue()` (L630, L672) pour les alertes — ces appels restent valides. La justification incorrecte crée un risque de confusion si le heartbeat est réactivé ultérieurement : quelqu'un pourrait croire que tout son code de notification est mort.
+- Alternative : Justifier R9 par "logique digest rendue caduque par R1" plutôt que "service non actif".
+
+**[MAJEUR] F-SS-3 — Champ `severity` sémantiquement mort sans marquage de dette**
+- Source : Section 9 "Zone d'ombre 2"
+- Description : Après R1 (envoi toujours immédiat), `severity: "critical"|"normal"` dans `NotificationItem` n'affecte plus le comportement. La spec traite cela hors scope sans déprécation formelle. Les 9 callsites continueront à passer `severity` pensant qu'il a un effet — dette technique immédiate.
+- Alternative : Ajouter un commentaire `@deprecated` sur `severity` dans l'interface, ou un ticket de suivi explicite. Ajouter un V-critère vérifiant qu'aucun test ne teste un comportement différentiel basé sur `severity`.
+
+**[MINEUR] F-SS-4 — `action-registry.ts` absent de la liste des fichiers à modifier**
+- Source : Section 5 — liste des fichiers concernés
+- Description : `src/action-registry.ts` L295 documente le usage de `/notify` avec les sous-commandes `quiet` et `immediate` qui seront supprimées par R8. Ce fichier n'est pas listé — documentation interne désynchronisée.
+- Codebase : `src/action-registry.ts` L293-303
+
+**[MINEUR] F-SS-5 — `commands/help.ts` absent de la liste des fichiers à modifier**
+- Source : Section 5
+- Description : `src/commands/help.ts` L62 liste `quiet` et `immediate` dans l'aide `/notify`. Après R8, ce texte sera incorrect.
+
+**[MINEUR] F-SS-6 — Test `"adds normal items to queue"` cassera après R1**
+- Source : Section 8 V3
+- Description : Le test L183-185 vérifie que `enqueue()` ajoute à la queue (`getQueueSize() === 1`). Après R1, `enqueue()` appelle `sendStandalone()` directement — `getQueueSize()` retournera 0. Régression CI non anticipée explicitement dans la spec.
+- Codebase : `tests/unit/notification-queue.test.ts` L183-215
+
+**[MINEUR] F-SS-7 — Timer 60s vs 300s non justifié empiriquement**
+- Source : Section 9 "Zone d'ombre 1"
+- Description : L'intervalle MCP passe de 300s à 60s (5x plus fréquent) sans benchmark ni justification autre que "valeur raisonnable". Augmentation des I/O fichier sans mesure.
+- Alternative : Nommer la constante `MCP_POLL_INTERVAL_MS` pour la rendre configurable facilement.
+
+**[MINEUR] F-SS-8 — Import `flush` dans les tests non mentionné pour suppression**
+- Source : Section 8 V4 : "`flush` n'existe plus dans le module"
+- Description : Les tests importent `flush` en L19-27. Si `flush` est supprimée du module, la compilation des tests échoue. La spec mentionne "supprimer suite `flush`" sans préciser la suppression de son import.
+- Codebase : `tests/unit/notification-queue.test.ts` L19-27, L218-242
+
+---
+
+### Statistiques
+- Bloquants : 0
 - Majeurs : 3
-- Mineurs : 3
+- Mineurs : 5
 
 ---
+
+**Synthèse** : La spec est bien fondée — le code mort est réel (flags `batchThreshold=100`, `quietStart=0`, `quietEnd=0` confirment les features non activées). Les findings sont des omissions dans la liste des fichiers à modifier (F-SS-4, F-SS-5) et des ambiguïtés sur ce qui disparaît vs reste (F-SS-1, F-SS-6, F-SS-8). Aucun finding ne remet en cause l'objectif de simplification.
 
 ## Verdict de l'agent: GO_WITH_CHANGES
-
-**Changements requis avant implémentation :**
-1. **(F-DA-1)** Spécifier l'intervalle hardcodé du timer MCP dans `startQueue` (ex: 30s ou conserver la valeur actuelle de 5min comme constante locale).
-2. **(F-DA-2)** Ajouter explicitement la suppression de `isQuietHours` dans la liste des imports à retirer de `notification-queue.ts`.
-3. **(F-DA-3)** Clarifier dans R6 que `startQueue` simplifié conserve l'appel `await loadPrefs()`.
-4. **(F-DA-4)** Mandater le remplacement du libellé "batch" par "normal" ou "direct" dans `formatPrefs()` — pas laisser en zone d'ombre optionnelle.
-
----
-
-## Edge Case Hunter — Rapport
-
-## Edge Case Hunter — Rapport
-
-### Findings
-
----
-
-**[BLOQUANT] F-EC-1 — `consumeMcpPending()` : "Conservé intégralement" irréalisable**
-
-- **Scenario** : La spec §6 (Patterns) dit "Conservé intégralement" pour `consumeMcpPending()`, mais la fonction accède directement à `queue[]` (ligne 327 : `queue.push(fullItem)`) et appelle `saveQueue()` (ligne 331) — deux constructs supprimés par R11. R5 contredit §6 en disant "appelle `enqueue()` pour chaque item valide". La fonction DOIT être modifiée mais la spec est contradictoire.
-- **Source** : R5 §2 vs §6 Pattern `consumeMcpPending()`, R11 §2
-- **Impact** : Si l'implémenteur suit "Conservé intégralement" littéralement → compile error sur `queue.push` et appel de `saveQueue` inexistant. Si l'implémenteur suit R5 et appelle `enqueue()`, la modification est correcte mais non documentée dans §5 (tableau fichiers/actions ne mentionne pas `consumeMcpPending` explicitement comme à modifier).
-- **Fréquence estimée** : certain (le code actuel est incompatible avec la suppression de `queue[]`)
-
----
-
-**[MAJEUR] F-EC-2 — Interval timer non spécifié après suppression de `batchIntervalMs`**
-
-- **Scenario** : `startQueue()` utilise actuellement `prefs.batchIntervalMs` (5 minutes) comme intervalle de `setInterval`. R8 supprime `batchIntervalMs` de `NotificationPrefs`. R6 dit que le timer doit appeler `consumeMcpPending()` périodiquement, mais ne spécifie pas quelle valeur hardcoder. L'implémenteur doit inventer un intervalle sans guidance.
-- **Source** : R6 §2, R8 §2, `startQueue()` ligne 358 : `prefs.batchIntervalMs`
-- **Impact** : Intervalle incohérent selon l'implémenteur (5s → spam I/O, 10min → notifications MCP en retard). Comportement observable en production sans base dans la spec.
-- **Fréquence estimée** : certain (choix arbitraire inévitable)
-
----
-
-**[MAJEUR] F-EC-3 — `getDefaultPrefs()` non listée pour modification malgré changement de type**
-
-- **Scenario** : `getDefaultPrefs()` dans `notification-prefs.ts` retourne un `NotificationPrefs` complet incluant `quietStart: 20, quietEnd: 9, batchIntervalMs: 5*60*1000, batchThreshold: 5`. Après suppression de ces champs du type (R8), la fonction doit être mise à jour. Elle n'est listée ni dans R12 (supprimées) ni dans la description de modification de `notification-prefs.ts` (§5). Utilisée dans les tests (`beforeEach`) et potentiellement ailleurs.
-- **Source** : R8 §2, §5 `notification-prefs.ts: Modifier`, `getDefaultPrefs()` ligne 125-135
-- **Impact** : TypeScript error au typecheck (V19) si la fonction retourne des champs qui n'existent plus dans l'interface. Bloque le CI.
-- **Fréquence estimée** : certain (type change sans mise à jour de la fonction)
-
----
-
-**[MAJEUR] F-EC-4 — Import `isQuietHours` dans `notification-queue.ts` non listé pour suppression**
-
-- **Scenario** : `notification-queue.ts` ligne 23 importe `isQuietHours` depuis `notification-prefs.ts`. R12 supprime `isQuietHours` de `notification-prefs.ts`. R13 liste explicitement la suppression de l'import dans `heartbeat.ts`, mais notification-queue.ts n'est pas mentionné pour cet import. Si `isQuietHours` est supprimé du module source, l'import dans `notification-queue.ts` provoque une compile error.
-- **Source** : R12 §2, R13 §2, `notification-queue.ts` ligne 23
-- **Impact** : Compile error (V19 échoue) — bloque CI. Détectable mais unlisted → risque d'oubli.
-- **Fréquence estimée** : probable si l'implémenteur suit R13 pour heartbeat mais oublie la même correction dans notification-queue.ts
-
----
-
-**[MAJEUR] F-EC-5 — Perte silencieuse du `createdAt` des items MCP lors du passage à `enqueue()`**
-
-- **Scenario** : L'implémentation actuelle de `consumeMcpPending()` préserve le `createdAt` original de l'item MCP (`createdAt: item.createdAt || Date.now()`). Si la fonction est modifiée pour appeler `enqueue()` (R5), la signature `Omit<NotificationItem, "id"|"createdAt">` exclut `createdAt` → le timestamp original est perdu et remplacé par `Date.now()` à l'enqueue. Comportement silencieusement différent non documenté.
-- **Source** : R5 §2, §4 Données de sortie, `consumeMcpPending()` ligne 325
-- **Impact** : Les notifications MCP reçues pendant un downtime du relay apparaîtront avec l'heure du redémarrage plutôt que leur heure de création. Impact limité (pas de digest après simplification) mais comportement non spécifié.
-- **Fréquence estimée** : rare (uniquement si relay redémarre avec items MCP en attente)
-
----
-
-**[MINEUR] F-EC-6 — `/notify status` affiche "batch" pour des types qui envoient immédiatement**
-
-- **Scenario** : Après simplification, tous les types envoient immédiatement sauf désactivation. Pourtant `formatPrefs()` adapté (R10) continuera d'afficher "batch" pour les types non-`immediate` (ex: `task : batch`, `pr : batch`). Ce label est trompeur : "batch" implique une file d'attente qui n'existe plus.
-- **Source** : §4 Données de sortie, §9 Zone d'ombre #4
-- **Impact** : Confusion UX si l'utilisateur tente de comprendre le système via `/notify status`. Déjà documenté comme acceptable "pour la V1".
-- **Fréquence estimée** : fréquent (affiché à chaque `/notify status`)
-
----
-
-**[MINEUR] F-EC-7 — `config/notification-prefs.json` peut contenir des champs TypeScript-invalides post-migration**
-
-- **Scenario** : Après mise à jour de `notification-prefs.json` (§5), les champs `quietStart/quietEnd/batchIntervalMs/batchThreshold` sont supprimés. Mais si le relay redémarre avant la mise à jour du fichier (ex: déploiement partiel), `loadPrefs()` reçoit un JSON avec ces champs extra. Via `...DEFAULT_PREFS, ...parsed`, les champs extras du `parsed` (de type `any`) sont spreadés sur le résultat typé `NotificationPrefs` → à l'exécution l'objet porte des champs fantômes. Constraint 7 affirme que c'est géré, mais si du code tente d'accéder à `prefs.batchIntervalMs` via un autre chemin (ex: tests non adaptés), undefined.
-- **Source** : §7 Contrainte 7, `loadPrefs()` ligne 55-61
-- **Impact** : Risque très faible en production (déjà confirmé dans constraint 7), mais les tests non-adaptés pourraient recevoir `undefined` là où ils attendraient un nombre.
-- **Fréquence estimée** : rare (uniquement en déploiement partiel ou tests non migrés)
-
----
-
-### Statistiques
-
-- **Bloquants** : 1 (F-EC-1)
-- **Majeurs** : 4 (F-EC-2, F-EC-3, F-EC-4, F-EC-5)
-- **Mineurs** : 2 (F-EC-6, F-EC-7)
-
----
-
-## Verdict de l'agent: GO_WITH_CHANGES
-
-La spec est solide sur le périmètre et les critères de validation. Mais trois corrections sont requises avant implémentation : (1) clarifier explicitement que `consumeMcpPending()` doit être modifiée pour appeler `enqueue()` et supprimer les références à `queue[]`/`saveQueue()` — la contradiction §6 vs R5 doit être levée ; (2) spécifier la valeur hardcodée de l'intervalle timer dans `startQueue()` (suggestion : conserver 5 minutes = 300000ms) ; (3) lister `getDefaultPrefs()` et l'import `isQuietHours` dans notification-queue.ts comme modifications requises dans §5.
-
----
-
-## Simplicity Skeptic — Rapport
-
-J'ai tout ce qu'il me faut. Voici le rapport.
-
----
-
-## Simplicity Skeptic — Rapport
-
-### Findings
-
-**[BLOQUANT] F-SS-1 — `consumeMcpPending()` : "conservé intégralement" impossible après suppression de `queue[]`**
-- Source : §6 Patterns ("conservé intégralement") vs R5 ("appelle `enqueue()` pour chaque item valide") vs R11 (suppression de `queue[]`)
-- Description : Le code actuel (`notification-queue.ts:327`) fait `queue.push(fullItem)` directement — pas `enqueue()`. Après suppression de `queue[]` (R11), ce code ne compile plus. La spec affirme deux choses contradictoires : "conservé intégralement" (§6) ET "appelle `enqueue()` pour chaque item valide" (R5). En réalité une modification est obligatoire pour remplacer `queue.push()` par `await enqueue()`, mais aucun fichier de la section §5 n'identifie cette modification dans le corps de `consumeMcpPending()`.
-- Alternative : Déclarer explicitement dans §5 que `consumeMcpPending()` sera modifié pour appeler `enqueue({type, severity, message, data})` à la place du `queue.push()` direct, et supprimer le `saveQueue()` final.
-- Codebase : `src/notification-queue.ts:317-337`
-
----
-
-**[MAJEUR] F-SS-2 — Intervalle du timer `startQueue()` non défini après suppression de `batchIntervalMs`**
-- Source : R6, R8, §5 `notification-queue.ts`
-- Description : Le timer de `startQueue()` utilise `prefs.batchIntervalMs` comme intervalle (ligne 358 : `timer = setInterval(..., prefs.batchIntervalMs)`). R8 supprime `batchIntervalMs` de `NotificationPrefs` et de `DEFAULT_PREFS`. La spec ne définit nulle part l'intervalle de remplacement du timer MCP. L'implémenteur devra inventer une valeur (hardcodée ? nouvelle constante ?) sans guidance.
-- Alternative : Déclarer une constante `MCP_POLL_INTERVAL_MS = 5 * 60 * 1000` dans la spec (reprenant la valeur existante), ou préciser que le timer garde la valeur actuelle en dur.
-- Codebase : `src/notification-queue.ts:351-358`
-
-**[MAJEUR] F-SS-3 — `getQueueSize()` : contradiction entre V4 (garder) et R11 (supprimer)**
-- Source : R11 ("Fonctions supprimées : `getQueue`, `loadQueue`... état mutable `queue[]` supprimé") vs V4 ("Unit test : after enqueue, getQueueSize() === 0")
-- Description : R11 liste `getQueue` à supprimer mais ne mentionne pas `getQueueSize()`. V4 teste explicitement `getQueueSize()` (implique son existence). La zone d'ombre §9 #3 soulève la question "peut être utilisé hors des fichiers explorés" sans trancher. Résultat : l'implémenteur ne sait pas si la fonction est conservée (retournant 0) ou supprimée. Si supprimée, V4 est invalide. Si conservée, R11 est incomplet.
-- Alternative : Décider explicitement : soit conserver `getQueueSize()` retournant toujours `0` (pour compatibilité monitoring, V4 valide), soit la supprimer et retirer V4.
-- Codebase : `src/notification-queue.ts:368-370`, tests `notification-queue.test.ts:185,198,232,235,240`
-
----
-
-**[MINEUR] F-SS-4 — Label "batch" trompeur après suppression du batching**
-- Source : §4, §9 zone d'ombre #4
-- Description : Après simplification, `formatPrefs()` affiche "batch" pour les types non-`immediate`. La spec identifie ce problème en §9 ("ce libellé est trompeur mais acceptable pour la V1 — note à documenter") sans prendre de décision. Le résultat : `/notify status` affichera "task : batch" alors que le batching n'existe plus, créant une confusion persistante pour l'utilisateur.
-- Alternative : Changer le label en "normal" dans `formatPrefs()` — 1 ligne, coût nul, résout le problème dans ce même sprint.
-
-**[MINEUR] F-SS-5 — V13/V14 testent un comportement implicite non spécifié**
-- Source : §8, V13 ("réponse 'Usage:' par défaut"), V14
-- Description : Les critères V13/V14 supposent que les commandes `/notify quiet` et `/notify TYPE batch` tombent dans le fallback "Usage:". C'est correct — le fallback final existe (`profile.ts:141`). Mais V13/V14 formulent "réponse 'Usage:' par défaut" comme si c'était un comportement garanti par design, alors que c'est un artefact du handler existant. Après suppression des handlers `quiet` et `batch`, le fallback sera effectivement atteint, mais la spec devrait noter que le comportement attendu est "aucun handler capturé → fallback Usage existant" plutôt que "réponse par défaut".
-- Codebase : `src/commands/profile.ts:141-144`
-
----
-
-### Statistiques
-- Bloquants : 1
-- Majeurs : 2
-- Mineurs : 2
-
----
-
-## Verdict de l'agent: GO_WITH_CHANGES
-
-Le cœur de la spec est solide : problème bien borné, périmètre identifié, V-critères complets. Mais F-SS-1 est réellement bloquant pour l'implémenteur — `consumeMcpPending()` devra obligatoirement être modifié (pas "conservé intégralement") et cette modification n'est pas déclarée. F-SS-2 laissera l'implémenteur sans guidance sur l'intervalle du timer. Ces deux points doivent être corrigés dans la spec avant implémentation.
