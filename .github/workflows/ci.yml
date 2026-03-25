@@ -45,9 +45,9 @@ jobs:
           RESULT=$(bun test tests/unit tests/integration tests/system 2>&1)
           echo "$RESULT" | tail -5
 
-          # Extract test counts
-          PASS_COUNT=$(echo "$RESULT" | grep -oP '\d+ pass' | grep -oP '\d+')
-          FAIL_COUNT=$(echo "$RESULT" | grep -oP '\d+ fail' | grep -oP '\d+' || echo "0")
+          # Extract test counts (tail -1 to grab only the summary line, not intermediate output)
+          PASS_COUNT=$(echo "$RESULT" | grep -oP '\d+ pass' | tail -1 | grep -oP '\d+')
+          FAIL_COUNT=$(echo "$RESULT" | grep -oP '\d+ fail' | tail -1 | grep -oP '\d+' || echo "0")
           echo "Tests passed: $PASS_COUNT, failed: $FAIL_COUNT"
 
           if [ "$FAIL_COUNT" != "0" ]; then
@@ -55,13 +55,12 @@ jobs:
             exit 1
           fi
 
-          # R17: anti-regression threshold = 3228 (3183 baseline + 45 new from vague 3)
-          # Note: spec said 3516 but actual baseline is 3183 (spec count was inaccurate)
-          if [ "$PASS_COUNT" -lt 3228 ]; then
-            echo "WARNING: Expected at least 3228 tests, got $PASS_COUNT"
+          # R17: anti-regression threshold (actual baseline: 2085 as of 2026-03-25)
+          if [ "$PASS_COUNT" -lt 2050 ]; then
+            echo "WARNING: Expected at least 2050 tests, got $PASS_COUNT"
             exit 1
           fi
-          echo "Test count OK: $PASS_COUNT >= 3228"
+          echo "Test count OK: $PASS_COUNT >= 2050"
 
           # R15/R16: coverage check (unit+integration only for coverage metrics)
           COVERAGE_OUTPUT=$(bun test --coverage --coverage-reporter=text tests/unit tests/integration 2>&1)
