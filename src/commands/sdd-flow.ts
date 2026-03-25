@@ -24,6 +24,7 @@ import {
   runSddReview,
   runSddSpec,
 } from "../sdd-agents.ts";
+import { syncTaskStatusForPhase } from "../sdd-task-sync.ts";
 
 const log = createLogger("sdd-flow");
 
@@ -219,9 +220,15 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
       case "discuss": {
         // sdd_discuss: conversational phase, no job launch (R13)
         await updateStep(chatId, threadId, "discuss", { status: "ok" });
+        // Sync linked task status (best-effort)
+        if (tracker.taskId && bctx.supabase) {
+          await syncTaskStatusForPhase(bctx.supabase, tracker.taskId, "discuss", "ok");
+        }
+        const discussKb = buildSddKeyboard("discuss", name);
         await ctx.reply(
-          "Phase discussion activee. Continuez la conversation pour affiner les decisions.",
-          bctx.threadOpts(ctx),
+          "Phase discussion activee. Continuez la conversation pour affiner les decisions.\n" +
+            "Quand vous etes pret, formalisez en spec.",
+          { ...bctx.threadOpts(ctx), ...(discussKb ? { reply_markup: discussKb } : {}) },
         );
         break;
       }

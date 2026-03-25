@@ -12,7 +12,8 @@ import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
-import { updateStep } from "./pipeline-tracker.ts";
+import { getTracker, type SddPhase, type StepStatus, updateStep } from "./pipeline-tracker.ts";
+import { syncTaskStatusForPhase } from "./sdd-task-sync.ts";
 import { Semaphore } from "./semaphore.ts";
 
 const log = createLogger("job-manager");
@@ -494,6 +495,54 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
           await updateStep(chatIdNum, job.messageThreadId, "implement", { prUrl });
         } catch (err) {
           log.error("Failed to persist prUrl to tracker", { error: String(err) });
+        }
+      }
+    }
+  }
+
+  // SDD-backlog sync: update pipeline step status and sync linked task
+  if (job.type.startsWith("sdd-")) {
+    const typeColonIdx = job.type.indexOf(":");
+    if (typeColonIdx !== -1) {
+      const sddPhase = job.type.substring(4, typeColonIdx); // strip "sdd-"
+      const chatIdNum =
+        typeof job.chatId === "number" ? job.chatId : parseInt(String(job.chatId), 10);
+
+      if (!Number.isNaN(chatIdNum)) {
+        const validPhases: SddPhase[] = [
+          "explore",
+          "discuss",
+          "spec",
+          "challenge",
+          "implement",
+          "review",
+          "doc",
+        ];
+        const typedPhase = sddPhase as SddPhase;
+        const typedStepStatus: StepStatus = job.status === "completed" ? "ok" : "failed";
+        if (validPhases.includes(typedPhase)) {
+          try {
+            await updateStep(chatIdNum, job.messageThreadId, typedPhase, {
+              status: typedStepStatus,
+              summary: job.result?.substring(0, 200) ?? job.error?.substring(0, 200),
+            });
+          } catch (err) {
+            log.warn("SDD step update failed", { error: String(err), sddPhase });
+          }
+
+          // Sync linked task status (best-effort, lazy supabase import)
+          try {
+            const tracker = await getTracker(chatIdNum, job.messageThreadId);
+            if (tracker?.taskId) {
+              const { getConfig } = await import("./config.ts");
+              const { createClient } = await import("@supabase/supabase-js");
+              const config = getConfig();
+              const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+              await syncTaskStatusForPhase(supabase, tracker.taskId, typedPhase, typedStepStatus);
+            }
+          } catch (syncErr) {
+            log.warn("SDD task sync failed (best-effort)", { error: String(syncErr), sddPhase });
+          }
         }
       }
     }
