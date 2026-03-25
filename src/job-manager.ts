@@ -587,6 +587,18 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
 
   // SDD Auto-advance: attempt event-driven transition to next phase
   await tryAutoAdvance(job, botInstance, launch);
+
+  // Emit SDD verdict + trigger feedback loop post-job (R1, R9) — fire-and-forget (F-SS-2)
+  if (job.type.startsWith("sdd-") && job.status === "completed" && job.type.includes(":")) {
+    Promise.resolve()
+      .then(async () => {
+        const { emitSddVerdict } = await import("./sdd-event.ts");
+        await emitSddVerdict(job.id, job.type, job.result);
+        const { runFeedbackLoop } = await import("./feedback-analyzer.ts");
+        await runFeedbackLoop();
+      })
+      .catch((e) => log.warn("post-job SDD hook failed", { error: String(e) }));
+  }
 }
 
 /**

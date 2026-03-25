@@ -2,10 +2,12 @@
  * @module feedback-analyzer
  * @description Analyzes agent feedback signals (NO-GO verdicts, review failures)
  * to detect recurring patterns and generate prompt overlays for SDD agents.
- * Runs as part of the heartbeat feedback loop.
+ * Runs as part of the heartbeat feedback loop and post-SDD-job.
  *
  * Design: pure analysis functions + a runFeedbackLoop orchestrator.
- * Dependencies are injected for testability (isFeatureEnabled, fetchSignals).
+ * Dependencies are injected for testability (isFeatureEnabled, fetchSignals,
+ * generateOverlayFn). The LLM path (Haiku) lives inside getDeps() only,
+ * keeping feedback-analyzer.ts free of a hard import on agent.ts (F-SS-1).
  */
 
 import { createLogger } from "./logger.ts";
@@ -19,7 +21,8 @@ export interface AgentFeedbackSignal {
   agentRole: string;
   outcome: "GO" | "GO_WITH_CHANGES" | "NO-GO" | "APPROVED" | "CHANGES_REQUESTED" | "FAILED";
   timestamp: string;
-  source: "challenge" | "review" | "implement" | "explore";
+  /** Phase that emitted the signal (F-EC-1: "spec" and "discuss" added) */
+  source: "challenge" | "review" | "implement" | "explore" | "spec" | "discuss";
   details?: string;
 }
 
@@ -28,6 +31,8 @@ export interface RecurringPattern {
   failureCount: number;
   source: string;
   recentOutcomes: string[];
+  /** Aggregated details from individual signals — used for LLM overlay (R4) */
+  aggregatedDetails?: string;
 }
 
 export interface FeedbackLoopResult {
@@ -45,11 +50,29 @@ const RECURRENCE_THRESHOLD = 3;
 /** Failure outcomes that count toward the threshold */
 const FAILURE_OUTCOMES = new Set(["NO-GO", "GO_WITH_CHANGES", "CHANGES_REQUESTED", "FAILED"]);
 
+/** Max chars for aggregated details sent to LLM */
+const DETAILS_MAX_CHARS = 500;
+
+/** Max chars for LLM-generated overlay text */
+const LLM_OVERLAY_MAX_CHARS = 300;
+
 // ── Dependency Injection ─────────────────────────────────────
 
 interface Dependencies {
   isFeatureEnabled: (flag: string) => boolean;
   fetchSignals: () => Promise<AgentFeedbackSignal[]>;
+  /**
+   * Generate overlay text for a pattern. When sdd_feedback_llm_overlay is on,
+   * this calls Haiku; otherwise falls back to the static template.
+   * Kept injectable so tests can mock without spawning a CLI process.
+   * Optional: if not provided, falls back to generateOverlayText template directly.
+   */
+  generateOverlayFn?: (
+    agentRole: string,
+    failureCount: number,
+    source: string,
+    aggregatedDetails?: string,
+  ) => Promise<string>;
 }
 
 let _deps: Dependencies | null = null;
@@ -61,13 +84,117 @@ export function _setDependencies(deps: Dependencies | null): void {
   _deps = deps;
 }
 
+/**
+ * Build the real fetchSignals implementation using Supabase.
+ * Reads agent_events filtered by event_type='sdd_verdict' over 7 days.
+ * Returns only negative-outcome signals (FAILURE_OUTCOMES).
+ * Rows with missing/invalid payload fields are skipped defensively (F-DA-2, F-DA-9).
+ */
+async function buildFetchSignals(): Promise<AgentFeedbackSignal[]> {
+  try {
+    const { getConfig } = await import("./config.ts");
+    const { createClient } = await import("@supabase/supabase-js");
+    const config = getConfig();
+    const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("agent_events")
+      .select("agent_role,event_type,payload,created_at")
+      .eq("event_type", "sdd_verdict")
+      .gte("created_at", cutoff);
+
+    if (error) {
+      log.error("fetchSignals: Supabase query failed", { error: String(error) });
+      return [];
+    }
+
+    const signals: AgentFeedbackSignal[] = [];
+    for (const row of data ?? []) {
+      const payload = row.payload;
+      if (!payload || typeof payload !== "object") continue;
+
+      const verdict = payload.verdict as string | undefined;
+      const source = payload.source as string | undefined;
+      if (!verdict || !source) continue;
+
+      // Only return negative-outcome signals (R2)
+      if (!FAILURE_OUTCOMES.has(verdict)) continue;
+
+      signals.push({
+        agentRole: row.agent_role as string,
+        outcome: verdict as AgentFeedbackSignal["outcome"],
+        timestamp: row.created_at as string,
+        source: source as AgentFeedbackSignal["source"],
+        details: typeof payload.details === "string" ? payload.details : undefined,
+      });
+    }
+
+    return signals;
+  } catch (err) {
+    log.error("fetchSignals: unexpected error", { error: String(err) });
+    return [];
+  }
+}
+
+/**
+ * Build the real generateOverlayFn using Haiku (when sdd_feedback_llm_overlay is on).
+ * Falls back to the static template on any error or when the flag is off.
+ */
+function buildGenerateOverlayFn(isFeatureEnabled: (flag: string) => boolean) {
+  return async (
+    agentRole: string,
+    failureCount: number,
+    source: string,
+    aggregatedDetails?: string,
+  ): Promise<string> => {
+    if (isFeatureEnabled("sdd_feedback_llm_overlay") && aggregatedDetails) {
+      try {
+        const { spawnClaude } = await import("./agent.ts");
+        const prompt = [
+          "Tu génères une instruction corrective courte (max 300 chars, en français) pour un agent IA SDD.",
+          `Agent: ${agentRole}`,
+          `Echecs récents (${failureCount}): source=${source}`,
+          `Details des signaux: ${aggregatedDetails.substring(0, DETAILS_MAX_CHARS)}`,
+          'Ecris une instruction d\'action concrète commençant par "ATTENTION :".',
+        ].join("\n");
+
+        const result = await spawnClaude({
+          prompt,
+          model: "claude-haiku-4-5-20251001",
+          effort: "low",
+          useWorktree: false,
+        });
+
+        // Fallback on any failure: exitCode != 0, empty stdout, or result too short
+        if (result.exitCode === 0 && result.stdout.trim().length > 10) {
+          const text = result.stdout.trim().substring(0, LLM_OVERLAY_MAX_CHARS);
+          log.info("LLM overlay generated", { agentRole, source, length: text.length });
+          return text;
+        }
+
+        log.warn("LLM overlay fallback: empty or failed result", {
+          agentRole,
+          exitCode: result.exitCode,
+        });
+      } catch (err) {
+        log.warn("LLM overlay fallback: exception", { agentRole, error: String(err) });
+      }
+    }
+
+    // Fallback to static template (R5)
+    return generateOverlayText(agentRole, failureCount, source);
+  };
+}
+
 function getDeps(): Dependencies {
   if (_deps) return _deps;
   // Default production dependencies — lazy loaded
   const { isFeatureEnabled } = require("./feature-flags.ts");
   return {
     isFeatureEnabled,
-    fetchSignals: async () => [],
+    fetchSignals: buildFetchSignals,
+    generateOverlayFn: buildGenerateOverlayFn(isFeatureEnabled),
   };
 }
 
@@ -76,6 +203,7 @@ function getDeps(): Dependencies {
 /**
  * Analyze a list of agent feedback signals and detect recurring failure patterns.
  * Groups failures by agentRole and source, returns patterns exceeding the threshold.
+ * Aggregates signal details for LLM use.
  */
 export function analyzeAgentFeedback(
   signals: AgentFeedbackSignal[],
@@ -102,11 +230,19 @@ export function analyzeAgentFeedback(
     }
     const dominantSource = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1])[0][0];
 
+    // Aggregate details from failure signals (F-EC-3: use 200 chars per signal)
+    const detailParts = failures
+      .map((f) => f.details)
+      .filter((d): d is string => Boolean(d))
+      .map((d) => d.substring(0, 200));
+    const aggregatedDetails = detailParts.length > 0 ? detailParts.join(" | ") : undefined;
+
     patterns.push({
       agentRole: role,
       failureCount: failures.length,
       source: dominantSource,
       recentOutcomes: roleSignals.map((s) => s.outcome),
+      aggregatedDetails,
     });
   }
 
@@ -115,8 +251,7 @@ export function analyzeAgentFeedback(
 
 /**
  * Generate a corrective overlay text based on the detected failure pattern.
- * This is a deterministic template — no LLM call needed for the initial version.
- * Future improvement: use Haiku to generate more contextual overlays.
+ * Static template fallback — used when LLM mode is disabled or fails.
  */
 export function generateOverlayText(
   agentRole: string,
@@ -138,6 +273,13 @@ export function generateOverlayText(
     explore: {
       default: `ATTENTION : ${failureCount} explorations recentes ont echoue. Assure-toi que le rapport est structure et complet avant de rendre un verdict.`,
     },
+    spec: {
+      "spec-architect": `ATTENTION : ${failureCount} specs recentes ont ete rejetees. Revois la structure des 9 sections et assure-toi que chaque V-critere est testable.`,
+      default: `ATTENTION : ${failureCount} echecs recents lors de la phase spec. Ameliore la qualite des specifications.`,
+    },
+    discuss: {
+      default: `ATTENTION : ${failureCount} echecs recents lors de la phase discussion. Assure-toi de bien capturer les decisions et contraintes avant de passer a la specification.`,
+    },
   };
 
   const sourceTemplates = templates[source] || templates.challenge;
@@ -157,6 +299,8 @@ export function generateOverlayText(
  * 3. Fetch recent signals
  * 4. Analyze for recurring patterns
  * 5. Create overlays for detected patterns (skip duplicates)
+ *    — uses LLM (Haiku) when sdd_feedback_llm_overlay is enabled (R4)
+ *    — falls back to static templates otherwise (R5)
  */
 export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
   const deps = getDeps();
@@ -197,11 +341,24 @@ export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
       continue;
     }
 
-    const overlayText = generateOverlayText(
-      pattern.agentRole,
-      pattern.failureCount,
-      pattern.source,
-    );
+    // Generate overlay text — LLM mode if enabled and details available, else template
+    let overlayText: string;
+    if (deps.generateOverlayFn) {
+      try {
+        overlayText = await deps.generateOverlayFn(
+          pattern.agentRole,
+          pattern.failureCount,
+          pattern.source,
+          pattern.aggregatedDetails,
+        );
+      } catch (err) {
+        log.warn("generateOverlayFn failed, using template fallback", { error: String(err) });
+        overlayText = generateOverlayText(pattern.agentRole, pattern.failureCount, pattern.source);
+      }
+    } else {
+      overlayText = generateOverlayText(pattern.agentRole, pattern.failureCount, pattern.source);
+    }
+
     addOverlay({
       agentRole: pattern.agentRole,
       overlayText,

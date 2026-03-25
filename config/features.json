@@ -9,5 +9,6 @@
   "sdd_auto_advance": false,
   "sdd_auto_deploy": true,
   "nlu_feature_request": false,
-  "prompt_feedback_loop": false
+  "prompt_feedback_loop": false,
+  "sdd_feedback_llm_overlay": false
 }

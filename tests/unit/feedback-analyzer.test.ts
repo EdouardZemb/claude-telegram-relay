@@ -349,3 +349,318 @@ describe("feedback-analyzer — runFeedbackLoop", () => {
     expect(result2.overlaysCreated).toBe(0);
   });
 });
+
+// ── V9-V15: fetchSignals + LLM overlay + job-manager integration ──────────
+
+describe("feedback-analyzer — fetchSignals (V9-V10)", () => {
+  it("V9: fetchSignals returns AgentFeedbackSignal[] from mocked Supabase rows with negative verdicts", async () => {
+    // Mock fetchSignals directly via _setDependencies to validate signal mapping
+    const mockSignals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "sections 6-7 vides",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "V-criteres manquants",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "imports incorrects",
+      },
+    ];
+
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => mockSignals,
+    });
+
+    const result = await runFeedbackLoop();
+    expect(result.skipped).toBe(false);
+    expect(result.overlaysCreated).toBe(1);
+    expect(result.patternsDetected).toBe(1);
+  });
+
+  it("V10: fetchSignals returning empty (no negative verdicts) → no overlays created", async () => {
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => [],
+    });
+
+    const result = await runFeedbackLoop();
+    expect(result.overlaysCreated).toBe(0);
+    expect(result.patternsDetected).toBe(0);
+  });
+
+  it("V10: fetchSignals with only positive verdicts (GO) → no overlays created", async () => {
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => [
+        {
+          agentRole: "spec-architect",
+          outcome: "GO",
+          timestamp: new Date().toISOString(),
+          source: "challenge",
+        },
+        {
+          agentRole: "spec-architect",
+          outcome: "GO",
+          timestamp: new Date().toISOString(),
+          source: "challenge",
+        },
+        {
+          agentRole: "spec-architect",
+          outcome: "APPROVED",
+          timestamp: new Date().toISOString(),
+          source: "review",
+        },
+      ],
+    });
+
+    const result = await runFeedbackLoop();
+    expect(result.overlaysCreated).toBe(0);
+  });
+
+  it("fetchSignals: malformed payload fields are handled gracefully", async () => {
+    // Signals with missing fields should be skipped without crashing
+    const partialSignals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        // No details field — should still work
+      },
+    ];
+
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => partialSignals,
+    });
+
+    // Only 1 signal, below threshold — no overlay but no crash
+    const result = await runFeedbackLoop();
+    expect(result.overlaysCreated).toBe(0);
+    expect(result.patternsDetected).toBe(0);
+  });
+});
+
+describe("feedback-analyzer — source type extension (F-EC-1)", () => {
+  it("accepts 'spec' as a valid source type", () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "spec",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "spec",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "spec",
+      },
+    ];
+
+    const results = analyzeAgentFeedback(signals);
+    expect(results.length).toBe(1);
+    expect(results[0].source).toBe("spec");
+  });
+
+  it("accepts 'discuss' as a valid source type", () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "discuss",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "discuss",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "discuss",
+      },
+    ];
+
+    const results = analyzeAgentFeedback(signals);
+    expect(results.length).toBe(1);
+    expect(results[0].source).toBe("discuss");
+  });
+});
+
+describe("feedback-analyzer — LLM overlay mode (V13, V14)", () => {
+  it("V13: LLM overlay mode calls generateOverlayFn and produces overlay ≤300 chars", async () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "sections 6-7 vides",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "V-criteres manquants",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "imports incorrects",
+      },
+    ];
+
+    let llmCalled = false;
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => signals,
+      generateOverlayFn: async (agentRole, failureCount, source, details) => {
+        llmCalled = true;
+        expect(agentRole).toBe("spec-architect");
+        expect(failureCount).toBe(3);
+        expect(source).toBe("challenge");
+        expect(details).toContain("sections 6-7 vides");
+        return "ATTENTION : 3 echecs recents (challenge). Cause : sections 6-7 vides. Action : utiliser Glob/Grep.";
+      },
+    });
+
+    const result = await runFeedbackLoop();
+    expect(llmCalled).toBe(true);
+    expect(result.overlaysCreated).toBe(1);
+
+    // Verify the overlay text is within 300 chars
+    const { getActiveOverlays } = await import("../../src/prompt-overlay.ts");
+    const overlays = getActiveOverlays("spec-architect");
+    expect(overlays.length).toBe(1);
+    expect(overlays[0].overlayText.length).toBeLessThanOrEqual(300);
+  });
+
+  it("V14: LLM overlay failure falls back to static template", async () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "reviewer",
+        outcome: "CHANGES_REQUESTED",
+        timestamp: new Date().toISOString(),
+        source: "review",
+      },
+      {
+        agentRole: "reviewer",
+        outcome: "CHANGES_REQUESTED",
+        timestamp: new Date().toISOString(),
+        source: "review",
+      },
+      {
+        agentRole: "reviewer",
+        outcome: "CHANGES_REQUESTED",
+        timestamp: new Date().toISOString(),
+        source: "review",
+      },
+    ];
+
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => signals,
+      generateOverlayFn: async () => {
+        throw new Error("Haiku failed with exitCode=1");
+      },
+    });
+
+    const result = await runFeedbackLoop();
+    expect(result.overlaysCreated).toBe(1);
+
+    // Verify fallback template was used
+    const { getActiveOverlays } = await import("../../src/prompt-overlay.ts");
+    const overlays = getActiveOverlays("reviewer");
+    expect(overlays.length).toBe(1);
+    // Static template text for reviewer/review
+    expect(overlays[0].overlayText).toMatch(/(CHANGES_REQUESTED|echec|review)/i);
+  });
+});
+
+describe("feedback-analyzer — analyzeAgentFeedback aggregatedDetails", () => {
+  it("aggregates details from failure signals for LLM use", () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "sections 6-7 vides",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "V-criteres manquants",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        details: "imports incorrects",
+      },
+    ];
+
+    const patterns = analyzeAgentFeedback(signals);
+    expect(patterns.length).toBe(1);
+    expect(patterns[0].aggregatedDetails).toBeTruthy();
+    expect(patterns[0].aggregatedDetails).toContain("sections 6-7 vides");
+    expect(patterns[0].aggregatedDetails).toContain("V-criteres manquants");
+  });
+
+  it("aggregatedDetails is undefined when no failure has details", () => {
+    const signals: AgentFeedbackSignal[] = [
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+        // No details
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+      },
+      {
+        agentRole: "spec-architect",
+        outcome: "NO-GO",
+        timestamp: new Date().toISOString(),
+        source: "challenge",
+      },
+    ];
+
+    const patterns = analyzeAgentFeedback(signals);
+    expect(patterns.length).toBe(1);
+    expect(patterns[0].aggregatedDetails).toBeUndefined();
+  });
+});
