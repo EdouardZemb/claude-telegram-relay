@@ -6,5 +6,6 @@
   "llmops_monitoring": true,
   "agent_role_memory": true,
   "sdd_auto_merge": true,
-  "sdd_auto_advance": false
+  "sdd_auto_advance": false,
+  "sdd_auto_deploy": true
 }

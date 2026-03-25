@@ -15,7 +15,28 @@ jobs:
           git checkout master
           git pull origin master
 
+      - name: Check sdd_auto_deploy flag
+        id: check_flag
+        run: |
+          cd /home/edouard/claude-telegram-relay
+          FLAGS_FILE="config/features.json"
+          if [ -f "$FLAGS_FILE" ]; then
+            # Use bun to read the flag (always available on self-hosted runner)
+            DEPLOY_ENABLED=$(bun -e "
+              try {
+                const f = require('./$FLAGS_FILE');
+                console.log(f.sdd_auto_deploy !== false ? 'true' : 'false');
+              } catch { console.log('true'); }
+            " 2>/dev/null || echo "true")
+          else
+            # Backward compat: deploy by default if file is missing
+            DEPLOY_ENABLED="true"
+          fi
+          echo "DEPLOY_ENABLED=$DEPLOY_ENABLED" >> "$GITHUB_OUTPUT"
+          echo "[check_flag] sdd_auto_deploy=$DEPLOY_ENABLED"
+
       - name: Install deps if needed
+        if: steps.check_flag.outputs.DEPLOY_ENABLED == 'true'
         run: |
           cd /home/edouard/claude-telegram-relay
           if git diff --name-only HEAD~1 HEAD | grep -q "package.json"; then
@@ -23,6 +44,7 @@ jobs:
           fi
 
       - name: Restart services
+        if: steps.check_flag.outputs.DEPLOY_ENABLED == 'true'
         run: |
           cd /home/edouard/claude-telegram-relay
           npx pm2 restart claude-relay --update-env
@@ -30,6 +52,7 @@ jobs:
           sleep 5
 
       - name: Smoke test
+        if: steps.check_flag.outputs.DEPLOY_ENABLED == 'true'
         run: |
           cd /home/edouard/claude-telegram-relay
           COMMIT=$(git log --oneline -1)
@@ -44,3 +67,9 @@ jobs:
             bash scripts/rollback.sh "smoke test failed after deploy"
             exit 1
           fi
+
+      - name: Deploy skipped
+        if: steps.check_flag.outputs.DEPLOY_ENABLED != 'true'
+        run: |
+          echo "Deploy skipped: sdd_auto_deploy flag is disabled in config/features.json"
+          echo "Code has been pulled but services were NOT restarted."

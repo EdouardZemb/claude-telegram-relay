@@ -128,7 +128,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 - `claude-heartbeat` — Autonomous pulse every 10min (alert checks, memory archival, morning digest)
 - `claude-system-alerts` — System health monitoring (every 15min)
 
-**GitHub Actions** (self-hosted runner): `ci.yml` (PR checks: typecheck, tests, doc freshness, per-file coverage, E2E) and `deploy.yml` (master: git pull, pm2 restart, smoke test, auto-rollback).
+**GitHub Actions** (self-hosted runner): `ci.yml` (PR checks: typecheck, tests, doc freshness, per-file coverage, E2E) and `deploy.yml` (master: git pull, pm2 restart, smoke test, auto-rollback, gated by `sdd_auto_deploy` feature flag).
 
 **Dashboard** (port 3456): Kanban board with project filter, sprint progress, task cards.
 
