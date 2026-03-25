@@ -28,8 +28,8 @@ describe("E2E Telegram Commands", () => {
     const reply = await fw.sendCommand("/help");
     expect(reply.length).toBeGreaterThan(0);
     fw.assertContains(reply, "COMMANDES");
-    fw.assertContains(reply, "/task");
-    fw.assertContains(reply, "/status");
+    // Interactive menu: categories shown via inline keyboard, individual commands in sub-menus
+    fw.assertContains(reply, "categorie");
   });
 
   test("/status returns health info", async () => {

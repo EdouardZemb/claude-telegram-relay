@@ -17,11 +17,11 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `config.ts` | Centralized env var validation via Zod: lazy singleton getConfig(), AppConfig type, _resetConfigForTesting() for tests |
 | `topic-config.ts` | Per-topic system prompts and command allowlists for forum groups |
 | `loader.ts` | Auto-discovers and loads Composer modules from src/commands/ |
-| `commands/help.ts` | Composer: /help, /workflow, /status, /monitor |
-| `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start, /done |
+| `commands/help.ts` | Composer: /help (interactive category menu + menu_ callbacks), /workflow, /status, /monitor |
+| `commands/tasks.ts` | Composer: /task, /backlog, /sprint, /start (onboarding + task start), /done + task_ callbacks |
 | `commands/memory-cmds.ts` | Composer: /brain, /ideas, /remind |
-| `commands/quality.ts` | Composer: /metrics, /retro, /alerts, /cost + retro callbacks |
-| `commands/profile.ts` | Composer: /profile, /notify + profile update callbacks |
+| `commands/quality.ts` | Composer: /metrics (+ quality nav keyboard), /retro, /alerts, /cost + retro callbacks |
+| `commands/profile.ts` | Composer: /profile, /notify (inline prefs keyboard + notify_ callbacks) |
 | `commands/project.ts` | Composer: /projects, /project |
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
@@ -57,7 +57,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review) |
-| `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases |
+| `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases, categories |
+| `inline-menus.ts` | Progressive inline menu system: category grouping, dynamic keyboards, onboarding, quality/notify navigation |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback |
 | `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
 | `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
@@ -66,11 +67,11 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 | Command | Purpose |
 |---------|---------|
-| `/help` | Command reference |
+| `/help` | Interactive command menu with category navigation (inline keyboard) |
 | `/task <title>` | Create task (--desc, --priority, --hours) |
 | `/backlog` | View backlog |
 | `/sprint` | View current sprint + progress bar |
-| `/start <id>` | Mark task in_progress |
+| `/start [id]` | Without args: onboarding with quick-access buttons. With id: mark task in_progress |
 | `/done <id>` | Mark task complete |
 | `/docs` | Document management (list, search, stats, delete, categories) |
 | `/explore <query>` | Launch Explorer agent to investigate a topic in the codebase |
@@ -129,7 +130,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    48 TypeScript modules (core logic)
+src/                    50 TypeScript modules (core logic)
   commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
 dashboard/              Kanban board (server.ts + index.html)
@@ -137,7 +138,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  1910 tests (unit + integration + E2E)
+tests/                  1975 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup, per-file coverage check
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -165,7 +166,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (1910 tests, all must pass before merge)
+- Tests: `bun test` (1975 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

@@ -9,6 +9,7 @@ import { Composer, type Context } from "grammy";
 import { z } from "zod";
 import type { BotContext } from "../bot-context.ts";
 import { getConfig } from "../config.ts";
+import { buildOnboardingKeyboard } from "../inline-menus.ts";
 import { enqueue } from "../notification-queue.ts";
 import { err, ok, type Result } from "../result.ts";
 
@@ -266,12 +267,23 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     }
   });
 
-  // /start — mark a task as in_progress by ID prefix
+  // /start — mark a task as in_progress by ID prefix, or show onboarding
   composer.command("start", async (ctx) => {
     // grammY auto-handles /start for new bots, but we override for task management
-    if (!bctx.supabase) return;
     const idPrefix = ctx.match?.trim();
-    if (!idPrefix) return; // /start without args = normal bot start, do nothing
+    if (!idPrefix) {
+      // /start without args = interactive onboarding
+      const welcome = [
+        "Bienvenue ! Je suis ton assistant de developpement.",
+        "",
+        "Je peux gerer tes taches, explorer le codebase, suivre les metriques,",
+        "et bien plus encore. Voici quelques raccourcis pour commencer :",
+      ].join("\n");
+      const kb = buildOnboardingKeyboard();
+      await ctx.reply(welcome, { ...bctx.threadOpts(ctx), reply_markup: kb });
+      return;
+    }
+    if (!bctx.supabase) return;
     const blocked = bctx.commandGuard(ctx, "start");
     if (blocked) {
       await ctx.reply(blocked, bctx.threadOpts(ctx));
@@ -323,6 +335,82 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       }
     } else {
       await ctx.reply("Erreur lors de la mise a jour.", bctx.threadOpts(ctx));
+    }
+  });
+
+  // ── Task action callbacks (task_ prefix) ──────────────────────
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+    if (!data.startsWith("task_")) {
+      await next();
+      return;
+    }
+    if (!bctx.supabase) {
+      await ctx.answerCallbackQuery({ text: "Supabase non configure." });
+      return;
+    }
+
+    // Parse callback: task_{action}:{shortId}
+    const withoutPrefix = data.substring("task_".length);
+    const colonIndex = withoutPrefix.indexOf(":");
+    if (colonIndex === -1) {
+      await ctx.answerCallbackQuery({ text: "Format invalide." });
+      return;
+    }
+
+    const action = withoutPrefix.substring(0, colonIndex);
+    const shortId = withoutPrefix.substring(colonIndex + 1);
+
+    if (action === "start") {
+      // Find task by short ID prefix in backlog
+      const { data: tasks } = await bctx.supabase
+        .from("tasks")
+        .select("id, title")
+        .eq("status", "backlog");
+
+      const matches = (tasks || []).filter((t: { id: string }) => t.id.startsWith(shortId));
+      if (matches.length !== 1) {
+        await ctx.answerCallbackQuery({ text: "Tache introuvable ou ambigue." });
+        return;
+      }
+
+      const updated = await updateTaskStatus(bctx.supabase, matches[0].id, "in_progress");
+      if (updated) {
+        await ctx.answerCallbackQuery({ text: "Tache demarree !" });
+        try {
+          await ctx.editMessageText(`En cours: ${updated.title}`);
+        } catch {
+          await ctx.reply(`En cours: ${updated.title}`, bctx.threadOpts(ctx));
+        }
+      } else {
+        await ctx.answerCallbackQuery({ text: "Erreur." });
+      }
+    } else if (action === "done") {
+      // Find task by short ID prefix
+      const { data: tasks } = await bctx.supabase
+        .from("tasks")
+        .select("id, title")
+        .neq("status", "done");
+
+      const matches = (tasks || []).filter((t: { id: string }) => t.id.startsWith(shortId));
+      if (matches.length !== 1) {
+        await ctx.answerCallbackQuery({ text: "Tache introuvable ou ambigue." });
+        return;
+      }
+
+      const updated = await updateTaskStatus(bctx.supabase, matches[0].id, "done");
+      if (updated) {
+        await ctx.answerCallbackQuery({ text: "Tache terminee !" });
+        try {
+          await ctx.editMessageText(`Fait: ${updated.title}`);
+        } catch {
+          await ctx.reply(`Fait: ${updated.title}`, bctx.threadOpts(ctx));
+        }
+      } else {
+        await ctx.answerCallbackQuery({ text: "Erreur." });
+      }
+    } else {
+      await ctx.answerCallbackQuery({ text: "Action inconnue." });
     }
   });
 

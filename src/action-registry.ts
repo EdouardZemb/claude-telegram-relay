@@ -34,6 +34,8 @@ export interface ActionDefinition {
   aliases: string[];
   /** Whether this command can run as a background job (S46) */
   backgroundEligible?: boolean;
+  /** Menu category for progressive inline menu grouping */
+  category?: string;
 }
 
 // ── Registry ─────────────────────────────────────────────────
@@ -49,6 +51,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "help",
     requiresSupabase: false,
     aliases: ["aide", "commandes", "comment ca marche", "que sais-tu faire"],
+    category: "system",
   },
   {
     command: "workflow",
@@ -59,6 +62,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "help",
     requiresSupabase: false,
     aliases: ["processus", "workflow bmad", "etapes"],
+    category: "system",
   },
   {
     command: "status",
@@ -69,6 +73,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "help",
     requiresSupabase: false,
     aliases: ["etat serveur", "sante", "systeme"],
+    category: "system",
   },
   {
     command: "monitor",
@@ -79,6 +84,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "help",
     requiresSupabase: false,
     aliases: ["monitoring", "production", "performances"],
+    category: "system",
   },
 
   // ─── tasks.ts ───
@@ -91,6 +97,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "tasks",
     requiresSupabase: true,
     aliases: ["creer tache", "nouvelle tache", "ajouter tache", "il faut faire"],
+    category: "tasks",
   },
   {
     command: "backlog",
@@ -101,6 +108,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "tasks",
     requiresSupabase: true,
     aliases: ["backlog", "taches a faire", "liste taches", "quoi faire"],
+    category: "tasks",
   },
   {
     command: "sprint",
@@ -111,6 +119,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "tasks",
     requiresSupabase: true,
     aliases: ["sprint", "avancement", "progression", "ou en est-on"],
+    category: "tasks",
   },
   {
     command: "start",
@@ -121,6 +130,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "tasks",
     requiresSupabase: true,
     aliases: ["demarrer tache", "commencer tache", "prendre tache"],
+    category: "tasks",
   },
   {
     command: "done",
@@ -131,6 +141,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "tasks",
     requiresSupabase: true,
     aliases: ["terminer tache", "finir tache", "tache terminee", "c'est fait"],
+    category: "tasks",
   },
 
   // ─── exploration.ts ───
@@ -159,6 +170,7 @@ const ACTIONS: ActionDefinition[] = [
       "alternative",
     ],
     backgroundEligible: true,
+    category: "knowledge",
   },
 
   // ─── documents.ts ───
@@ -185,6 +197,7 @@ const ACTIONS: ActionDefinition[] = [
       "facture",
       "contrat",
     ],
+    category: "knowledge",
   },
 
   // ─── memory-cmds.ts ───
@@ -197,6 +210,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "memory-cmds",
     requiresSupabase: true,
     aliases: ["synthese memoire", "resume memoire", "qu'est-ce que tu sais", "memoire"],
+    category: "knowledge",
   },
   {
     command: "ideas",
@@ -210,6 +224,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "memory-cmds",
     requiresSupabase: true,
     aliases: ["idees", "suggestions", "propositions"],
+    category: "knowledge",
   },
   {
     command: "remind",
@@ -223,6 +238,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "memory-cmds",
     requiresSupabase: false,
     aliases: ["rappel", "rappelle-moi", "dans 2 heures"],
+    category: "knowledge",
   },
 
   // ─── quality.ts ───
@@ -235,6 +251,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "quality",
     requiresSupabase: true,
     aliases: ["metriques", "statistiques", "stats", "velocite", "performance"],
+    category: "quality",
   },
   {
     command: "retro",
@@ -246,6 +263,7 @@ const ACTIONS: ActionDefinition[] = [
     requiresSupabase: true,
     aliases: ["retrospective", "retro", "bilan sprint", "retour d'experience"],
     backgroundEligible: true,
+    category: "quality",
   },
   {
     command: "patterns",
@@ -256,6 +274,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "quality",
     requiresSupabase: true,
     aliases: ["patterns", "tendances", "analyse multi-sprint"],
+    category: "quality",
   },
   {
     command: "alerts",
@@ -266,6 +285,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "quality",
     requiresSupabase: true,
     aliases: ["alertes", "anomalies", "problemes detectes"],
+    category: "quality",
   },
   {
     command: "cost",
@@ -276,6 +296,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "quality",
     requiresSupabase: true,
     aliases: ["couts", "depenses", "budget tokens", "combien ca coute"],
+    category: "quality",
   },
 
   // ─── profile.ts ───
@@ -288,6 +309,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "profile",
     requiresSupabase: true,
     aliases: ["profil", "mon profil"],
+    category: "project",
   },
   {
     command: "notify",
@@ -301,6 +323,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "profile",
     requiresSupabase: false,
     aliases: ["notifications", "preferences notifications"],
+    category: "project",
   },
 
   // ─── project.ts ───
@@ -313,6 +336,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "project",
     requiresSupabase: true,
     aliases: ["projets", "liste projets", "quels projets"],
+    category: "project",
   },
   {
     command: "project",
@@ -326,6 +350,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "project",
     requiresSupabase: true,
     aliases: ["projet", "changer projet", "creer projet"],
+    category: "project",
   },
 
   // ─── jobs.ts ───
@@ -341,6 +366,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "jobs",
     requiresSupabase: false,
     aliases: ["jobs", "travaux en cours", "qu'est-ce qui tourne", "statut jobs"],
+    category: "system",
   },
 
   // ─── utilities.ts ───
@@ -355,6 +381,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "utilities",
     requiresSupabase: false,
     aliases: ["parle", "dis", "synthese vocale", "lis a voix haute"],
+    category: "system",
   },
   {
     command: "export",
@@ -365,6 +392,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "utilities",
     requiresSupabase: true,
     aliases: ["exporter", "export donnees", "telecharger donnees"],
+    category: "system",
   },
   {
     command: "feature",
@@ -378,6 +406,7 @@ const ACTIONS: ActionDefinition[] = [
     module: "utilities",
     requiresSupabase: false,
     aliases: ["feature flag", "flags", "activer feature"],
+    category: "system",
   },
   {
     command: "rollback",
@@ -389,6 +418,7 @@ const ACTIONS: ActionDefinition[] = [
     requiresSupabase: false,
     aliases: ["rollback", "revenir en arriere", "annuler deploy"],
     backgroundEligible: true,
+    category: "system",
   },
 ];
 
@@ -412,6 +442,11 @@ export function getAllActions(): ActionDefinition[] {
 /** Get actions filtered by risk level */
 export function getActionsByRisk(risk: RiskLevel): ActionDefinition[] {
   return ACTIONS.filter((a) => a.risk === risk);
+}
+
+/** Get actions filtered by menu category */
+export function getActionsByCategory(category: string): ActionDefinition[] {
+  return ACTIONS.filter((a) => a.category === category);
 }
 
 /** Get actions that require a specific parameter */

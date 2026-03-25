@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   formatActionsForLLM,
   getAction,
+  getActionsByCategory,
   getActionsByRisk,
   getActionsRequiringParam,
   getAllActions,
@@ -95,6 +96,14 @@ describe("action-registry", () => {
         expect(action.aliases.length).toBeGreaterThan(0);
       }
     });
+
+    it("every action has a category for menu grouping", () => {
+      const validCategories = ["tasks", "quality", "knowledge", "project", "system"];
+      for (const action of getAllActions()) {
+        expect(action.category).toBeTruthy();
+        expect(validCategories).toContain(action.category);
+      }
+    });
   });
 
   describe("getActionsByRisk", () => {
@@ -140,6 +149,29 @@ describe("action-registry", () => {
 
     it("returns empty for nonexistent param", () => {
       expect(getActionsRequiringParam("xyz")).toHaveLength(0);
+    });
+  });
+
+  describe("getActionsByCategory", () => {
+    it("returns actions for tasks category", () => {
+      const tasks = getActionsByCategory("tasks");
+      expect(tasks.length).toBeGreaterThan(0);
+      const commands = tasks.map((a) => a.command);
+      expect(commands).toContain("task");
+      expect(commands).toContain("backlog");
+      expect(commands).toContain("sprint");
+    });
+
+    it("returns actions for quality category", () => {
+      const quality = getActionsByCategory("quality");
+      expect(quality.length).toBeGreaterThan(0);
+      const commands = quality.map((a) => a.command);
+      expect(commands).toContain("metrics");
+      expect(commands).toContain("retro");
+    });
+
+    it("returns empty for unknown category", () => {
+      expect(getActionsByCategory("nonexistent")).toHaveLength(0);
     });
   });
 

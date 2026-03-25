@@ -11,6 +11,12 @@ import { cpus, freemem, hostname, loadavg, uptime as osUptime, totalmem } from "
 import { formatMonitoringStats } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { RELAY_START_TIME } from "../bot-context.ts";
+import {
+  buildCategoryKeyboard,
+  buildMainMenuKeyboard,
+  getActionsForCategory,
+  MENU_CATEGORIES,
+} from "../inline-menus.ts";
 import { formatLlmOpsSnapshot, getLlmOpsSnapshot } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
 
@@ -19,50 +25,94 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
   const composer = new Composer<Context>();
   const { commandGuard, threadOpts, sendResponse, supabase } = bctx;
 
-  // /help — command reference
+  // /help — interactive command menu with inline keyboard
   composer.command("help", async (ctx) => {
-    const help = [
+    const menuText = [
       "COMMANDES",
       "",
-      "BACKLOG & SPRINT",
-      "  /task <titre> -- Ajouter une tache",
-      "  /backlog [projet] -- Voir le backlog",
-      "  /sprint [id] -- Etat du sprint",
-      "  /start <id> -- Demarrer une tache",
-      "  /done <id> -- Terminer une tache",
-      "",
-      "EXPLORATION & DOCUMENTS",
-      "  /explore <sujet> -- Explorer un sujet dans le codebase",
-      "  /docs [list|search|stats] -- Gerer les documents",
-      "",
-      "QUALITE & AMELIORATION",
-      "  /metrics [sprint] -- Metriques (Scrum Master Bob)",
-      "  /retro [sprint] -- Retrospective (Bob)",
-      "  /alerts -- Alertes proactives (QA Quinn)",
-      "  /cost [sprint|total] -- Suivi couts tokens par agent/tache/sprint",
-      "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
-      "  /ideas [list|add|review|promote|archive] -- Gerer les idees",
-      "",
-      "PROJETS",
-      "  /projects -- Tous les projets",
-      "  /project create|switch|archive -- Gerer",
-      "",
-      "PRODUCTION",
-      "  /monitor -- Monitoring production (temps reponse, spawn, erreurs)",
-      "  /feature [list|enable|disable] -- Feature flags",
-      "  /rollback [raison] -- Rollback au commit precedent",
-      "",
-      "UTILITAIRES",
-      "  /status -- Etat serveur",
-      "  /remind <heure> <texte> -- Rappel",
-      "  /speak [texte] -- Synthese vocale",
-      "  /profile -- Profil utilisateur",
-      "  /notify [status|quiet|on|off|immediate] -- Preferences notifications",
-      "  /export -- Export donnees",
-      "",
-      "Envoie un texte ou vocal pour discuter librement.",
+      "Choisis une categorie pour voir les commandes disponibles.",
+      "Tu peux aussi envoyer un texte ou vocal pour discuter librement.",
     ].join("\n");
-    await ctx.reply(help, threadOpts(ctx));
+    const kb = buildMainMenuKeyboard();
+    await ctx.reply(menuText, { ...threadOpts(ctx), reply_markup: kb });
+  });
+
+  // ── Menu callback handlers (menu_ prefix) ───────────────────
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+    if (!data.startsWith("menu_")) {
+      await next();
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+
+    if (data === "menu_back") {
+      // Return to main menu
+      const menuText = [
+        "COMMANDES",
+        "",
+        "Choisis une categorie pour voir les commandes disponibles.",
+      ].join("\n");
+      const kb = buildMainMenuKeyboard();
+      try {
+        await ctx.editMessageText(menuText, { reply_markup: kb });
+      } catch {
+        await ctx.reply(menuText, { ...bctx.threadOpts(ctx), reply_markup: kb });
+      }
+      return;
+    }
+
+    if (data.startsWith("menu_cat:")) {
+      // Show category sub-menu
+      const catId = data.substring("menu_cat:".length);
+      const cat = MENU_CATEGORIES.find((c) => c.id === catId);
+      if (!cat) return;
+
+      const actions = getActionsForCategory(catId);
+      const lines = [`${cat.label}`, "", cat.description, ""];
+      for (const a of actions) {
+        lines.push(`${a.usage} -- ${a.description}`);
+      }
+
+      const kb = buildCategoryKeyboard(catId);
+      try {
+        await ctx.editMessageText(lines.join("\n"), { reply_markup: kb });
+      } catch {
+        await ctx.reply(lines.join("\n"), { ...bctx.threadOpts(ctx), reply_markup: kb });
+      }
+      return;
+    }
+
+    if (data.startsWith("menu_cmd:")) {
+      // Execute command via synthetic update
+      const command = data.substring("menu_cmd:".length);
+      try {
+        await ctx.editMessageText(`Execution: /${command}`);
+      } catch {
+        // R5: optional IO -> degrade gracefully
+      }
+      // Build synthetic update to dispatch command
+      const chatId = ctx.chat?.id || 0;
+      const userId = ctx.from?.id || 0;
+      const threadId = ctx.callbackQuery.message?.message_thread_id;
+      const syntheticUpdate = {
+        update_id: 0,
+        message: {
+          message_id: ctx.callbackQuery.message?.message_id || 0,
+          from: { id: userId, is_bot: false, first_name: ctx.from?.first_name || "" },
+          chat: { id: chatId, type: ctx.chat?.type || "private" },
+          date: Math.floor(Date.now() / 1000),
+          text: `/${command}`,
+          entities: [{ offset: 0, length: command.length + 1, type: "bot_command" }],
+          ...(threadId ? { message_thread_id: threadId } : {}),
+        },
+      };
+      await bctx.bot.handleUpdate(syntheticUpdate as never);
+      return;
+    }
+
+    await next();
   });
 
   // /workflow — show BMad workflow overview

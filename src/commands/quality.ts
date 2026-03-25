@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import { formatAlerts, runAllChecks } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
+import { buildQualityNavKeyboard } from "../inline-menus.ts";
 import { formatCostSummary, getSprintCostSummary, getTotalCost } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
 import { getCurrentSprint } from "../tasks.ts";
@@ -354,6 +355,9 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       return;
     }
     await bctx.sendResponse(ctx, formatMetrics(metrics));
+    // Navigation keyboard to other quality commands
+    const navKb = buildQualityNavKeyboard();
+    await ctx.reply("Voir aussi :", { ...bctx.threadOpts(ctx), reply_markup: navKb });
   });
 
   // /retro

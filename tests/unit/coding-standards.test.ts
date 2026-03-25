@@ -324,6 +324,8 @@ describe("Coding standards — S6: createLogger mandatory", () => {
     "topic-config.ts": "Declarative topic configuration — no runtime logic",
     "heartbeat-prompt.ts": "Prompt builder returning strings — no side-effects",
     "doc-utils.ts": "Pure parsing utilities — no side-effects needing logging",
+    "inline-menus.ts":
+      "Pure keyboard builder functions from registry data — no side-effects needing logging",
     // Pure functions querying Supabase — errors handled by caller
     "alerts.ts":
       "Pure async functions returning Alert[] — no internal side-effects needing logging",
