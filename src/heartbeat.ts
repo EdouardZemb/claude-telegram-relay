@@ -40,7 +40,7 @@ import {
   parseClaudeMdModules,
   parseClaudeMdTestCount,
 } from "./doc-utils.ts";
-import { isFeatureEnabled } from "./feature-flags.ts";
+import { isFeatureEnabled, refreshFeatureFlags } from "./feature-flags.ts";
 import { runFeedbackLoop } from "./feedback-analyzer.ts";
 import {
   buildHeartbeatPrompt,
@@ -598,6 +598,14 @@ export async function pulse(): Promise<{
   // These run regardless of triage result, gated only by time intervals.
 
   const sprint = (await getCurrentSprint(supabase)) || undefined;
+
+  // Every pulse (10min): Refresh feature flags cache from Supabase
+  try {
+    await refreshFeatureFlags();
+    log.debug("Feature flags cache refreshed");
+  } catch (err) {
+    log.error("Feature flags refresh error", { error: err });
+  }
 
   // Hourly: Alert checks
   try {
