@@ -10,6 +10,7 @@
 import { spawnSync } from "bun";
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
+import { escapeHtml } from "../bot-context.ts";
 import { getConfig } from "../config.ts";
 import { assembleHandoffContext } from "../conversation-handoff.ts";
 import { isJobManagerEnabled, launch } from "../job-manager.ts";
@@ -287,8 +288,8 @@ export default function sddFlowComposer(bctx: BotContext): Composer<Context> {
           const updatedTracker = await getTracker(chatId, threadId);
           const statusBar = updatedTracker ? formatStatusBar(updatedTracker) : "";
           await ctx.reply(
-            `Job lance ${jobType} (id: ${jobId})\n${statusBar || `Pipeline: ${name}`}`,
-            bctx.threadOpts(ctx),
+            `Job lance ${escapeHtml(jobType)} (id: <code>${escapeHtml(String(jobId))}</code>)\n${statusBar || `Pipeline: ${escapeHtml(name)}`}`,
+            { ...bctx.threadOpts(ctx), parse_mode: "HTML" as const },
           );
         } catch (error) {
           log.error("SDD job launch error", { error: String(error), action, name });

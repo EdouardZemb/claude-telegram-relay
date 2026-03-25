@@ -24,28 +24,33 @@ import {
 
 // ── Mock Grammy Context ────────────────────────────────────
 
-function createMockCtx(overrides: Record<string, any> = {}) {
+function createMockCtx(overrides: Record<string, unknown> = {}): {
+  // biome-ignore lint/suspicious/noExplicitAny: mock Grammy context requires type coercion
+  ctx: any;
+  replies: string[];
+  voiceReplies: unknown[];
+} {
   const replies: string[] = [];
-  const voiceReplies: any[] = [];
+  const voiceReplies: unknown[] = [];
 
   return {
     ctx: {
-      chat: { id: overrides.chatId ?? 12345 },
+      chat: { id: (overrides.chatId as number) ?? 12345 },
       message: {
-        text: overrides.text || "test message",
+        text: (overrides.text as string) || "test message",
         message_thread_id: overrides.threadId,
-        message_id: overrides.messageId ?? 1,
+        message_id: (overrides.messageId as number) ?? 1,
         reply_to_message: overrides.replyToMessage,
       },
-      reply: async (text: string, _opts?: any) => {
+      reply: async (text: string, _opts?: Record<string, unknown>) => {
         replies.push(text);
         return { message_id: 99 };
       },
-      replyWithVoice: async (file: any, _opts?: any) => {
+      replyWithVoice: async (file: unknown, _opts?: Record<string, unknown>) => {
         voiceReplies.push(file);
         return { message_id: 100 };
       },
-    } as any,
+    },
     replies,
     voiceReplies,
   };
@@ -53,12 +58,13 @@ function createMockCtx(overrides: Record<string, any> = {}) {
 
 // ── Mock Bot ───────────────────────────────────────────────
 
-function createMockBot() {
+// biome-ignore lint/suspicious/noExplicitAny: mock Bot requires type coercion
+function createMockBot(): any {
   return {
     api: {
       sendMessage: async () => ({}),
     },
-  } as any;
+  };
 }
 
 // ── Tests ──────────────────────────────────────────────────
@@ -296,9 +302,10 @@ describe("bot-context", () => {
       const afterSdd = prompt.substring(sddStart);
       // The instruction ends before the next \n\n section header
       const nextSection = afterSdd.indexOf("\nVOICE CAPABILITIES");
-      const sddBlock = nextSection > 0
-        ? afterSdd.substring(0, nextSection)
-        : afterSdd.split("\n\n")[0] + "\n" + (afterSdd.split("\n\n")[1] || "");
+      const sddBlock =
+        nextSection > 0
+          ? afterSdd.substring(0, nextSection)
+          : afterSdd.split("\n\n")[0] + "\n" + (afterSdd.split("\n\n")[1] || "");
       const wordCount = sddBlock.split(/\s+/).filter(Boolean).length;
       expect(wordCount).toBeLessThan(100);
     });
@@ -322,6 +329,58 @@ describe("bot-context", () => {
     });
   });
 
+  // ── escapeHtml ─────────────────────────────────────────
+
+  describe("escapeHtml", () => {
+    // Import escapeHtml
+    it("escapes & < > characters", () => {
+      // test via the re-exported function
+      const { escapeHtml } = require("../../src/bot-context.ts");
+      expect(escapeHtml("a & b")).toBe("a &amp; b");
+      expect(escapeHtml("a < b")).toBe("a &lt; b");
+      expect(escapeHtml("a > b")).toBe("a &gt; b");
+    });
+
+    it("escapes \" and ' characters (F-DA-1 fix)", () => {
+      const { escapeHtml } = require("../../src/bot-context.ts");
+      expect(escapeHtml('say "hello"')).toBe("say &quot;hello&quot;");
+      expect(escapeHtml("it's fine")).toBe("it&#39;s fine");
+    });
+
+    it("returns empty string unchanged", () => {
+      const { escapeHtml } = require("../../src/bot-context.ts");
+      expect(escapeHtml("")).toBe("");
+    });
+
+    it("passes through safe text unchanged", () => {
+      const { escapeHtml } = require("../../src/bot-context.ts");
+      expect(escapeHtml("Hello world 123")).toBe("Hello world 123");
+    });
+  });
+
+  // ── sendVoiceResponse HTML strip (V14/V15) ─────────────
+
+  describe("sendVoiceResponse HTML strip", () => {
+    // V14/V15: source code check that HTML strip precedes Markdown strip
+    it("V14/V15: bot-context.ts strips HTML tags before Markdown in sendVoiceResponse", () => {
+      const fs = require("fs");
+      const source = fs.readFileSync("src/bot-context.ts", "utf-8");
+
+      // V14: HTML tag strip is present
+      expect(source).toContain("replace(/<[^>]+>/g");
+
+      // V15: HTML entities are decoded
+      expect(source).toContain('replace(/&amp;/g, "&")');
+      expect(source).toContain('replace(/&lt;/g, "<")');
+      expect(source).toContain('replace(/&gt;/g, ">")');
+
+      // V14: HTML strip comes before Markdown strip in the function
+      const htmlStripIdx = source.indexOf("replace(/<[^>]+>/g");
+      const markdownStripIdx = source.indexOf("replace(/```[\\s\\S]*?```/g");
+      expect(htmlStripIdx).toBeLessThan(markdownStripIdx);
+    });
+  });
+
   // ── sendResponse ───────────────────────────────────────
 
   describe("sendResponse", () => {
@@ -333,20 +392,20 @@ describe("bot-context", () => {
 
     it("sends a short response in a single message", async () => {
       const { ctx, replies } = createMockCtx();
-      await botCtx.sendResponse(ctx as any, "Hello there");
+      await botCtx.sendResponse(ctx, "Hello there");
       expect(replies).toHaveLength(1);
       expect(replies[0]).toBe("Hello there");
     });
 
     it("does nothing for empty response", async () => {
       const { ctx, replies } = createMockCtx();
-      await botCtx.sendResponse(ctx as any, "");
+      await botCtx.sendResponse(ctx, "");
       expect(replies).toHaveLength(0);
     });
 
     it("does nothing for whitespace-only response", async () => {
       const { ctx, replies } = createMockCtx();
-      await botCtx.sendResponse(ctx as any, "   \n  ");
+      await botCtx.sendResponse(ctx, "   \n  ");
       expect(replies).toHaveLength(0);
     });
 
@@ -354,7 +413,7 @@ describe("bot-context", () => {
       const { ctx, replies } = createMockCtx();
       // Build a string longer than 4000 characters
       const longText = "A".repeat(3000) + "\n\n" + "B".repeat(3000);
-      await botCtx.sendResponse(ctx as any, longText);
+      await botCtx.sendResponse(ctx, longText);
       expect(replies.length).toBeGreaterThan(1);
       // All chunks together should contain full content
       const joined = replies.join("");
@@ -363,15 +422,16 @@ describe("bot-context", () => {
     });
 
     it("includes message_thread_id in thread context", async () => {
-      const sentOpts: any[] = [];
-      const ctx = {
+      const sentOpts: Record<string, unknown>[] = [];
+      // biome-ignore lint/suspicious/noExplicitAny: mock Grammy context
+      const ctx: any = {
         chat: { id: 123 },
         message: { message_thread_id: 42 },
-        reply: async (_text: string, opts?: any) => {
-          sentOpts.push(opts);
+        reply: async (_text: string, opts?: Record<string, unknown>) => {
+          sentOpts.push(opts ?? {});
           return { message_id: 1 };
         },
-      } as any;
+      };
       await botCtx.sendResponse(ctx, "Threaded reply");
       expect(sentOpts.length).toBeGreaterThanOrEqual(1);
       expect(sentOpts[0]?.message_thread_id).toBe(42);
@@ -412,25 +472,25 @@ describe("bot-context", () => {
     describe("getThreadId", () => {
       it("returns threadId from context message", () => {
         const { ctx } = createMockCtx({ threadId: 42 });
-        expect(botCtx.getThreadId(ctx as any)).toBe(42);
+        expect(botCtx.getThreadId(ctx)).toBe(42);
       });
 
       it("returns undefined when no threadId", () => {
         const { ctx } = createMockCtx();
-        expect(botCtx.getThreadId(ctx as any)).toBeUndefined();
+        expect(botCtx.getThreadId(ctx)).toBeUndefined();
       });
     });
 
     describe("threadOpts", () => {
       it("returns message_thread_id when thread exists", () => {
         const { ctx } = createMockCtx({ threadId: 99 });
-        const opts = botCtx.threadOpts(ctx as any);
+        const opts = botCtx.threadOpts(ctx);
         expect(opts.message_thread_id).toBe(99);
       });
 
       it("returns empty object when no thread", () => {
         const { ctx } = createMockCtx();
-        const opts = botCtx.threadOpts(ctx as any);
+        const opts = botCtx.threadOpts(ctx);
         expect(opts.message_thread_id).toBeUndefined();
         expect(Object.keys(opts)).toHaveLength(0);
       });
@@ -439,14 +499,14 @@ describe("bot-context", () => {
     describe("heartbeatOpts", () => {
       it("returns chatId and threadId when in thread", () => {
         const { ctx } = createMockCtx({ chatId: 777, threadId: 55 });
-        const opts = botCtx.heartbeatOpts(ctx as any);
+        const opts = botCtx.heartbeatOpts(ctx);
         expect(opts.chatId).toBe(777);
         expect(opts.threadId).toBe(55);
       });
 
       it("returns chatId only when not in thread", () => {
         const { ctx } = createMockCtx({ chatId: 888 });
-        const opts = botCtx.heartbeatOpts(ctx as any);
+        const opts = botCtx.heartbeatOpts(ctx);
         expect(opts.chatId).toBe(888);
         expect(opts.threadId).toBeUndefined();
       });
@@ -460,13 +520,13 @@ describe("bot-context", () => {
             forum_topic_created: { name: "sprint" },
           },
         });
-        const name = botCtx.getTopicName(ctx as any);
+        const name = botCtx.getTopicName(ctx);
         expect(name).toBe("sprint");
       });
 
       it("returns undefined when no threadId", () => {
         const { ctx } = createMockCtx();
-        const name = botCtx.getTopicName(ctx as any);
+        const name = botCtx.getTopicName(ctx);
         expect(name).toBeUndefined();
       });
 
@@ -478,11 +538,11 @@ describe("bot-context", () => {
             forum_topic_created: { name: "idees" },
           },
         });
-        botCtx.getTopicName(ctx1 as any);
+        botCtx.getTopicName(ctx1);
 
         // Second call without forum_topic_created but same threadId
         const { ctx: ctx2 } = createMockCtx({ threadId: 300 });
-        const name = botCtx.getTopicName(ctx2 as any);
+        const name = botCtx.getTopicName(ctx2);
         expect(name).toBe("idees");
       });
     });
@@ -520,7 +580,7 @@ describe("bot-context", () => {
             forum_topic_created: { name: "claude-relay" },
           },
         });
-        const result = botCtx.commandGuard(ctx as any, "exec");
+        const result = botCtx.commandGuard(ctx, "exec");
         expect(result).toBeNull();
       });
 
@@ -532,7 +592,7 @@ describe("bot-context", () => {
           },
         });
         // "task" is not in serveur's allowedCommands
-        const result = botCtx.commandGuard(ctx as any, "task");
+        const result = botCtx.commandGuard(ctx, "task");
         expect(result).not.toBeNull();
         expect(result).toContain("n'est pas disponible");
         expect(result).toContain("serveur");
@@ -540,7 +600,7 @@ describe("bot-context", () => {
 
       it("returns null when no topic (DM context)", () => {
         const { ctx } = createMockCtx();
-        const result = botCtx.commandGuard(ctx as any, "exec");
+        const result = botCtx.commandGuard(ctx, "exec");
         expect(result).toBeNull();
       });
     });

@@ -625,15 +625,14 @@ function buildPrompt(
 // RESPONSE HELPERS
 // ============================================================
 
-export function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+// Re-export escapeHtml for backward compatibility (importers of bot-context.ts)
+export { escapeHtml } from "./html-utils.ts";
 
 function sendResponse(ctx: Context, response: string): Promise<void> {
   const MAX_LENGTH = 4000;
   const opts = threadOpts(ctx);
 
-  if (!response || !response.trim()) return Promise.resolve();
+  if (!response?.trim()) return Promise.resolve();
 
   if (response.length <= MAX_LENGTH) {
     return ctx.reply(response, opts).then(() => {});
@@ -666,7 +665,7 @@ function sendResponseHtml(ctx: Context, response: string): Promise<void> {
   const MAX_LENGTH = 4000;
   const opts = { ...threadOpts(ctx), parse_mode: "HTML" as const };
 
-  if (!response || !response.trim()) return Promise.resolve();
+  if (!response?.trim()) return Promise.resolve();
 
   if (response.length <= MAX_LENGTH) {
     return ctx.reply(response, opts).then(() => {});
@@ -697,6 +696,12 @@ function sendResponseHtml(ctx: Context, response: string): Promise<void> {
 
 async function sendVoiceResponse(ctx: Context, response: string): Promise<void> {
   const clean = response
+    .replace(/<[^>]+>/g, "") // Strip HTML tags (R5 — must precede Markdown strip)
+    .replace(/&amp;/g, "&") // Decode HTML entities
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/```[\s\S]*?```/g, "")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")

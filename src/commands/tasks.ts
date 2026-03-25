@@ -8,6 +8,7 @@
 import { Composer, type Context } from "grammy";
 import { z } from "zod";
 import type { BotContext } from "../bot-context.ts";
+import { escapeHtml } from "../bot-context.ts";
 import { getConfig } from "../config.ts";
 import { buildOnboardingKeyboard } from "../inline-menus.ts";
 import { enqueue } from "../notification-queue.ts";
@@ -136,7 +137,7 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
     if (filter) {
       // Explicit project filter
       const tasks = await getBacklog(bctx.supabase, { project: filter });
-      await bctx.sendResponse(ctx, formatBacklog(tasks));
+      await bctx.sendResponseHtml(ctx, formatBacklog(tasks));
     } else {
       // Auto-scope to current project
       const currentProject = await resolveProjectContext(
@@ -147,8 +148,8 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
         bctx.supabase,
         currentProject ? { project_id: currentProject.id } : undefined,
       );
-      const header = currentProject ? `Backlog — ${currentProject.name}\n\n` : "";
-      await bctx.sendResponse(ctx, header + formatBacklog(tasks));
+      const header = currentProject ? `Backlog — ${escapeHtml(currentProject.name)}\n\n` : "";
+      await bctx.sendResponseHtml(ctx, header + formatBacklog(tasks));
     }
   });
 
@@ -184,23 +185,23 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       }
       const summary = await getSprintSummary(bctx.supabase, current);
       const tasks = await getBacklog(bctx.supabase, { sprint: current, ...projectFilter });
-      const header = currentProject ? `${currentProject.name} — ` : "";
+      const header = currentProject ? `${escapeHtml(currentProject.name)} — ` : "";
       const text =
         header +
         formatSprintSummary(current, summary) +
         "\n\n" +
         formatBacklog(tasks, `Taches ${current}`);
-      await bctx.sendResponse(ctx, text);
+      await bctx.sendResponseHtml(ctx, text);
       return;
     }
 
     // /sprint S01 — show that sprint
     const summary = await getSprintSummary(bctx.supabase, arg);
     const tasks = await getBacklog(bctx.supabase, { sprint: arg, ...projectFilter });
-    const header = currentProject ? `${currentProject.name} — ` : "";
+    const header = currentProject ? `${escapeHtml(currentProject.name)} — ` : "";
     const text =
       header + formatSprintSummary(arg, summary) + "\n\n" + formatBacklog(tasks, `Taches ${arg}`);
-    await bctx.sendResponse(ctx, text);
+    await bctx.sendResponseHtml(ctx, text);
   });
 
   // /done — mark a task as done by ID prefix

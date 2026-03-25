@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isFeatureEnabled } from "../feature-flags.ts";
+import { escapeHtml } from "../html-utils.ts";
 import { createLogger } from "../logger.ts";
 import { getAgentMemories } from "./agent-memory.ts";
 import { classifyLinkContent } from "./classification.ts";
@@ -646,11 +647,11 @@ export async function memoryHealthStats(
 }
 
 /**
- * Format memory health stats as plain text for Telegram (no markdown).
+ * Format memory health stats for Telegram (HTML formatting via sendResponseHtml).
  */
 export function formatMemoryHealth(stats: MemoryHealthStats): string {
   const lines: string[] = [];
-  lines.push("SANTE MEMOIRE");
+  lines.push("<b>SANTE MEMOIRE</b>");
   lines.push(`Total: ${stats.total} memoires actives`);
 
   if (Object.keys(stats.byType).length > 0) {
@@ -673,7 +674,7 @@ export function formatMemoryHealth(stats: MemoryHealthStats): string {
     const top = stats.topAccessed
       .map(
         (t) =>
-          `"${t.content.slice(0, 40)}${t.content.length > 40 ? "..." : ""}" (${t.accessCount}x)`,
+          `"${escapeHtml(t.content.slice(0, 40))}${t.content.length > 40 ? "..." : ""}" (${t.accessCount}x)`,
       )
       .join(", ");
     lines.push(`Top acces: ${top}`);

@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "./bot-context.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("llm-ops");
@@ -499,18 +500,18 @@ export function sha256(content: string): string {
 // ── Formatting ──────────────────────────────────────────────
 
 /**
- * Format LlmOpsSnapshot for /monitor display (plain text).
+ * Format LlmOpsSnapshot for /monitor display (HTML formatting for sendResponseHtml).
  */
 export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
-  const parts: string[] = ["LLM-OPS MONITORING"];
+  const parts: string[] = ["<b>LLM-OPS MONITORING</b>"];
 
   // Circuit-breakers
   const openCBs = snapshot.circuitBreakers.filter((cb) => cb.open);
   if (openCBs.length > 0) {
     parts.push("");
-    parts.push("Circuit-breakers ouverts:");
+    parts.push("<b>Circuit-breakers ouverts:</b>");
     for (const cb of openCBs) {
-      parts.push(`  ${cb.role}: ${cb.reason}`);
+      parts.push(`  <code>${escapeHtml(cb.role)}</code>: ${escapeHtml(cb.reason)}`);
     }
   } else {
     parts.push("");
@@ -522,7 +523,7 @@ export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
     parts.push("");
     parts.push(`Prompt versions: ${snapshot.promptVersions.length} enregistrees`);
     for (const pv of snapshot.promptVersions.slice(0, 5)) {
-      parts.push(`  ${pv.role}: ${pv.combinedHash.substring(0, 16)}...`);
+      parts.push(`  <code>${escapeHtml(pv.role)}</code>: ${pv.combinedHash.substring(0, 16)}...`);
     }
   }
 
@@ -532,7 +533,7 @@ export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
     `Couts 7j: $${snapshot.costSummary.totalCostUsd.toFixed(4)} (${snapshot.costSummary.totalSpans} spans)`,
   );
   if (snapshot.costSummary.topRoleByCost) {
-    parts.push(`  Top role: ${snapshot.costSummary.topRoleByCost}`);
+    parts.push(`  Top role: <code>${escapeHtml(snapshot.costSummary.topRoleByCost)}</code>`);
   }
 
   return parts.join("\n");

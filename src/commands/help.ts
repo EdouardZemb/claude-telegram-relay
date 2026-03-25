@@ -223,7 +223,7 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       }
     }
 
-    await ctx.reply(parts.join("\n"), threadOpts(ctx));
+    await ctx.reply(parts.join("\n"), { ...threadOpts(ctx), parse_mode: "HTML" as const });
   });
 
   return composer;

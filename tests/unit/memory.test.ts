@@ -94,8 +94,8 @@ describe("processMemoryIntents", () => {
     expect(result).toBe("Response text.");
     const memory = supabase._getTable("memory");
     expect(memory.length).toBe(2);
-    expect(memory.some((m: any) => m.type === "fact")).toBe(true);
-    expect(memory.some((m: any) => m.type === "goal")).toBe(true);
+    expect(memory.some((m: Record<string, unknown>) => m.type === "fact")).toBe(true);
+    expect(memory.some((m: Record<string, unknown>) => m.type === "goal")).toBe(true);
   });
 
   it("returns response unchanged when no tags", async () => {
@@ -445,7 +445,7 @@ describe("findDuplicateIdea", () => {
   });
 
   it("returns matching idea content when duplicate found", async () => {
-    supabase._registerFunction("search", (opts: any) => {
+    supabase._registerFunction("search", (opts: Record<string, unknown>) => {
       expect(opts.body.table).toBe("memory");
       expect(opts.body.match_threshold).toBe(0.85);
       return [{ content: "Ajouter un mode sombre", type: "idea", similarity: 0.92 }];
@@ -643,7 +643,9 @@ describe("listIdeas", () => {
   it("returns new and reviewed ideas by default", async () => {
     const ideas = await listIdeas(supabase);
     expect(ideas.length).toBe(2);
-    expect(ideas.every((i: any) => ["new", "reviewed"].includes(i.idea_status))).toBe(true);
+    expect(
+      ideas.every((i: Record<string, unknown>) => ["new", "reviewed"].includes(i.idea_status)),
+    ).toBe(true);
   });
 
   it("filters by custom status", async () => {
@@ -659,7 +661,9 @@ describe("listIdeas", () => {
 
   it("excludes non-idea types", async () => {
     const ideas = await listIdeas(supabase, ["new", "reviewed", "promoted", "archived"]);
-    expect(ideas.every((i: any) => i.type === undefined || i.id !== "f1")).toBe(true);
+    expect(ideas.every((i: Record<string, unknown>) => i.type === undefined || i.id !== "f1")).toBe(
+      true,
+    );
   });
 
   it("returns empty array for null supabase", async () => {
@@ -849,11 +853,11 @@ describe("formatIdeasList", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("IDEES (2)");
-    expect(result).toContain("NEW | abcd1234");
+    expect(result).toContain("<b>IDEES (2)</b>");
+    expect(result).toContain("NEW | <code>abcd1234</code>");
     expect(result).toContain("Mode sombre");
     expect(result).toContain("[ui, dashboard]");
-    expect(result).toContain("REVIEWED | efgh5678");
+    expect(result).toContain("REVIEWED | <code>efgh5678</code>");
     expect(result).toContain("Cache Redis");
   });
 
@@ -877,6 +881,37 @@ describe("formatIdeasList", () => {
     expect(result).toContain("Simple idea");
     expect(result).not.toContain("[");
   });
+
+  // V8: formatIdeasList header uses <b> HTML tag
+  it("V8: formatIdeasList returns <b>IDEES (n)</b> as header", () => {
+    const ideas = [
+      {
+        id: "abcd1234-5678-0000-0000-000000000000",
+        content: "Test idea",
+        idea_status: "new" as const,
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
+    ];
+    const result = formatIdeasList(ideas);
+    expect(result).toContain("<b>IDEES (1)</b>");
+  });
+
+  // V9: formatIdeasList IDs are in <code> tags
+  it("V9: formatIdeasList wraps IDs in <code> tags", () => {
+    const ideas = [
+      {
+        id: "abcd1234-5678-0000-0000-000000000000",
+        content: "Test idea",
+        idea_status: "new" as const,
+        metadata: {},
+        created_at: "2026-03-14T10:00:00Z",
+      },
+    ];
+    const result = formatIdeasList(ideas);
+    expect(result).toContain("<code>");
+    expect(result).toContain("abcd1234");
+  });
 });
 
 describe("archiveOldMemories", () => {
@@ -887,7 +922,7 @@ describe("archiveOldMemories", () => {
   });
 
   it("calls archive_old_memories RPC with default threshold", async () => {
-    supabase._registerRpc("archive_old_memories", (params: any) => {
+    supabase._registerRpc("archive_old_memories", (params: Record<string, unknown>) => {
       expect(params.days_threshold).toBe(90);
       return 5;
     });
@@ -897,7 +932,7 @@ describe("archiveOldMemories", () => {
   });
 
   it("calls archive_old_memories RPC with custom threshold", async () => {
-    supabase._registerRpc("archive_old_memories", (params: any) => {
+    supabase._registerRpc("archive_old_memories", (params: Record<string, unknown>) => {
       expect(params.days_threshold).toBe(30);
       return 2;
     });

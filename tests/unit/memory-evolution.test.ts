@@ -814,8 +814,8 @@ describe("memoryHealthStats", () => {
 // ── formatMemoryHealth ──────────────────────────────────────────
 
 describe("formatMemoryHealth", () => {
-  // V10: Produces readable plain text (no markdown)
-  it("[V10] formats stats as plain text without markdown", () => {
+  // V10: Produces readable HTML (no markdown)
+  it("[V10] formats stats as HTML without markdown", () => {
     const stats: MemoryHealthStats = {
       total: 142,
       byType: { fact: 98, goal: 12, idea: 23, preference: 9 },
@@ -849,6 +849,8 @@ describe("formatMemoryHealth", () => {
     expect(text).not.toContain("**");
     expect(text).not.toContain("##");
     expect(text).not.toContain("```");
+    // HTML header
+    expect(text).toContain("<b>SANTE MEMOIRE</b>");
   });
 
   it("handles empty stats (total=0)", () => {

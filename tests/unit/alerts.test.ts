@@ -208,4 +208,22 @@ describe("Alert Formatting", () => {
     const result = formatAlerts([]);
     expect(result).toContain("Aucune alerte");
   });
+
+  // V13: formatAlerts escapes dynamic message content
+  it("V13: formatAlerts escapes HTML special chars in alert messages", () => {
+    const result = formatAlerts([
+      { type: "stuck_task", severity: "critical", message: "a <b> c", data: {} },
+    ]);
+    expect(result).toContain("a &lt;b&gt; c");
+    expect(result).not.toContain("a <b> c");
+  });
+
+  // V13-spec: header uses <b> HTML tag
+  it("V13-spec: formatAlerts uses <b> for alert count header", () => {
+    const result = formatAlerts([
+      { type: "stuck_task", severity: "critical", message: "Test", data: {} },
+    ]);
+    expect(result).toContain("<b>");
+    expect(result).toContain("alerte");
+  });
 });

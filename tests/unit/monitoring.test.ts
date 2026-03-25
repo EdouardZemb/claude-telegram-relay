@@ -113,4 +113,12 @@ describe("formatMonitoringStats", () => {
     expect(output).toContain("Spawn Claude par role");
     expect(output).toContain("Erreurs modules");
   });
+
+  // V12: section headers use <b> HTML tags
+  it("V12: formatMonitoringStats uses <b> for section headers", () => {
+    const output = formatMonitoringStats();
+    expect(output).toContain("<b>");
+    expect(output).toContain("<b>Monitoring Production</b>");
+    expect(output).toContain("<b>Temps de reponse:</b>");
+  });
 });
