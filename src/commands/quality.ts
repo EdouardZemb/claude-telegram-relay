@@ -360,6 +360,23 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
     await ctx.reply("Voir aussi :", { ...bctx.threadOpts(ctx), reply_markup: navKb });
   });
 
+  // /patterns — multi-sprint trend analysis (delegates to metrics comparison)
+  composer.command("patterns", async (ctx) => {
+    const blocked = bctx.commandGuard(ctx, "patterns");
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
+    if (!bctx.supabase) {
+      await ctx.reply("Supabase non configure.", bctx.threadOpts(ctx));
+      return;
+    }
+    const all = await getAllSprintMetrics(bctx.supabase);
+    await bctx.sendResponse(ctx, formatMetricsComparison(all));
+    const navKb = buildQualityNavKeyboard();
+    await ctx.reply("Voir aussi :", { ...bctx.threadOpts(ctx), reply_markup: navKb });
+  });
+
   // /retro
   composer.command("retro", async (ctx) => {
     const blocked = bctx.commandGuard(ctx, "retro");

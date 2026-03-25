@@ -80,6 +80,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/profile` | User profile (view, update, insights) |
 | `/metrics` | Sprint metrics (velocity, rework, cycle time) |
 | `/retro <sprint>` | Generate retrospective |
+| `/patterns` | Multi-sprint trend analysis |
 | `/alerts` | Check anomalies |
 | `/cost` | Token usage and cost tracking (per sprint or total) |
 | `/status` | System health check |
