@@ -41,6 +41,7 @@ import {
   parseClaudeMdTestCount,
 } from "./doc-utils.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { runFeedbackLoop } from "./feedback-analyzer.ts";
 import {
   buildHeartbeatPrompt,
   createDefaultState,
@@ -666,6 +667,23 @@ export async function pulse(): Promise<{
     }
   } catch (err) {
     log.error("LLM-Ops check error", { error: err });
+  }
+
+  // Hourly: Prompt feedback loop (gated on feature flag internally)
+  try {
+    const hourAgoFbl = now - 60 * 60 * 1000;
+    if (!state.lastFeedbackLoopAt || new Date(state.lastFeedbackLoopAt).getTime() < hourAgoFbl) {
+      log.info("Running prompt feedback loop...");
+      const fblResult = await runFeedbackLoop();
+      if (!fblResult.skipped) {
+        log.info(
+          `Feedback loop: ${fblResult.overlaysCreated} overlay(s) created, ${fblResult.expiredCount} expired, ${fblResult.patternsDetected} pattern(s).`,
+        );
+      }
+      state.lastFeedbackLoopAt = timestamp;
+    }
+  } catch (err) {
+    log.error("Feedback loop error", { error: err });
   }
 
   // Daily: Lightweight audit (structure + tests)

@@ -59,6 +59,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting, pipeline context injection for prompts |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review), auto-merge via gh pr merge --auto |
+| `prompt-overlay.ts` | Prompt overlay CRUD: dynamic feedback overlays for SDD agents, JSON local storage, max 3 per role, TTL, buildEnrichedPrompt |
+| `feedback-analyzer.ts` | Agent feedback analysis: recurring failure pattern detection, overlay generation, runFeedbackLoop orchestrator |
 | `sdd-auto-advance.ts` | Event-driven SDD auto-advance: getNextSddPhase mapping, depth circuit breaker, tryAutoAdvance orchestration |
 | `sdd-task-sync.ts` | SDD-backlog sync: PHASE_TO_TASK_STATUS mapping, syncTaskStatusForPhase best-effort sync (no downgrade, errors logged) |
 | `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases, categories |
@@ -171,7 +173,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2195 tests, all must pass before merge)
+- Tests: `bun test` (2240 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

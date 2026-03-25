@@ -8,5 +8,6 @@
   "sdd_auto_merge": true,
   "sdd_auto_advance": false,
   "sdd_auto_deploy": true,
-  "nlu_feature_request": false
+  "nlu_feature_request": false,
+  "prompt_feedback_loop": false
 }

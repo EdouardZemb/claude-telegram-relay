@@ -142,6 +142,8 @@ describe("Coding standards — S2: no direct process.env", () => {
     // SDD agents: GITHUB_REPO for gh CLI calls (consistent with agent.ts pattern)
     "sdd-agents.ts":
       "GITHUB_REPO — GitHub CLI pr review call (no full config needed in agent context)",
+    // Prompt overlay: RELAY_DIR + HOME for JSON storage path (same pattern as job-manager)
+    "prompt-overlay.ts": "RELAY_DIR, HOME — prompt overlay JSON storage directory",
   };
 
   const files = getAllSourceFiles().filter((f) => {

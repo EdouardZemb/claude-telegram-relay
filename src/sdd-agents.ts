@@ -13,6 +13,7 @@ import type { BotContext } from "./bot-context.ts";
 import { formatHandoffForAgent, type HandoffSummary } from "./conversation-handoff.ts";
 import { isFeatureEnabled as _isFeatureEnabledDefault } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
+import { buildEnrichedPrompt as _buildEnrichedPromptDefault } from "./prompt-overlay.ts";
 
 const log = createLogger("sdd-agents");
 
@@ -69,6 +70,24 @@ function checkFeatureEnabled(flag: string): boolean {
   return _isFeatureEnabledDefault(flag);
 }
 
+/**
+ * Optional test hook: replace buildEnrichedPrompt without importing prompt-overlay in tests.
+ * In production this is undefined and the real buildEnrichedPrompt is used.
+ */
+let _buildEnrichedPromptHook: ((role: string, base: string) => string) | undefined;
+
+/** @internal — for tests only */
+export function setBuildEnrichedPromptHook(
+  fn: ((role: string, base: string) => string) | undefined,
+): void {
+  _buildEnrichedPromptHook = fn;
+}
+
+function enrichPrompt(role: string, base: string): string {
+  if (_buildEnrichedPromptHook) return _buildEnrichedPromptHook(role, base);
+  return _buildEnrichedPromptDefault(role, base);
+}
+
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
 const AGENTS_DIR = join(PROJECT_ROOT, ".claude", "agents");
 const SKILLS_DIR = join(PROJECT_ROOT, ".claude", "skills");
@@ -109,10 +128,19 @@ function mostSevereVerdict(verdicts: ChallengeVerdict[]): ChallengeVerdict {
   );
 }
 
-/** Read an agent definition file from .claude/agents/. Returns "" on failure. */
+/** Read an agent definition file from .claude/agents/. Returns "" on failure.
+ * When the prompt_feedback_loop feature flag is enabled, enriches the prompt
+ * with active overlays for the agent role (derived from filename).
+ */
 async function readAgentFile(filename: string): Promise<string> {
   try {
-    return await readFile(join(AGENTS_DIR, filename), "utf-8");
+    const content = await readFile(join(AGENTS_DIR, filename), "utf-8");
+    // Enrich with overlays if feature flag is on
+    if (checkFeatureEnabled("prompt_feedback_loop") && content) {
+      const role = filename.replace(/\.md$/, "");
+      return enrichPrompt(role, content);
+    }
+    return content;
   } catch {
     log.warn(`Agent file not found: ${filename}`);
     return "";

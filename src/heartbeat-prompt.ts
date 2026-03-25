@@ -22,6 +22,7 @@ export interface HeartbeatState {
   lastLlmOpsCheckAt: string | null; // when LLM-Ops check last ran (30min)
   lastAuditAt: string | null; // when codebase audit last ran
   lastAuditScore: number | null; // last audit score (for regression detection)
+  lastFeedbackLoopAt: string | null; // when feedback loop last ran (hourly)
 }
 
 export interface HeartbeatAction {
@@ -228,5 +229,6 @@ export function createDefaultState(): HeartbeatState {
     lastLlmOpsCheckAt: null,
     lastAuditAt: null,
     lastAuditScore: null,
+    lastFeedbackLoopAt: null,
   };
 }
