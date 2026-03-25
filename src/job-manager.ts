@@ -15,8 +15,18 @@ import { escapeHtml } from "./html-utils.ts";
 import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
 import { getTracker, type SddPhase, type StepStatus, updateStep } from "./pipeline-tracker.ts";
+import {
+  _clearDepthForTests,
+  getAutoAdvanceDepth,
+  getNextSddPhase,
+  resetAutoAdvanceDepth,
+  tryAutoAdvance,
+} from "./sdd-auto-advance.ts";
 import { syncTaskStatusForPhase } from "./sdd-task-sync.ts";
 import { Semaphore } from "./semaphore.ts";
+
+// Re-export auto-advance API for consumers
+export { getAutoAdvanceDepth, getNextSddPhase, resetAutoAdvanceDepth };
 
 const log = createLogger("job-manager");
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
@@ -565,14 +575,24 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
       if (keyboard) opts.reply_markup = keyboard;
 
       await botInstance.api.sendMessage(job.chatId, message, opts);
-      return;
     } catch (error) {
       log.error("Direct job notification failed, falling back to queue", { error: String(error) });
+      // Fallback to notification queue
+      await enqueueFallback(job);
     }
+  } else {
+    // Fallback to notification queue
+    await enqueueFallback(job);
   }
 
-  // Fallback to notification queue
-  // Determine severity: critical for batch with high failure rate
+  // SDD Auto-advance: attempt event-driven transition to next phase
+  await tryAutoAdvance(job, botInstance, launch);
+}
+
+/**
+ * Enqueue fallback notification (used when bot instance is unavailable).
+ */
+async function enqueueFallback(job: Job): Promise<void> {
   let severity: "normal" | "critical" = "normal";
   if (job.type === "autopipeline-batch" && job.result) {
     const batch = parseBatchResult(job.result);
@@ -745,4 +765,5 @@ export function _resetForTests(): void {
   registry.clear();
   loaded = false;
   botInstance = null;
+  _clearDepthForTests();
 }

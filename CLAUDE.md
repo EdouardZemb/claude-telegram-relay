@@ -59,6 +59,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting, pipeline context injection for prompts |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review), auto-merge via gh pr merge --auto |
+| `sdd-auto-advance.ts` | Event-driven SDD auto-advance: getNextSddPhase mapping, depth circuit breaker, tryAutoAdvance orchestration |
 | `sdd-task-sync.ts` | SDD-backlog sync: PHASE_TO_TASK_STATUS mapping, syncTaskStatusForPhase best-effort sync (no downgrade, errors logged) |
 | `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases, categories |
 | `inline-menus.ts` | Progressive inline menu system: category grouping, dynamic keyboards, onboarding, quality/notify navigation |
@@ -134,7 +135,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    53 TypeScript modules (core logic)
+src/                    54 TypeScript modules (core logic)
   commands/             12 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
 dashboard/              Kanban board (server.ts + index.html)
@@ -142,7 +143,7 @@ config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2100 tests (unit + integration + E2E)
+tests/                  2132 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup, per-file coverage check
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -170,7 +171,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2100 tests, all must pass before merge)
+- Tests: `bun test` (2132 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
