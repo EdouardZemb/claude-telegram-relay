@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isFeatureEnabled } from "../feature-flags.ts";
+import { kvLine, progressBar, sectionTitle, separator } from "../html-format-helpers.ts";
 import { escapeHtml } from "../html-utils.ts";
 import { createLogger } from "../logger.ts";
 import { getAgentMemories } from "./agent-memory.ts";
@@ -395,25 +396,28 @@ export async function clusterMemories(
 }
 
 /**
- * Format memory clusters for display (plain text, no markdown).
+ * Format memory clusters for display (HTML formatting via sendResponseHtml).
  */
 export function formatClusters(clusters: MemoryCluster[]): string {
   if (clusters.length === 0) return "Aucun cluster detecte.";
 
-  const lines: string[] = [`CLUSTERS DE MEMOIRE (${clusters.length})`];
+  const lines: string[] = [sectionTitle(`Clusters de memoire (${clusters.length})`), ""];
 
   for (const cluster of clusters) {
-    lines.push("");
-    lines.push(`Cluster ${cluster.id + 1} (${cluster.size} memoires):`);
-    for (const mem of cluster.memories.slice(0, 5)) {
-      lines.push(`  - [${mem.type}] ${mem.content}`);
-    }
+    const clusterItems = cluster.memories
+      .slice(0, 5)
+      .map((mem) => `  \u2022 [<code>${escapeHtml(mem.type)}</code>] ${escapeHtml(mem.content)}`);
     if (cluster.memories.length > 5) {
-      lines.push(`  ... et ${cluster.memories.length - 5} autres`);
+      clusterItems.push(`  <i>... et ${cluster.memories.length - 5} autres</i>`);
     }
+    const clusterContent = clusterItems.join("\n");
+
+    lines.push(`<b>Cluster ${cluster.id + 1}</b> (${cluster.size} memoires)`);
+    lines.push(clusterContent);
+    lines.push("");
   }
 
-  return lines.join("\n");
+  return lines.join("\n").trim();
 }
 
 // ── Memory Chains for Agents (S41-04) ───────────────────────
@@ -651,33 +655,35 @@ export async function memoryHealthStats(
  */
 export function formatMemoryHealth(stats: MemoryHealthStats): string {
   const lines: string[] = [];
-  lines.push("<b>SANTE MEMOIRE</b>");
-  lines.push(`Total: ${stats.total} memoires actives`);
+  lines.push(sectionTitle("Sante memoire"));
+  lines.push("");
+  lines.push(kvLine("Total", `${stats.total} memoires actives`));
 
   if (Object.keys(stats.byType).length > 0) {
     const types = Object.entries(stats.byType)
-      .map(([t, c]) => `${t}: ${c}`)
+      .map(([t, c]) => `<code>${escapeHtml(t)}</code>: ${c}`)
       .join(" | ");
     lines.push(`  ${types}`);
   }
 
-  const embPct = Math.round(stats.embeddingCoverage * 100);
   const embCount = Math.round(stats.embeddingCoverage * stats.total);
-  lines.push(`Embeddings: ${embCount}/${stats.total} (${embPct}%)`);
-  lines.push(`Importance moyenne: ${stats.avgImportanceScore}`);
-  lines.push(`Age moyen: ${stats.avgAgeDays} jours`);
-  lines.push(`Liens semantiques: ${stats.linksCount}`);
-  lines.push(`Archive: ${stats.archiveCount}`);
-  lines.push(`Promotions recentes (7j): ${stats.recentPromotions}`);
+  lines.push("");
+  lines.push(separator());
+  lines.push(`<b>Embeddings</b>  ${progressBar(embCount, stats.total)}`);
+  lines.push(kvLine("Importance moyenne", stats.avgImportanceScore));
+  lines.push(kvLine("Age moyen", `${stats.avgAgeDays} jours`));
+  lines.push(kvLine("Liens semantiques", stats.linksCount));
+  lines.push(kvLine("Archive", stats.archiveCount));
+  lines.push(kvLine("Promotions recentes (7j)", stats.recentPromotions));
 
   if (stats.topAccessed.length > 0) {
-    const top = stats.topAccessed
-      .map(
-        (t) =>
-          `"${escapeHtml(t.content.slice(0, 40))}${t.content.length > 40 ? "..." : ""}" (${t.accessCount}x)`,
-      )
-      .join(", ");
-    lines.push(`Top acces: ${top}`);
+    lines.push("");
+    lines.push(separator());
+    lines.push("<b>Top acces</b>");
+    for (const t of stats.topAccessed) {
+      const truncated = t.content.slice(0, 40) + (t.content.length > 40 ? "..." : "");
+      lines.push(`  \u2022 "${escapeHtml(truncated)}" (${t.accessCount}x)`);
+    }
   }
 
   return lines.join("\n");

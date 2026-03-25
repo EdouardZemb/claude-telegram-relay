@@ -141,7 +141,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     const sub = parts[0]?.toLowerCase();
 
     if (!sub || sub === "list") {
-      await ctx.reply(formatFeatures(), bctx.threadOpts(ctx));
+      await bctx.sendResponseHtml(ctx, formatFeatures());
       return;
     }
 

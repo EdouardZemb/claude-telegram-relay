@@ -34,7 +34,11 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
     if (!args || args === "status") {
       const prefs = getPrefs();
       const kb = buildNotifyPrefsKeyboard(prefs);
-      await ctx.reply(formatPrefs(prefs), { ...bctx.threadOpts(ctx), reply_markup: kb });
+      await ctx.reply(formatPrefs(prefs), {
+        ...bctx.threadOpts(ctx),
+        parse_mode: "HTML",
+        reply_markup: kb,
+      });
       return;
     }
 
@@ -131,7 +135,10 @@ export default function profileComposer(bctx: BotContext): Composer<Context> {
     const updatedPrefs = getPrefs();
     const kb = buildNotifyPrefsKeyboard(updatedPrefs);
     try {
-      await ctx.editMessageText(formatPrefs(updatedPrefs), { reply_markup: kb });
+      await ctx.editMessageText(formatPrefs(updatedPrefs), {
+        parse_mode: "HTML",
+        reply_markup: kb,
+      });
     } catch {
       // R5: optional IO -> degrade gracefully
     }

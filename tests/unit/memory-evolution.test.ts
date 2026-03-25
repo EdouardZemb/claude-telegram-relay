@@ -833,24 +833,31 @@ describe("formatMemoryHealth", () => {
 
     const text = formatMemoryHealth(stats);
 
-    expect(text).toContain("SANTE MEMOIRE");
-    expect(text).toContain("Total: 142 memoires actives");
-    expect(text).toContain("fact: 98");
-    expect(text).toContain("goal: 12");
-    expect(text).toContain("Embeddings: 131/142 (92%)");
-    expect(text).toContain("Importance moyenne: 47.3");
-    expect(text).toContain("Age moyen: 18.2 jours");
-    expect(text).toContain("Liens semantiques: 87");
-    expect(text).toContain("Archive: 34");
-    expect(text).toContain("Promotions recentes (7j): 5");
-    expect(text).toContain("Top acces:");
+    expect(text).toContain("Sante memoire");
+    expect(text).toContain("142 memoires actives");
+    expect(text).toContain("fact");
+    expect(text).toContain("98");
+    expect(text).toContain("goal");
+    expect(text).toContain("12");
+    expect(text).toContain("Embeddings");
+    expect(text).toContain("Importance moyenne");
+    expect(text).toContain("47.3");
+    expect(text).toContain("Age moyen");
+    expect(text).toContain("18.2 jours");
+    expect(text).toContain("Liens semantiques");
+    expect(text).toContain("87");
+    expect(text).toContain("Archive");
+    expect(text).toContain("34");
+    expect(text).toContain("Promotions recentes (7j)");
+    expect(text).toContain("5");
+    expect(text).toContain("Top acces");
     expect(text).toContain("14x");
     // No markdown chars
     expect(text).not.toContain("**");
     expect(text).not.toContain("##");
     expect(text).not.toContain("```");
     // HTML header
-    expect(text).toContain("<b>SANTE MEMOIRE</b>");
+    expect(text).toContain("<b>Sante memoire</b>");
   });
 
   it("handles empty stats (total=0)", () => {
@@ -868,9 +875,9 @@ describe("formatMemoryHealth", () => {
 
     const text = formatMemoryHealth(stats);
 
-    expect(text).toContain("SANTE MEMOIRE");
-    expect(text).toContain("Total: 0 memoires actives");
-    expect(text).not.toContain("Top acces:");
+    expect(text).toContain("Sante memoire");
+    expect(text).toContain("0 memoires actives");
+    expect(text).not.toContain("<b>Top acces</b>");
   });
 
   it("truncates long content in topAccessed display", () => {

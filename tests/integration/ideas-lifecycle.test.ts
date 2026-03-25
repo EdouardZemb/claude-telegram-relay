@@ -429,10 +429,10 @@ describe("Ideas Formatting Through Lifecycle", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("<b>IDEES (3)</b>");
-    expect(result).toContain("NEW | <code>aaaa1111</code>");
-    expect(result).toContain("REVIEWED | <code>bbbb2222</code>");
-    expect(result).toContain("PROMOTED | <code>cccc3333</code>");
+    expect(result).toContain("<b>Idees (3)</b>");
+    expect(result).toContain("<code>aaaa1111</code>");
+    expect(result).toContain("<code>bbbb2222</code>");
+    expect(result).toContain("<code>cccc3333</code>");
     expect(result).toContain("[ui]");
     expect(result).toContain("[api, perf]");
   });
@@ -449,8 +449,9 @@ describe("Ideas Formatting Through Lifecycle", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("<b>IDEES (1)</b>");
-    expect(result).toContain("REVIEWED | <code>dddd4444</code>");
+    expect(result).toContain("<b>Idees (1)</b>");
+    expect(result).toContain("<code>dddd4444</code>");
+    expect(result).toContain("Reviewed only");
   });
 });
 

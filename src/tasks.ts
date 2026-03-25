@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { escapeHtml } from "./bot-context.ts";
+import { kvLine, progressBar, sectionTitle, statusIcon } from "./html-format-helpers.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("tasks");
@@ -230,7 +231,14 @@ export function formatBacklog(tasks: Task[], title?: string): string {
     grouped[key].push(t);
   }
 
-  const sections: string[] = [header, ""];
+  const STATUS_SECTION_ICONS: Record<string, string> = {
+    in_progress: "\u25B6\uFE0F",
+    review: "\uD83D\uDD0D",
+    backlog: "\uD83D\uDCCB",
+    done: "\u2705",
+  };
+
+  const sections: string[] = [sectionTitle(header)];
 
   const order = ["in_progress", "review", "backlog", "done"];
   const sectionNames: Record<string, string> = {
@@ -243,7 +251,8 @@ export function formatBacklog(tasks: Task[], title?: string): string {
   for (const status of order) {
     const items = grouped[status];
     if (!items || items.length === 0) continue;
-    sections.push(`<b>${sectionNames[status]}</b>`);
+    const icon = STATUS_SECTION_ICONS[status] || "";
+    sections.push(`${icon} <b>${sectionNames[status]}</b> (${items.length})`);
     for (const t of items) {
       const prio = PRIORITY_LABELS[t.priority] || "";
       const sprint = t.sprint ? ` (${t.sprint})` : "";
@@ -265,12 +274,14 @@ export function formatSprintSummary(
 ): string {
   const progress = summary.total > 0 ? Math.round((summary.done / summary.total) * 100) : 0;
   return [
-    `<b>Sprint ${escapeHtml(sprint)}</b>`,
+    sectionTitle(`Sprint ${sprint}`),
     "",
-    `Progression: ${summary.done}/${summary.total} (${progress}%)`,
-    `A faire: ${summary.backlog}`,
-    `En cours: ${summary.in_progress}`,
-    `En review: ${summary.review}`,
-    `Fait: ${summary.done}`,
+    progressBar(summary.done, summary.total),
+    `${statusIcon("info")} ${summary.done}/${summary.total} (${progress}%)`,
+    "",
+    kvLine("A faire", summary.backlog),
+    kvLine("En cours", summary.in_progress),
+    kvLine("En review", summary.review),
+    kvLine("Fait", summary.done),
   ].join("\n");
 }

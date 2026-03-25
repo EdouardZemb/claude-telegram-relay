@@ -97,7 +97,7 @@ describe("getMemoryChain", () => {
     // Mock root fetch
     supabase._store.memory = [{ id: "root", content: "Root fact", type: "fact" }];
 
-    supabase._registerRpc("get_linked_memories", (params: any) => {
+    supabase._registerRpc("get_linked_memories", (params: Record<string, string[]>) => {
       if (params.p_memory_ids.includes("root")) {
         return [
           {
@@ -162,7 +162,7 @@ describe("getMemoryChain", () => {
     supabase._store.memory = [{ id: "root", content: "Root fact", type: "fact" }];
 
     let callCount = 0;
-    supabase._registerRpc("get_linked_memories", (params: any) => {
+    supabase._registerRpc("get_linked_memories", (params: Record<string, string[]>) => {
       callCount++;
       const id = params.p_memory_ids[0];
       return [
@@ -360,10 +360,11 @@ describe("formatClusters", () => {
 
     const result = formatClusters(clusters);
 
-    expect(result).toContain("CLUSTERS DE MEMOIRE (1)");
-    expect(result).toContain("Cluster 1 (3 memoires)");
-    expect(result).toContain("[fact] Uses TypeScript");
-    expect(result).toContain("[fact] Supabase as DB");
+    expect(result).toContain("Clusters de memoire (1)");
+    expect(result).toContain("Cluster 1");
+    expect(result).toContain("3 memoires");
+    expect(result).toContain("Uses TypeScript");
+    expect(result).toContain("Supabase as DB");
   });
 
   it("truncates clusters with more than 5 members", () => {
@@ -622,7 +623,7 @@ describe("S41 integration", () => {
     ];
 
     const result = formatClusters(clusters);
-    expect(result).toContain("CLUSTERS DE MEMOIRE (2)");
+    expect(result).toContain("Clusters de memoire (2)");
     expect(result).toContain("Cluster 1");
     expect(result).toContain("Cluster 2");
   });

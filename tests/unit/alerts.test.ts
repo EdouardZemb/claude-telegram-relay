@@ -200,8 +200,11 @@ describe("Alert Formatting", () => {
     ]);
 
     expect(result).toContain("2 alertes");
-    expect(result).toContain("!! Tache bloquee");
-    expect(result).toContain("! Rework eleve");
+    // Uses Unicode icons instead of text-based !! and !
+    expect(result).toContain("\u274C"); // critical icon
+    expect(result).toContain("Tache bloquee");
+    expect(result).toContain("\u26A0"); // warning icon
+    expect(result).toContain("Rework eleve");
   });
 
   it("formats empty alerts", () => {

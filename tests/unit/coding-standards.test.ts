@@ -331,8 +331,9 @@ describe("Coding standards — S6: createLogger mandatory", () => {
       "Pure async functions returning Alert[] — no internal side-effects needing logging",
     // Utility with graceful degradation — no logging needed
     "feature-flags.ts": "Simple file-based toggle — no side-effects needing logging",
-    // Pure string escaping utility — no side-effects needing logging
+    // Pure string formatting utilities — no side-effects needing logging
     "html-utils.ts": "Pure escapeHtml function — no runtime logic or side-effects",
+    "html-format-helpers.ts": "Pure HTML formatting helpers — no side-effects needing logging",
     // Command composers: thin wrappers delegating to logged modules via bctx
     "commands/jobs.ts": "Thin Composer delegating to job-manager.ts — logging in dependency",
     "commands/profile.ts":

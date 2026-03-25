@@ -27,6 +27,14 @@ describe("auto_document_search flag (AC-1, AC-2)", () => {
   });
 });
 
+describe("sdd_auto_merge flag (AM-FLAG)", () => {
+  it("AM-FLAG: sdd_auto_merge exists in config/features.json", () => {
+    const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+    expect(raw).toHaveProperty("sdd_auto_merge");
+    expect(typeof raw.sdd_auto_merge).toBe("boolean");
+  });
+});
+
 describe("feature-flags", () => {
   let originalContent: string;
 

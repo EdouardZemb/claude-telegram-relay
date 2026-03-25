@@ -4,5 +4,6 @@
   "auto_document_search": true,
   "prd_to_deploy": true,
   "llmops_monitoring": true,
-  "agent_role_memory": true
+  "agent_role_memory": true,
+  "sdd_auto_merge": false
 }

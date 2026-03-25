@@ -8,6 +8,8 @@ import { readFile, writeFile } from "fs/promises";
 import type { Bot } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { dirname, join } from "path";
+import { sectionTitle, statusIcon } from "./html-format-helpers.ts";
+import { escapeHtml } from "./html-utils.ts";
 import { createLogger } from "./logger.ts";
 
 // ── Notification Preferences ────────────────────────────────────
@@ -72,10 +74,11 @@ export function isImmediate(type: NotificationType): boolean {
 }
 
 export function formatPrefs(prefs: NotificationPrefs): string {
-  const lines = ["PREFERENCES NOTIFICATIONS", "", "Types :"];
+  const lines = [sectionTitle("Preferences notifications"), "", "<b>Types</b>"];
   for (const [type, tp] of Object.entries(prefs.types)) {
-    const status = tp.enabled ? (tp.immediate ? "immediat" : "normal") : "desactive";
-    lines.push(`  ${type} : ${status}`);
+    const icon = tp.enabled ? (tp.immediate ? "\u26A1" : statusIcon("ok")) : statusIcon("critical");
+    const label = tp.enabled ? (tp.immediate ? "immediat" : "normal") : "desactive";
+    lines.push(`${icon} <code>${escapeHtml(type)}</code> : ${label}`);
   }
   return lines.join("\n");
 }

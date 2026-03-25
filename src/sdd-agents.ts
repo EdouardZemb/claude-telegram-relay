@@ -11,6 +11,7 @@ import { dirname, join } from "path";
 import { spawnClaude } from "./agent.ts";
 import type { BotContext } from "./bot-context.ts";
 import { formatHandoffForAgent, type HandoffSummary } from "./conversation-handoff.ts";
+import { isFeatureEnabled as _isFeatureEnabledDefault } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("sdd-agents");
@@ -50,6 +51,22 @@ export function setSpawnSyncHook(
 function execSpawnSync(args: string[]): { exitCode: number | null } {
   if (_spawnSyncHook) return _spawnSyncHook(args);
   return spawnSync(args);
+}
+
+/**
+ * Optional test hook: replace isFeatureEnabled without reading from disk.
+ * In production this is undefined and the real isFeatureEnabled is used.
+ */
+let _featureEnabledHook: ((flag: string) => boolean) | undefined;
+
+/** @internal — for tests only */
+export function setFeatureEnabledHook(fn: ((flag: string) => boolean) | undefined): void {
+  _featureEnabledHook = fn;
+}
+
+function checkFeatureEnabled(flag: string): boolean {
+  if (_featureEnabledHook) return _featureEnabledHook(flag);
+  return _isFeatureEnabledDefault(flag);
 }
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
@@ -453,6 +470,7 @@ export async function runSddReview(
     const verdict = extractedVerdict === "APPROVED" ? "APPROVED" : "CHANGES_REQUESTED";
 
     // If APPROVED and prUrl provided: call gh pr review --approve (R7)
+    let autoMergeActivated = false;
     if (verdict === "APPROVED" && prUrl) {
       const prNumber = prUrl.match(/\/pull\/(\d+)/)?.[1];
       const githubRepo = process.env.GITHUB_REPO || "";
@@ -476,10 +494,37 @@ export async function runSddReview(
           });
           // R7: log but continue — verdict Telegram remains APPROVED
         }
+
+        // Auto-merge: if feature flag enabled, activate gh pr merge --auto (AM)
+        if (checkFeatureEnabled("sdd_auto_merge")) {
+          const mergeResult = execSpawnSync([
+            "gh",
+            "pr",
+            "merge",
+            prNumber,
+            "--auto",
+            "--squash",
+            "--delete-branch",
+            "-R",
+            githubRepo,
+          ]);
+          if (mergeResult.exitCode === 0) {
+            autoMergeActivated = true;
+            log.info("Auto-merge activated for PR", { name, prNumber });
+          } else {
+            log.error("gh pr merge --auto failed", {
+              name,
+              prNumber,
+              exitCode: mergeResult.exitCode,
+            });
+            // Log but continue — fallback to manual merge button
+          }
+        }
       }
     }
 
-    return `SDD_REVIEW_${verdict}: ${name}`;
+    const autoMergeTag = autoMergeActivated ? " [AUTO-MERGE]" : "";
+    return `SDD_REVIEW_${verdict}: ${name}${autoMergeTag}`;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error("runSddReview exception", { name, error: msg });

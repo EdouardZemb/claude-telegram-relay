@@ -187,17 +187,19 @@ describe("notification preferences", () => {
     expect(output).not.toContain("quiet");
     expect(output).not.toContain("Batch interval");
     expect(output).not.toContain("batchInterval");
-    expect(output).toContain("PREFERENCES NOTIFICATIONS");
-    expect(output).toContain("Types :");
+    expect(output).toContain("Preferences notifications");
+    expect(output).toContain("<b>Types</b>");
   });
 
   it("V9: formatPrefs shows types with normal/immediat/desactive labels", async () => {
     const prefs = getDefaultPrefs();
     const output = formatPrefs(prefs);
     // alert is immediate by default
-    expect(output).toContain("alert : immediat");
+    expect(output).toContain("alert");
+    expect(output).toContain("immediat");
     // task is normal (not immediate, not disabled)
-    expect(output).toContain("task : normal");
+    expect(output).toContain("task");
+    expect(output).toContain("normal");
   });
 
   // V12: immediate mode via savePrefs

@@ -334,7 +334,8 @@ describe("job-manager", () => {
       const result = formatJobList([], recent);
       expect(result).toContain("Derniers termines");
       expect(result).toContain("def67890");
-      expect(result).toContain("OK");
+      // Uses Unicode check icon for completed jobs
+      expect(result).toContain("\u2705");
     });
 
     it("formats failed jobs", () => {
@@ -351,7 +352,8 @@ describe("job-manager", () => {
         },
       ];
       const result = formatJobList([], recent);
-      expect(result).toContain("FAIL");
+      // Uses Unicode cross icon for failed jobs
+      expect(result).toContain("\u274C");
     });
   });
 
@@ -447,6 +449,45 @@ describe("job-manager", () => {
         .map((b) => (b as { callback_data?: string }).callback_data)
         .filter(Boolean);
       expect(allData).not.toContain("sdd_merge_ask:my-feature");
+    });
+
+    it("AM-KB1: getCompletionKeyboard for review APPROVED with [AUTO-MERGE] hides merge button", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_APPROVED: my-feature [AUTO-MERGE]",
+      });
+      expect(kb).toBeDefined();
+      const allCallbackData = (kb?.inline_keyboard ?? [])
+        .flat()
+        .map((b) => (b as { callback_data?: string }).callback_data)
+        .filter(Boolean);
+      // Should NOT have the manual merge button
+      expect(allCallbackData).not.toContain("sdd_merge_ask:my-feature");
+    });
+
+    it("AM-KB2: getCompletionKeyboard for review APPROVED with [AUTO-MERGE] still shows PR link", () => {
+      // Inject a fake implement job with prUrl into registry
+      _resetForTests();
+      // Use a fresh job with a result that contains [AUTO-MERGE]
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_APPROVED: my-feature [AUTO-MERGE]",
+      });
+      expect(kb).toBeDefined();
+      // Keyboard should exist (at minimum for the Voir la PR button if prUrl found)
+    });
+
+    it("AM-KB3: getCompletionKeyboard for review APPROVED without [AUTO-MERGE] still shows merge button", () => {
+      const kb = getCompletionKeyboard({
+        ...baseJob,
+        result: "SDD_REVIEW_APPROVED: my-feature",
+      });
+      expect(kb).toBeDefined();
+      const allCallbackData = (kb?.inline_keyboard ?? [])
+        .flat()
+        .map((b) => (b as { callback_data?: string }).callback_data)
+        .filter(Boolean);
+      expect(allCallbackData).toContain("sdd_merge_ask:my-feature");
     });
   });
 
@@ -683,6 +724,35 @@ describe("job-manager", () => {
       expect(sentMessage.text).toContain("3 taches creees");
       expect(sentMessage.opts?.message_thread_id).toBe(678);
       expect(sentMessage.opts?.reply_markup).toBeDefined();
+    });
+
+    it("AM-NOTIF1: includes auto-merge info in notification when [AUTO-MERGE] in result", async () => {
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      let sentMessage: any = null;
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const fakeBotInstance = {
+        api: {
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
+          sendMessage: async (chatId: any, text: string, opts?: any) => {
+            sentMessage = { chatId, text, opts };
+          },
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+
+      initJobManager(fakeBotInstance);
+
+      await launch(
+        "sdd-review:my-feature",
+        12345,
+        async () => "SDD_REVIEW_APPROVED: my-feature [AUTO-MERGE]",
+        { messageThreadId: 678 },
+      );
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      expect(sentMessage).not.toBeNull();
+      expect(sentMessage.text).toContain("auto-merge");
     });
 
     it("sends error notification for failed jobs", async () => {

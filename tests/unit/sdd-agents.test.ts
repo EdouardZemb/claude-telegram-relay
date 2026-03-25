@@ -43,6 +43,7 @@ import {
   runSddImplement,
   runSddReview,
   runSddSpec,
+  setFeatureEnabledHook,
   setSpawnSyncHook,
   setWriteFileHook,
 } from "../../src/sdd-agents.ts";
@@ -93,10 +94,13 @@ beforeEach(() => {
     spawnSyncCalls.push(args);
     return { exitCode: 0 };
   });
+  // Default: disable auto-merge so existing tests are not affected
+  setFeatureEnabledHook(() => false);
 });
 
 afterEach(() => {
   setSpawnSyncHook(undefined);
+  setFeatureEnabledHook(undefined);
 });
 
 afterAll(() => {
@@ -543,6 +547,163 @@ describe("sdd-agents", () => {
       await runSddReview("test-feature", makeBctx());
 
       expect(spawnSyncCalls).toHaveLength(0);
+      delete process.env.GITHUB_REPO;
+    });
+
+    // ── Auto-merge tests ──────────────────────────────────────
+
+    it("AM1: calls gh pr merge --auto --squash --delete-branch when sdd_auto_merge enabled and APPROVED", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      setFeatureEnabledHook(() => true);
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(result).toContain("[AUTO-MERGE]");
+
+      // Should have 2 spawnSync calls: gh pr review --approve + gh pr merge --auto
+      expect(spawnSyncCalls).toHaveLength(2);
+
+      // First call: gh pr review --approve
+      expect(spawnSyncCalls[0]).toContain("review");
+      expect(spawnSyncCalls[0]).toContain("--approve");
+
+      // Second call: gh pr merge --auto --squash --delete-branch
+      expect(spawnSyncCalls[1][0]).toBe("gh");
+      expect(spawnSyncCalls[1][1]).toBe("pr");
+      expect(spawnSyncCalls[1][2]).toBe("merge");
+      expect(spawnSyncCalls[1][3]).toBe("42");
+      expect(spawnSyncCalls[1]).toContain("--auto");
+      expect(spawnSyncCalls[1]).toContain("--squash");
+      expect(spawnSyncCalls[1]).toContain("--delete-branch");
+
+      setFeatureEnabledHook(undefined);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("AM2: does NOT call gh pr merge --auto when sdd_auto_merge disabled", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      setFeatureEnabledHook(() => false);
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(result).not.toContain("[AUTO-MERGE]");
+
+      // Should have only 1 spawnSync call: gh pr review --approve (no merge)
+      expect(spawnSyncCalls).toHaveLength(1);
+      expect(spawnSyncCalls[0]).toContain("review");
+
+      setFeatureEnabledHook(undefined);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("AM3: does NOT call gh pr merge --auto when verdict is CHANGES_REQUESTED", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      setFeatureEnabledHook(() => true);
+      spawnClaudeResults = [
+        { stdout: "Issues found.\nVERDICT: CHANGES_REQUESTED", stderr: "", exitCode: 0 },
+      ];
+
+      await runSddReview("test-feature", makeBctx(), "https://github.com/owner/repo/pull/42");
+
+      // No spawnSync calls at all (no approve, no merge)
+      expect(spawnSyncCalls).toHaveLength(0);
+
+      setFeatureEnabledHook(undefined);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("AM4: does NOT call gh pr merge --auto when prUrl is absent", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      setFeatureEnabledHook(() => true);
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview("test-feature", makeBctx());
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(result).not.toContain("[AUTO-MERGE]");
+      // No spawnSync at all (no prUrl => no approve, no merge)
+      expect(spawnSyncCalls).toHaveLength(0);
+
+      setFeatureEnabledHook(undefined);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("AM5: continues with APPROVED verdict even when gh pr merge --auto fails", async () => {
+      process.env.GITHUB_REPO = "owner/repo";
+      setFeatureEnabledHook(() => true);
+      let callCount = 0;
+      setSpawnSyncHook((args) => {
+        callCount++;
+        // First call (review --approve) succeeds, second (merge --auto) fails
+        if (callCount === 1) {
+          spawnSyncCalls.push(args);
+          return { exitCode: 0 };
+        }
+        spawnSyncCalls.push(args);
+        return { exitCode: 1 };
+      });
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      // Verdict remains APPROVED (merge failure is logged but not fatal)
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      // Should NOT contain [AUTO-MERGE] since merge failed
+      expect(result).not.toContain("[AUTO-MERGE]");
+      expect(spawnSyncCalls).toHaveLength(2);
+
+      setFeatureEnabledHook(undefined);
+      delete process.env.GITHUB_REPO;
+    });
+
+    it("AM6: does NOT call gh pr merge --auto when GITHUB_REPO is empty", async () => {
+      delete process.env.GITHUB_REPO;
+      setFeatureEnabledHook(() => true);
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      const result = await runSddReview(
+        "test-feature",
+        makeBctx(),
+        "https://github.com/owner/repo/pull/42",
+      );
+
+      expect(result).toMatch(/^SDD_REVIEW_APPROVED:/);
+      expect(result).not.toContain("[AUTO-MERGE]");
+      expect(spawnSyncCalls).toHaveLength(0);
+
+      setFeatureEnabledHook(undefined);
+    });
+
+    it("AM7: passes -R flag with GITHUB_REPO to gh pr merge", async () => {
+      process.env.GITHUB_REPO = "EdouardZemb/claude-telegram-relay";
+      setFeatureEnabledHook(() => true);
+      spawnClaudeResults = [{ stdout: "All good.\nVERDICT: APPROVED", stderr: "", exitCode: 0 }];
+
+      await runSddReview("test-feature", makeBctx(), "https://github.com/owner/repo/pull/99");
+
+      // Merge call (second call) should contain -R with the repo
+      expect(spawnSyncCalls).toHaveLength(2);
+      const mergeCall = spawnSyncCalls[1];
+      expect(mergeCall).toContain("-R");
+      expect(mergeCall).toContain("EdouardZemb/claude-telegram-relay");
+
+      setFeatureEnabledHook(undefined);
       delete process.env.GITHUB_REPO;
     });
   });

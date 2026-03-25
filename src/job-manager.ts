@@ -10,6 +10,8 @@ import type { Bot } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { join } from "path";
 import { isFeatureEnabled } from "./feature-flags.ts";
+import { sectionTitle, separator } from "./html-format-helpers.ts";
+import { escapeHtml } from "./html-utils.ts";
 import { createLogger } from "./logger.ts";
 import { enqueue } from "./notification-queue.ts";
 import { getTracker, type SddPhase, type StepStatus, updateStep } from "./pipeline-tracker.ts";
@@ -368,7 +370,11 @@ export function getCompletionKeyboard(job: Job): InlineKeyboard | undefined {
             if (sddVerdict === "APPROVED") {
               const implementPrUrl = findImplementPrUrl(sddName);
               if (implementPrUrl) kb.url("Voir la PR", implementPrUrl);
-              kb.row().text("Fusionner la PR", `sdd_merge_ask:${sddName}`);
+              // If auto-merge was activated ([AUTO-MERGE] tag in result), skip manual merge button
+              const isAutoMerge = job.result?.includes("[AUTO-MERGE]") ?? false;
+              if (!isAutoMerge) {
+                kb.row().text("Fusionner la PR", `sdd_merge_ask:${sddName}`);
+              }
               hasButtons = true;
             } else if (sddVerdict === "CHANGES_REQUESTED") {
               const implementPrUrl = findImplementPrUrl(sddName);
@@ -477,6 +483,8 @@ async function sendJobCompletionNotification(job: Job): Promise<void> {
         const summary = job.result.replace("BATCH_COMPLETE:", "").split("\n")[0].split(":")[0];
         message = `Implementation batch terminee (${elapsed})\nResultat : ${summary} taches reussies`;
       }
+    } else if (job.type.startsWith("sdd-review:") && job.result?.includes("[AUTO-MERGE]")) {
+      message = `Review approuvee (${elapsed})\nauto-merge active — le merge sera effectue automatiquement quand la CI passera.`;
     } else {
       message = `Job ${job.type} terminé (${elapsed})\n${job.result || ""}`;
     }
@@ -678,32 +686,38 @@ export function formatJobList(running: Job[], recent: Job[]): string {
   const lines: string[] = [];
 
   const capacity = getCapacity();
-  lines.push(`Jobs en cours (${running.length}/${capacity.max}):`);
+  lines.push(sectionTitle(`Jobs en cours (${running.length}/${capacity.max})`));
+  lines.push("");
 
   if (running.length === 0) {
-    lines.push("  (aucun)");
+    lines.push("  <i>(aucun)</i>");
   } else {
     for (const job of running) {
       const elapsed = formatDuration(Date.now() - new Date(job.startedAt).getTime());
       const taskLabel = job.taskId ? job.taskId.substring(0, 8) : job.type;
-      lines.push(`  ${job.id} | ${job.type} | ${taskLabel} | ${elapsed}`);
+      lines.push(
+        `  \u25B6\uFE0F <code>${escapeHtml(job.id)}</code> ${escapeHtml(job.type)} | ${escapeHtml(taskLabel)} | ${elapsed}`,
+      );
     }
   }
 
   if (capacity.waiting > 0) {
-    lines.push(`  (${capacity.waiting} en attente)`);
+    lines.push(`  <i>(${capacity.waiting} en attente)</i>`);
   }
 
   if (recent.length > 0) {
     lines.push("");
-    lines.push("Derniers termines:");
+    lines.push(separator());
+    lines.push("<b>Derniers termines</b>");
     for (const job of recent) {
       const taskLabel = job.taskId ? job.taskId.substring(0, 8) : job.type;
-      const status = job.status === "completed" ? "OK" : "FAIL";
+      const icon = job.status === "completed" ? "\u2705" : "\u274C";
       const elapsed = job.completedAt
         ? formatDuration(new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime())
         : "?";
-      lines.push(`  ${job.id} | ${job.type} | ${taskLabel} | ${status} | ${elapsed}`);
+      lines.push(
+        `  ${icon} <code>${escapeHtml(job.id)}</code> ${escapeHtml(job.type)} | ${escapeHtml(taskLabel)} | ${elapsed}`,
+      );
     }
   }
 

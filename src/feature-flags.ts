@@ -5,6 +5,8 @@
 
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { sectionTitle, statusIcon } from "./html-format-helpers.ts";
+import { escapeHtml } from "./html-utils.ts";
 
 const FLAGS_FILE = join(import.meta.dir, "..", "config", "features.json");
 
@@ -52,16 +54,17 @@ export function listFeatures(): Array<{ flag: string; enabled: boolean }> {
 }
 
 /**
- * Format feature flags for Telegram display (plain text).
+ * Format feature flags for Telegram display (HTML formatting via sendResponseHtml).
  */
 export function formatFeatures(): string {
   const features = listFeatures();
   if (features.length === 0) return "Aucun feature flag configure.";
 
-  const lines = ["Feature Flags", ""];
+  const lines = [sectionTitle("Feature Flags"), ""];
   for (const { flag, enabled } of features) {
-    const status = enabled ? "ON" : "OFF";
-    lines.push(`  ${status}  ${flag}`);
+    const icon = enabled ? statusIcon("ok") : statusIcon("critical");
+    const label = enabled ? "ON" : "OFF";
+    lines.push(`${icon} <code>${escapeHtml(flag)}</code>  ${label}`);
   }
   return lines.join("\n");
 }

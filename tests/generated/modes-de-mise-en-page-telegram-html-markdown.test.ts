@@ -11,39 +11,37 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "fs";
 
 describe("HTML formatting migration — quality.ts", () => {
-  // V10: formatMetrics uses HTML bold for title
-  it("V10: formatMetrics source uses <b>Metriques Sprint ...<b> pattern", () => {
+  // V10: formatMetrics uses sectionTitle for title (which generates <b> + separator)
+  it("V10: formatMetrics source uses sectionTitle for Metriques Sprint", () => {
     const source = readFileSync("src/commands/quality.ts", "utf-8");
-    expect(source).toContain("<b>Metriques Sprint");
+    expect(source).toContain("sectionTitle(`Metriques Sprint");
   });
 
-  // V11: formatMetricsComparison uses HTML bold for header
-  it("V11: formatMetricsComparison source uses <b>Evolution des sprints</b>", () => {
+  // V11: formatMetricsComparison uses sectionTitle for header
+  it("V11: formatMetricsComparison source uses sectionTitle for Evolution des sprints", () => {
     const source = readFileSync("src/commands/quality.ts", "utf-8");
-    expect(source).toContain("<b>Evolution des sprints</b>");
+    expect(source).toContain('sectionTitle("Evolution des sprints")');
   });
 
-  // V16: formatRetro is NOT sent via sendResponseHtml (invariant LLM — R2)
-  it("V16: formatRetro is never sent via sendResponseHtml", () => {
+  // V16: formatRetro is sent via sendResponseHtml (now HTML formatted)
+  it("V16: formatRetro uses sectionTitle and HTML formatting", () => {
     const source = readFileSync("src/commands/quality.ts", "utf-8");
-    // sendResponseHtml must not appear in proximity to formatRetro
-    const htmlCalls = [...source.matchAll(/sendResponseHtml\s*\([^)]+formatRetro/g)];
-    expect(htmlCalls).toHaveLength(0);
+    expect(source).toContain("sectionTitle(`Retro Sprint");
+    expect(source).toContain("sendResponseHtml(ctx, formatRetro(");
   });
 });
 
 describe("HTML formatting migration — tasks.ts", () => {
-  // V1: formatBacklog uses <b> for section headers
+  // V1: formatBacklog uses sectionTitle and <b> for section headers
   it("V1: formatBacklog source uses <b> HTML tags for section headers", () => {
     const source = readFileSync("src/tasks.ts", "utf-8");
-    // The source contains template literal with <b>${sectionNames[...]} pattern
     expect(source).toContain("<b>${sectionNames[status]}</b>");
   });
 
-  // V5: formatSprintSummary uses <b>Sprint ...
-  it("V5: formatSprintSummary source uses <b>Sprint HTML tag", () => {
+  // V5: formatSprintSummary uses sectionTitle
+  it("V5: formatSprintSummary source uses sectionTitle for Sprint", () => {
     const source = readFileSync("src/tasks.ts", "utf-8");
-    expect(source).toContain("<b>Sprint ");
+    expect(source).toContain("sectionTitle(`Sprint ");
   });
 });
 

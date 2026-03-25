@@ -119,6 +119,6 @@ describe("formatMonitoringStats", () => {
     const output = formatMonitoringStats();
     expect(output).toContain("<b>");
     expect(output).toContain("<b>Monitoring Production</b>");
-    expect(output).toContain("<b>Temps de reponse:</b>");
+    expect(output).toContain("<b>Temps de reponse</b>");
   });
 });

@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { escapeHtml } from "./bot-context.ts";
+import { kvLine, sectionTitle, separator } from "./html-format-helpers.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("llm-ops");
@@ -218,29 +219,34 @@ export function formatTokenCount(count: number): string {
 export function formatCostSummary(summary: SprintCostSummary | null): string {
   if (!summary) return "Pas de donnees de cout disponibles.";
   if (summary.agentExecutions === 0) {
-    return `Couts Sprint ${summary.sprintId}\n\nAucune execution d'agent enregistree.`;
+    return `${sectionTitle(`Couts Sprint ${summary.sprintId}`)}\n\nAucune execution d'agent enregistree.`;
   }
   const lines: string[] = [
-    `Couts Sprint ${summary.sprintId}`,
+    sectionTitle(`Couts Sprint ${summary.sprintId}`),
     "",
-    `Executions: ${summary.agentExecutions}`,
-    `Tokens totaux: ${formatTokenCount(summary.totalTokens)} (${formatTokenCount(summary.totalInputTokens)} in / ${formatTokenCount(summary.totalOutputTokens)} out)`,
-    `Cout estime: $${summary.totalCostUsd.toFixed(4)}`,
+    kvLine("Executions", summary.agentExecutions),
+    kvLine(
+      "Tokens totaux",
+      `${formatTokenCount(summary.totalTokens)} (${formatTokenCount(summary.totalInputTokens)} in / ${formatTokenCount(summary.totalOutputTokens)} out)`,
+    ),
+    kvLine("Cout estime", `$${summary.totalCostUsd.toFixed(4)}`),
   ];
   const agents = Object.entries(summary.costByAgent).sort((a, b) => b[1].cost - a[1].cost);
   if (agents.length > 0) {
-    lines.push("", "Par agent:");
+    lines.push("", separator());
+    lines.push("<b>Par agent</b>");
     for (const [role, stats] of agents) {
       lines.push(
-        `  ${role}: ${stats.count}x, ${formatTokenCount(stats.tokens)} tokens, $${stats.cost.toFixed(4)}`,
+        `  <code>${escapeHtml(role)}</code>: ${stats.count}x, ${formatTokenCount(stats.tokens)} tokens, $${stats.cost.toFixed(4)}`,
       );
     }
   }
   if (summary.costByTask.length > 0) {
-    lines.push("", "Top taches:");
+    lines.push("", separator());
+    lines.push("<b>Top taches</b>");
     for (const task of summary.costByTask.slice(0, 5)) {
       lines.push(
-        `  ${task.taskId.slice(0, 8)}: ${formatTokenCount(task.tokens)} tokens, $${task.cost.toFixed(4)}`,
+        `  <code>${task.taskId.slice(0, 8)}</code>: ${formatTokenCount(task.tokens)} tokens, $${task.cost.toFixed(4)}`,
       );
     }
   }
@@ -503,25 +509,24 @@ export function sha256(content: string): string {
  * Format LlmOpsSnapshot for /monitor display (HTML formatting for sendResponseHtml).
  */
 export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
-  const parts: string[] = ["<b>LLM-OPS MONITORING</b>"];
+  const parts: string[] = [sectionTitle("LLM-Ops Monitoring"), ""];
 
   // Circuit-breakers
   const openCBs = snapshot.circuitBreakers.filter((cb) => cb.open);
   if (openCBs.length > 0) {
-    parts.push("");
-    parts.push("<b>Circuit-breakers ouverts:</b>");
+    parts.push("<b>Circuit-breakers ouverts</b>");
     for (const cb of openCBs) {
-      parts.push(`  <code>${escapeHtml(cb.role)}</code>: ${escapeHtml(cb.reason)}`);
+      parts.push(`  \u274C <code>${escapeHtml(cb.role)}</code>: ${escapeHtml(cb.reason)}`);
     }
   } else {
-    parts.push("");
-    parts.push("Circuit-breakers: tous fermes");
+    parts.push("\u2705 Circuit-breakers: tous fermes");
   }
 
   // Prompt versions
   if (snapshot.promptVersions.length > 0) {
     parts.push("");
-    parts.push(`Prompt versions: ${snapshot.promptVersions.length} enregistrees`);
+    parts.push(separator());
+    parts.push(kvLine("Prompt versions", `${snapshot.promptVersions.length} enregistrees`));
     for (const pv of snapshot.promptVersions.slice(0, 5)) {
       parts.push(`  <code>${escapeHtml(pv.role)}</code>: ${pv.combinedHash.substring(0, 16)}...`);
     }
@@ -529,8 +534,12 @@ export function formatLlmOpsSnapshot(snapshot: LlmOpsSnapshot): string {
 
   // Cost summary
   parts.push("");
+  parts.push(separator());
   parts.push(
-    `Couts 7j: $${snapshot.costSummary.totalCostUsd.toFixed(4)} (${snapshot.costSummary.totalSpans} spans)`,
+    kvLine(
+      "Couts 7j",
+      `$${snapshot.costSummary.totalCostUsd.toFixed(4)} (${snapshot.costSummary.totalSpans} spans)`,
+    ),
   );
   if (snapshot.costSummary.topRoleByCost) {
     parts.push(`  Top role: <code>${escapeHtml(snapshot.costSummary.topRoleByCost)}</code>`);

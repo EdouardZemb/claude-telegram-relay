@@ -9,6 +9,13 @@ import { Composer, type Context, InlineKeyboard } from "grammy";
 import { formatAlerts, runAllChecks } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { escapeHtml } from "../bot-context.ts";
+import {
+  bulletList,
+  kvLine,
+  progressBar,
+  sectionTitle,
+  separator,
+} from "../html-format-helpers.ts";
 import { buildQualityNavKeyboard } from "../inline-menus.ts";
 import { formatCostSummary, getSprintCostSummary, getTotalCost } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
@@ -152,36 +159,42 @@ async function getAllSprintMetrics(supabase: SupabaseClient): Promise<SprintMetr
 
 function formatMetrics(metrics: SprintMetrics): string {
   if (!metrics) return "Pas de metriques disponibles pour ce sprint.";
+  const rate = metrics.completion_rate ?? 0;
   const lines = [
-    `<b>Metriques Sprint ${escapeHtml(metrics.sprint_id)}</b>`,
+    sectionTitle(`Metriques Sprint ${metrics.sprint_id}`),
     "",
-    `Taches: ${metrics.tasks_completed}/${metrics.tasks_planned} (${metrics.completion_rate ?? 0}%)`,
+    progressBar(metrics.tasks_completed, metrics.tasks_planned),
+    kvLine("Taches", `${metrics.tasks_completed}/${metrics.tasks_planned} (${rate}%)`),
   ];
   if (metrics.avg_delivery_hours !== null)
-    lines.push(`Temps moyen de livraison: ${metrics.avg_delivery_hours}h`);
+    lines.push(kvLine("Temps moyen livraison", `${metrics.avg_delivery_hours}h`));
   if (metrics.first_pass_rate !== null)
-    lines.push(`Taux premier passage: ${metrics.first_pass_rate}%`);
-  if (metrics.rework_count > 0) lines.push(`Retouches: ${metrics.rework_count}`);
-  if (metrics.incidents_count > 0) lines.push(`Incidents: ${metrics.incidents_count}`);
+    lines.push(kvLine("Taux premier passage", `${metrics.first_pass_rate}%`));
+  if (metrics.rework_count > 0) lines.push(kvLine("Retouches", metrics.rework_count));
+  if (metrics.incidents_count > 0) lines.push(kvLine("Incidents", metrics.incidents_count));
   if (metrics.total_tokens > 0 || metrics.total_cost_usd > 0) {
     lines.push(
-      `Tokens: ${metrics.total_tokens || 0} (~$${(metrics.total_cost_usd || 0).toFixed(4)})`,
+      kvLine(
+        "Tokens",
+        `${metrics.total_tokens || 0} (~$${(metrics.total_cost_usd || 0).toFixed(4)})`,
+      ),
     );
-    if (metrics.agent_executions > 0) lines.push(`Executions agent: ${metrics.agent_executions}`);
+    if (metrics.agent_executions > 0)
+      lines.push(kvLine("Executions agent", metrics.agent_executions));
   }
   if (metrics.sprint_ended_at)
-    lines.push(`Cloture: ${new Date(metrics.sprint_ended_at).toLocaleDateString("fr-FR")}`);
+    lines.push(kvLine("Cloture", new Date(metrics.sprint_ended_at).toLocaleDateString("fr-FR")));
   return lines.join("\n");
 }
 
 function formatMetricsComparison(metricsList: SprintMetrics[]): string {
   if (metricsList.length === 0) return "Pas de metriques disponibles.";
-  const lines = ["<b>Evolution des sprints</b>", ""];
+  const lines = [sectionTitle("Evolution des sprints"), ""];
   for (const m of metricsList) {
     const rate = m.completion_rate ?? 0;
-    const bar = "=".repeat(Math.round(rate / 5)) + " " + rate + "%";
+    const bar = progressBar(rate, 100, 8);
     lines.push(
-      `<code>${escapeHtml(m.sprint_id)}</code>: ${bar} (${m.tasks_completed}/${m.tasks_planned})`,
+      `<code>${escapeHtml(m.sprint_id)}</code>  ${bar}  (${m.tasks_completed}/${m.tasks_planned})`,
     );
   }
   return lines.join("\n");
@@ -290,31 +303,33 @@ async function getRetro(supabase: SupabaseClient, sprintId: string): Promise<Ret
 
 function formatRetro(retro: RetroRow | null): string {
   if (!retro) return "Pas de retro disponible pour ce sprint.";
-  const lines = [`Retro Sprint ${retro.sprint_id}`, ""];
+  const lines = [sectionTitle(`Retro Sprint ${retro.sprint_id}`), ""];
   if (retro.what_worked?.length > 0) {
-    lines.push("Ce qui a bien marche :");
-    for (const item of retro.what_worked) lines.push(`  + ${item}`);
+    lines.push("\u2705 <b>Ce qui a bien marche</b>");
+    lines.push(bulletList(retro.what_worked));
     lines.push("");
   }
   if (retro.what_didnt?.length > 0) {
-    lines.push("Ce qui a coince :");
-    for (const item of retro.what_didnt) lines.push(`  - ${item}`);
+    lines.push("\u274C <b>Ce qui a coince</b>");
+    lines.push(bulletList(retro.what_didnt));
     lines.push("");
   }
   if (retro.patterns_detected?.length > 0) {
-    lines.push("Patterns detectes :");
-    for (const item of retro.patterns_detected) lines.push(`  ~ ${item}`);
+    lines.push("\uD83D\uDD0D <b>Patterns detectes</b>");
+    lines.push(bulletList(retro.patterns_detected));
     lines.push("");
   }
   if (retro.actions_proposed?.length > 0) {
-    lines.push("Actions proposees :");
+    lines.push(separator());
+    lines.push("<b>Actions proposees</b>");
     for (const action of retro.actions_proposed) {
-      const status = retro.actions_accepted?.some(
+      const accepted = retro.actions_accepted?.some(
         (a: { action: string }) => a.action === action.action,
-      )
-        ? "[OK]"
-        : "[ ]";
-      lines.push(`  ${status} ${action.action} (${action.priority})`);
+      );
+      const icon = accepted ? "\u2705" : "\u2B1C";
+      lines.push(
+        `  ${icon} ${escapeHtml(action.action)} (<code>${escapeHtml(action.priority)}</code>)`,
+      );
     }
   }
   return lines.join("\n");
@@ -401,7 +416,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     const existing = await getRetro(bctx.supabase, sprintId);
     if (existing) {
-      await bctx.sendResponse(ctx, formatRetro(existing));
+      await bctx.sendResponseHtml(ctx, formatRetro(existing));
       return;
     }
 
@@ -447,7 +462,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       });
 
       const retro = await getRetro(bctx.supabase, sprintId);
-      await bctx.sendResponse(ctx, formatRetro(retro));
+      await bctx.sendResponseHtml(ctx, formatRetro(retro));
 
       if (parsed.actions_proposed?.length > 0) {
         const keyboard = new InlineKeyboard()
@@ -516,7 +531,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     await ctx.replyWithChatAction("typing");
     const summary = await getSprintCostSummary(bctx.supabase, sprintId);
-    await bctx.sendResponse(ctx, formatCostSummary(summary));
+    await bctx.sendResponseHtml(ctx, formatCostSummary(summary));
   });
 
   // Retro validation callbacks

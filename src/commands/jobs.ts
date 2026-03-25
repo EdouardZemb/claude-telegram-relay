@@ -70,7 +70,7 @@ export default function jobsCommands(bctx: BotContext): Composer<Context> {
 
     // /jobs — list all
     const { running, recent } = await list();
-    await ctx.reply(formatJobList(running, recent), bctx.threadOpts(ctx));
+    await bctx.sendResponseHtml(ctx, formatJobList(running, recent));
   });
 
   // Callback query for job status check from inline buttons

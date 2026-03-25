@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { escapeHtml } from "./bot-context.ts";
+import { kvLine, sectionTitle, separator, statusIcon } from "./html-format-helpers.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -507,16 +508,16 @@ export function checkModuleErrors(): Alert[] {
  * S35: Includes trust scores section.
  */
 export function formatMonitoringStats(): string {
-  const lines: string[] = ["<b>Monitoring Production</b>", ""];
+  const lines: string[] = [sectionTitle("Monitoring Production"), ""];
 
   // Response time
   const rtStats = getResponseTimeStats();
-  lines.push("<b>Temps de reponse:</b>");
+  lines.push("<b>Temps de reponse</b>");
   if (rtStats.count === 0) {
     lines.push("  Pas de mesures");
   } else {
     lines.push(
-      `  p50: ${Math.round(rtStats.p50 / 1000)}s, p95: ${Math.round(rtStats.p95 / 1000)}s, p99: ${Math.round(rtStats.p99 / 1000)}s`,
+      `  ${kvLine("p50", `${Math.round(rtStats.p50 / 1000)}s`)}  ${kvLine("p95", `${Math.round(rtStats.p95 / 1000)}s`)}  ${kvLine("p99", `${Math.round(rtStats.p99 / 1000)}s`)}`,
     );
     lines.push(`  ${rtStats.count} mesures`);
   }
@@ -524,14 +525,16 @@ export function formatMonitoringStats(): string {
   // Spawn stats
   const spawnStats = getSpawnStats();
   lines.push("");
-  lines.push("<b>Spawn Claude par role:</b>");
+  lines.push(separator());
+  lines.push("<b>Spawn Claude par role</b>");
   if (Object.keys(spawnStats).length === 0) {
     lines.push("  Aucune execution");
   } else {
     for (const [role, data] of Object.entries(spawnStats)) {
       const total = data.success + data.failure;
+      const icon = data.failureRate > 20 ? statusIcon("warning") : statusIcon("ok");
       lines.push(
-        `  <code>${escapeHtml(role)}</code>: ${data.success}/${total} OK (${data.failureRate}% echec)`,
+        `  ${icon} <code>${escapeHtml(role)}</code>: ${data.success}/${total} OK (${data.failureRate}% echec)`,
       );
     }
   }
@@ -539,15 +542,17 @@ export function formatMonitoringStats(): string {
   // Module errors
   const modErrors = getModuleErrorCounts();
   lines.push("");
-  lines.push("<b>Erreurs modules (derniere heure):</b>");
+  lines.push(separator());
+  lines.push("<b>Erreurs modules (derniere heure)</b>");
   const sorted = Object.entries(modErrors)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
   if (sorted.length === 0) {
-    lines.push("  Aucune erreur");
+    lines.push(`  ${statusIcon("ok")} Aucune erreur`);
   } else {
     for (const [mod, count] of sorted) {
-      lines.push(`  <code>${escapeHtml(mod)}</code>: ${count}`);
+      const icon = count > 10 ? statusIcon("critical") : statusIcon("warning");
+      lines.push(`  ${icon} <code>${escapeHtml(mod)}</code>: ${count}`);
     }
   }
 
@@ -557,16 +562,23 @@ export function formatMonitoringStats(): string {
 // ── Formatting ───────────────────────────────────────────────
 
 export function formatAlerts(alerts: Alert[]): string {
-  if (alerts.length === 0) return "Aucune alerte active. Tout est nominal.";
+  if (alerts.length === 0) return `${statusIcon("ok")} Aucune alerte active. Tout est nominal.`;
 
   const lines = [
-    `<b>${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""}</b> :`,
+    sectionTitle(
+      `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""}`,
+    ),
     "",
   ];
 
   for (const alert of alerts) {
-    const icon = alert.severity === "critical" ? "!!" : alert.severity === "warning" ? "!" : "~";
-    lines.push(`  ${icon} ${escapeHtml(alert.message)}`);
+    const icon =
+      alert.severity === "critical"
+        ? statusIcon("critical")
+        : alert.severity === "warning"
+          ? statusIcon("warning")
+          : statusIcon("info");
+    lines.push(`${icon} ${escapeHtml(alert.message)}`);
   }
 
   return lines.join("\n");

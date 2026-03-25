@@ -853,11 +853,11 @@ describe("formatIdeasList", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("<b>IDEES (2)</b>");
-    expect(result).toContain("NEW | <code>abcd1234</code>");
+    expect(result).toContain("<b>Idees (2)</b>");
+    expect(result).toContain("<code>abcd1234</code>");
     expect(result).toContain("Mode sombre");
     expect(result).toContain("[ui, dashboard]");
-    expect(result).toContain("REVIEWED | <code>efgh5678</code>");
+    expect(result).toContain("<code>efgh5678</code>");
     expect(result).toContain("Cache Redis");
   });
 
@@ -883,7 +883,7 @@ describe("formatIdeasList", () => {
   });
 
   // V8: formatIdeasList header uses <b> HTML tag
-  it("V8: formatIdeasList returns <b>IDEES (n)</b> as header", () => {
+  it("V8: formatIdeasList returns <b>Idees (n)</b> as header", () => {
     const ideas = [
       {
         id: "abcd1234-5678-0000-0000-000000000000",
@@ -894,7 +894,7 @@ describe("formatIdeasList", () => {
       },
     ];
     const result = formatIdeasList(ideas);
-    expect(result).toContain("<b>IDEES (1)</b>");
+    expect(result).toContain("<b>Idees (1)</b>");
   });
 
   // V9: formatIdeasList IDs are in <code> tags
