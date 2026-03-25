@@ -33,7 +33,10 @@ import {
   buildSyntheticUpdate,
   checkPendingClarification,
   handleConfirmationCallback,
+  handleFeatureRequestCallback,
+  isFeatureRequestIntent,
   routeIntent,
+  showFeatureRequestConfirmation,
 } from "./command-router.ts";
 import {
   buildClassificationKeyboard,
@@ -142,6 +145,28 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     }
   });
 
+  // ── Feature request confirmation callbacks ───────────────────
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+    if (!data.startsWith("feature_request_")) {
+      await next();
+      return;
+    }
+
+    const command = handleFeatureRequestCallback(ctx, data, undefined);
+    if (command) {
+      await ctx.answerCallbackQuery({ text: "Lancement de l'exploration..." });
+      await ctx.editMessageText(`Exploration lancee : ${command}`);
+      const update = buildSyntheticUpdate(ctx, command);
+      await bctx.bot.handleUpdate(update as never);
+    } else if (data === "feature_request_cancel") {
+      await ctx.answerCallbackQuery({ text: "OK, pas d'exploration." });
+      await ctx.editMessageText("Pas de souci, on continue la conversation.");
+    } else {
+      await ctx.answerCallbackQuery({ text: "Demande expiree." });
+    }
+  });
+
   // ── Common message pipeline (text + voice) ──────────────────
 
   /**
@@ -230,6 +255,13 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       },
     };
 
+    // Feature request interception: show confirmation instead of direct routing
+    if (regexResult.detected && isFeatureRequestIntent(regexResult.detected)) {
+      const subject = regexResult.detected.args || input;
+      await showFeatureRequestConfirmation(ctx, subject, bctx.threadOpts(ctx));
+      return;
+    }
+
     if (regexResult.detected && regexResult.detected.confidence >= 0.8) {
       // High-confidence regex match — route to command
       const routeResult = await routeIntent(ctx, regexResult.detected, routerCtx);
@@ -241,6 +273,14 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
         recentMessages,
         timeoutMs: 15000,
       });
+
+      // Feature request interception from LLM fallback
+      if (llmResult.detected && isFeatureRequestIntent(llmResult.detected)) {
+        const subject = llmResult.detected.args || input;
+        await showFeatureRequestConfirmation(ctx, subject, bctx.threadOpts(ctx));
+        return;
+      }
+
       if (llmResult.detected && llmResult.detected.confidence >= 0.8) {
         const routeResult = await routeIntent(ctx, llmResult.detected, routerCtx);
         if (routeResult.handled) return;

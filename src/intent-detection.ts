@@ -56,12 +56,44 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "feature_request",
+    command: "explore",
+    patterns: [
+      /\b(il\s+faudrait\s+pouvoir|ce\s+serait\s+bien\s+(de|d')|on\s+pourrait\s+ajouter|j'aimerais\s+(que|pouvoir))\b/i,
+      /\b(pourquoi\s+pas|et\s+si\s+on)\s+(ajouter|ajoutait|faisait|implementait|creait)\b/i,
+      /\b(le\s+bot\s+devrait|il\s+manque|ca\s+manque)\b/i,
+      /\b(nouvelle\s+fonctionnalite|new\s+feature|feature\s+request)\b/i,
+      /\b(on\s+devrait)\s+(implementer|ajouter|creer|faire|mettre)\b/i,
+      /\b(il\s+faudrait|faudrait)\s+(creer|ajouter|implementer|faire)\b/i,
+      /\b(il\s+faut|on\s+doit)\s+(ajouter|creer|faire)\s+(?!.*\btache\b)/i,
+    ],
+    argExtractor: (text) => {
+      const extractors = [
+        /(?:il\s+faudrait\s+pouvoir|j'aimerais\s+pouvoir)\s+(.+)/i,
+        /ce\s+serait\s+bien\s+(?:de|d')\s*(?:avoir|pouvoir)?\s*(.+)/i,
+        /on\s+pourrait\s+ajouter\s+(.+)/i,
+        /j'aimerais\s+que\s+(.+)/i,
+        /(?:pourquoi\s+pas|et\s+si\s+on)\s+\w+\s+(.+)/i,
+        /le\s+bot\s+devrait\s+(.+)/i,
+        /(?:il\s+manque|ca\s+manque)\s+(?:un|une|des|de|du|d')?\s*(.+)/i,
+        /nouvelle\s+fonctionnalite\s+(?:de|pour|:)?\s*(.+)/i,
+        /on\s+devrait\s+\w+\s+(.+)/i,
+        /(?:il\s+faudrait|faudrait)\s+(?:creer|ajouter|implementer|faire)\s+(.+)/i,
+        /(?:il\s+faut|on\s+doit)\s+(?:ajouter|creer|faire)\s+(.+)/i,
+      ];
+      for (const p of extractors) {
+        const m = text.match(p);
+        if (m?.[1]) {
+          return m[1].replace(/\s*[?!.]\s*$/, "").trim();
+        }
+      }
+      return undefined;
+    },
+  },
+  {
     intent: "create_task",
     command: "task",
-    patterns: [
-      /\b(cree|ajoute|nouvelle)\s+(une\s+)?tache\b/i,
-      /\b(il\s+faut|on\s+doit|faudrait)\s+(ajouter|creer|faire)\b/i,
-    ],
+    patterns: [/\b(cree|ajoute|nouvelle)\s+(une\s+)?tache\b/i],
     argExtractor: (text) => {
       const match = text.match(/(?:tache|faire|creer|ajouter)\s*:?\s+(.+)/i);
       return match?.[1]?.trim();
@@ -312,6 +344,8 @@ export async function detectIntentWithLLM(
       "",
       "Reponds UNIQUEMENT en JSON valide, sans markdown:",
       '{"command": "nom_commande_sans_slash", "args": "arguments extraits ou vide", "confidence": 0.0-1.0}',
+      "",
+      "FEATURE REQUEST: Si le message decrit une fonctionnalite souhaitee, un changement ou amelioration qui n'existe pas encore (ex: 'le bot devrait pouvoir X', 'ca serait top d'avoir Y'), classifier comme feature_request avec command=explore et les args decrivant le sujet.",
       "",
       'Si aucune commande ne correspond, reponds: {"command": null, "args": "", "confidence": 0}',
       "Ne force pas un match si le message est juste une conversation normale.",

@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Context, InlineKeyboard } from "grammy";
 import { type ActionDefinition, getAction } from "../action-registry.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
 import type { DetectedIntent } from "../intent-detection.ts";
 import { createLogger } from "../logger.ts";
 
@@ -242,4 +243,81 @@ export function buildSyntheticUpdate(ctx: Context, command: string): Record<stri
       ...(threadId ? { message_thread_id: threadId } : {}),
     },
   };
+}
+
+// ── Feature Request Intent (NLU) ────────────────────────────────
+
+interface PendingFeatureRequest {
+  subject: string;
+  timestamp: number;
+}
+
+const pendingFeatureRequests = new Map<string, PendingFeatureRequest>();
+const FEATURE_REQUEST_TTL_MS = 120_000;
+
+/**
+ * Check if a detected intent is a feature_request and the flag is enabled.
+ * Returns true only when both conditions are met.
+ */
+export function isFeatureRequestIntent(detected: DetectedIntent | null): boolean {
+  if (!detected) return false;
+  if (detected.intent !== "feature_request") return false;
+  return isFeatureEnabled("nlu_feature_request");
+}
+
+/**
+ * Show the feature request confirmation InlineKeyboard.
+ * Stores the pending request for callback resolution.
+ */
+export async function showFeatureRequestConfirmation(
+  ctx: Context,
+  subject: string,
+  threadOpts: Record<string, unknown>,
+): Promise<void> {
+  const key = confirmationKey(ctx);
+  pendingFeatureRequests.set(key, { subject, timestamp: Date.now() });
+
+  const keyboard = new InlineKeyboard()
+    .text("Explorer", "feature_request_confirm")
+    .text("Non merci", "feature_request_cancel");
+
+  const displaySubject = subject ? ` : "${subject}"` : "";
+  await ctx.reply(
+    `Ca ressemble a une demande de feature${displaySubject}.\nLancer une exploration SDD ?`,
+    { ...threadOpts, reply_markup: keyboard },
+  );
+}
+
+/**
+ * Handle feature_request confirmation/cancel callbacks.
+ * Returns the /explore command string on confirm, null on cancel or unrelated data.
+ * If an explicit subject is passed (from args), it is used directly;
+ * otherwise falls back to the pending request map.
+ */
+export function handleFeatureRequestCallback(
+  ctx: Context,
+  data: string,
+  subject: string | undefined,
+): string | null {
+  if (data === "feature_request_cancel") {
+    const key = confirmationKey(ctx);
+    pendingFeatureRequests.delete(key);
+    return null;
+  }
+  if (data === "feature_request_confirm") {
+    const key = confirmationKey(ctx);
+    // Use provided subject or look up pending
+    let resolvedSubject = subject;
+    if (!resolvedSubject) {
+      const pending = pendingFeatureRequests.get(key);
+      if (!pending || Date.now() - pending.timestamp > FEATURE_REQUEST_TTL_MS) {
+        pendingFeatureRequests.delete(key);
+        return null;
+      }
+      resolvedSubject = pending.subject;
+    }
+    pendingFeatureRequests.delete(key);
+    return resolvedSubject ? `/explore ${resolvedSubject}` : "/explore";
+  }
+  return null;
 }
