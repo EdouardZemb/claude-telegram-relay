@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "../html-utils.ts";
 import { createLogger } from "../logger.ts";
 
 const log = createLogger("memory.ideas");
@@ -156,19 +157,21 @@ export async function archiveIdea(supabase: SupabaseClient | null, id: string): 
 }
 
 /**
- * Format ideas list for Telegram (plain text, no markdown).
+ * Format ideas list for Telegram (HTML formatting via sendResponseHtml).
  */
 export function formatIdeasList(ideas: Idea[]): string {
   if (!ideas.length) return "Aucune idee trouvee.";
 
-  const lines: string[] = ["IDEES (" + ideas.length + ")"];
+  const lines: string[] = [`<b>IDEES (${ideas.length})</b>`];
   for (const idea of ideas) {
     const status = idea.idea_status.toUpperCase();
     const date = new Date(idea.created_at).toLocaleDateString("fr-FR");
     const topics = Array.isArray(idea.metadata?.topics)
-      ? " [" + (idea.metadata.topics as string[]).join(", ") + "]"
+      ? " [" + (idea.metadata.topics as string[]).map((t) => escapeHtml(t)).join(", ") + "]"
       : "";
-    lines.push(`${status} | ${idea.id.slice(0, 8)} | ${idea.content}${topics} (${date})`);
+    lines.push(
+      `${status} | <code>${idea.id.slice(0, 8)}</code> | ${escapeHtml(idea.content)}${topics} (${date})`,
+    );
   }
   return lines.join("\n");
 }

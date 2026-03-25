@@ -48,7 +48,7 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
       await ctx.replyWithChatAction("typing");
       try {
         const stats = await memoryHealthStats(bctx.supabase);
-        await bctx.sendResponse(ctx, formatMemoryHealth(stats));
+        await bctx.sendResponseHtml(ctx, formatMemoryHealth(stats));
       } catch (error) {
         log.error("Brain health error", { error: String(error) });
         await ctx.reply("Erreur lors du calcul des metriques memoire.", bctx.threadOpts(ctx));
@@ -225,14 +225,14 @@ Reponds en texte brut, sans markdown.`;
     // /ideas or /ideas list — show new + reviewed ideas
     if (subcommand === "list" || (!input && subcommand === "list")) {
       const ideas = await listIdeas(bctx.supabase);
-      await bctx.sendResponse(ctx, formatIdeasList(ideas));
+      await bctx.sendResponseHtml(ctx, formatIdeasList(ideas));
       return;
     }
 
     // /ideas all — show all ideas including archived
     if (subcommand === "all") {
       const ideas = await listIdeas(bctx.supabase, ["new", "reviewed", "promoted", "archived"]);
-      await bctx.sendResponse(ctx, formatIdeasList(ideas));
+      await bctx.sendResponseHtml(ctx, formatIdeasList(ideas));
       return;
     }
 

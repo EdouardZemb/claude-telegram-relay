@@ -137,7 +137,7 @@ describe("Ideas Multi-Source Creation", () => {
 
     expect(result).toBe("Voici mon idee:");
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(1);
     expect(ideas[0].content).toBe("Ajouter un cache Redis");
     expect(ideas[0].idea_status).toBe("new");
@@ -155,7 +155,7 @@ describe("Ideas Multi-Source Creation", () => {
     );
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(1);
     expect(ideas[0].metadata.source).toBe("auto-detect");
     expect(ideas[0].metadata.topics).toEqual(["architecture"]);
@@ -176,10 +176,10 @@ describe("Ideas Multi-Source Creation", () => {
     );
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(2);
 
-    const sources = ideas.map((i: any) => i.metadata.source).sort();
+    const sources = ideas.map((i: Record<string, unknown>) => i.metadata.source).sort();
     expect(sources).toEqual(["auto-detect", "intent-tag"]);
   });
 
@@ -246,7 +246,7 @@ describe("Ideas Deduplication Integration", () => {
     );
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(1);
   });
 
@@ -268,7 +268,7 @@ describe("Ideas Deduplication Integration", () => {
     await processMemoryIntents(supabase, "[IDEA: Mettre en place un cache]");
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(1);
   });
 
@@ -285,7 +285,7 @@ describe("Ideas Deduplication Integration", () => {
     );
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(1);
   });
 
@@ -373,7 +373,7 @@ describe("Ideas Status Filtering", () => {
   it("default listing shows new + reviewed only", async () => {
     const ideas = await listIdeas(supabase);
     expect(ideas.length).toBe(3);
-    const statuses = ideas.map((i: any) => i.idea_status);
+    const statuses = ideas.map((i: Record<string, unknown>) => i.idea_status);
     expect(statuses).not.toContain("promoted");
     expect(statuses).not.toContain("archived");
   });
@@ -384,7 +384,7 @@ describe("Ideas Status Filtering", () => {
     const after = await listIdeas(supabase);
     expect(after.length).toBe(3); // still 3: 1 new, 2 reviewed
 
-    const reviewed = after.filter((i: any) => i.idea_status === "reviewed");
+    const reviewed = after.filter((i: Record<string, unknown>) => i.idea_status === "reviewed");
     expect(reviewed.length).toBe(2);
   });
 
@@ -396,7 +396,7 @@ describe("Ideas Status Filtering", () => {
 
   it("archived ideas excluded from all active views", async () => {
     const active = await listIdeas(supabase, ["new", "reviewed", "promoted"]);
-    expect(active.every((i: any) => i.idea_status !== "archived")).toBe(true);
+    expect(active.every((i: Record<string, unknown>) => i.idea_status !== "archived")).toBe(true);
   });
 });
 
@@ -429,10 +429,10 @@ describe("Ideas Formatting Through Lifecycle", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("IDEES (3)");
-    expect(result).toContain("NEW | aaaa1111");
-    expect(result).toContain("REVIEWED | bbbb2222");
-    expect(result).toContain("PROMOTED | cccc3333");
+    expect(result).toContain("<b>IDEES (3)</b>");
+    expect(result).toContain("NEW | <code>aaaa1111</code>");
+    expect(result).toContain("REVIEWED | <code>bbbb2222</code>");
+    expect(result).toContain("PROMOTED | <code>cccc3333</code>");
     expect(result).toContain("[ui]");
     expect(result).toContain("[api, perf]");
   });
@@ -449,8 +449,8 @@ describe("Ideas Formatting Through Lifecycle", () => {
     ];
 
     const result = formatIdeasList(ideas);
-    expect(result).toContain("IDEES (1)");
-    expect(result).toContain("REVIEWED | dddd4444");
+    expect(result).toContain("<b>IDEES (1)</b>");
+    expect(result).toContain("REVIEWED | <code>dddd4444</code>");
   });
 });
 
@@ -471,8 +471,8 @@ describe("Ideas and Other Memory Types", () => {
     const memory = supabase._getTable("memory");
     expect(memory.length).toBe(2);
 
-    const fact = memory.find((m: any) => m.type === "fact");
-    const idea = memory.find((m: any) => m.type === "idea");
+    const fact = memory.find((m: Record<string, unknown>) => m.type === "fact");
+    const idea = memory.find((m: Record<string, unknown>) => m.type === "idea");
     expect(fact).toBeDefined();
     expect(idea).toBeDefined();
     expect(fact!.content).toBe("Le serveur tourne sur Bun");
@@ -491,8 +491,8 @@ describe("Ideas and Other Memory Types", () => {
     );
 
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
-    const goals = memory.filter((m: any) => m.type === "goal");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
+    const goals = memory.filter((m: Record<string, unknown>) => m.type === "goal");
     expect(ideas.length).toBe(1);
     expect(goals.length).toBe(2);
     expect(goals[0].metadata.source).toBe("action-item");
@@ -606,9 +606,12 @@ describe("Ideas Edge Cases", () => {
 
     expect(result).toBe("et aussi");
     const memory = supabase._getTable("memory");
-    const ideas = memory.filter((m: any) => m.type === "idea");
+    const ideas = memory.filter((m: Record<string, unknown>) => m.type === "idea");
     expect(ideas.length).toBe(2);
-    expect(ideas.map((i: any) => i.content).sort()).toEqual(["Idee deux", "Idee un"]);
+    expect(ideas.map((i: Record<string, unknown>) => i.content).sort()).toEqual([
+      "Idee deux",
+      "Idee un",
+    ]);
   });
 
   it("IDEA tag with empty content is still processed", async () => {

@@ -11,6 +11,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "./bot-context.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("tasks");
@@ -220,7 +221,7 @@ export function formatTask(task: Task, index?: number): string {
 export function formatBacklog(tasks: Task[], title?: string): string {
   if (tasks.length === 0) return "Backlog vide. Utilise /task pour ajouter des taches.";
 
-  const header = title || "Backlog";
+  const header = title ? escapeHtml(title) : "Backlog";
   const grouped: Record<string, Task[]> = {};
 
   for (const t of tasks) {
@@ -242,13 +243,15 @@ export function formatBacklog(tasks: Task[], title?: string): string {
   for (const status of order) {
     const items = grouped[status];
     if (!items || items.length === 0) continue;
-    sections.push(`-- ${sectionNames[status]} --`);
+    sections.push(`<b>${sectionNames[status]}</b>`);
     for (const t of items) {
       const prio = PRIORITY_LABELS[t.priority] || "";
       const sprint = t.sprint ? ` (${t.sprint})` : "";
       const id = t.id.substring(0, 8);
       const sddTag = t.sdd_pipeline_name ? "[SDD] " : "";
-      sections.push(`  ${prio} ${sddTag}${t.title}${sprint}  [${id}]`);
+      sections.push(
+        `  ${prio} ${sddTag}<b>${escapeHtml(t.title)}</b>${sprint}  <code>${id}</code>`,
+      );
     }
     sections.push("");
   }
@@ -262,7 +265,7 @@ export function formatSprintSummary(
 ): string {
   const progress = summary.total > 0 ? Math.round((summary.done / summary.total) * 100) : 0;
   return [
-    `Sprint ${sprint}`,
+    `<b>Sprint ${escapeHtml(sprint)}</b>`,
     "",
     `Progression: ${summary.done}/${summary.total} (${progress}%)`,
     `A faire: ${summary.backlog}`,

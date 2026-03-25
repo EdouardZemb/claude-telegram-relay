@@ -30,9 +30,9 @@ describe("/brain health dispatch", () => {
     );
     expect(healthBlock).not.toBeNull();
 
-    // V11: The formatted result is sent via sendResponse
+    // V11: The formatted result is sent via sendResponseHtml (HTML formatting)
     const sendMatch = source.match(
-      /memoryHealthStats\([\s\S]*?formatMemoryHealth\(\s*stats\s*\)[\s\S]*?sendResponse/,
+      /memoryHealthStats\([\s\S]*?formatMemoryHealth\(\s*stats\s*\)[\s\S]*?sendResponseHtml/,
     );
     expect(sendMatch).not.toBeNull();
   });

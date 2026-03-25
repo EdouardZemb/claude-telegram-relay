@@ -337,10 +337,10 @@ describe("pipeline-tracker", () => {
       };
 
       const bar = formatStatusBar(tracker);
-      expect(bar).toStartWith("Pipeline « refactoring-memoire »");
+      expect(bar).toStartWith("<b>Pipeline « refactoring-memoire »</b>");
     });
 
-    it("is plain text only (no markdown)", () => {
+    it("uses HTML bold for pipeline name header (no markdown)", () => {
       const tracker: PipelineTracker = {
         chatId: 12345,
         name: "test",
@@ -358,9 +358,61 @@ describe("pipeline-tracker", () => {
       };
 
       const bar = formatStatusBar(tracker);
-      expect(bar).not.toContain("*");
+      // HTML format, not Markdown
+      expect(bar).not.toContain("**");
       expect(bar).not.toContain("_");
-      expect(bar).not.toContain("`");
+      // HTML <b> tags are used instead
+      expect(bar).toContain("<b>Pipeline");
+    });
+
+    // V6-spec: pipeline name wrapped in <b> tags
+    it("V6-spec: formatStatusBar wraps pipeline name in <b> HTML tags", () => {
+      const tracker: PipelineTracker = {
+        chatId: 12345,
+        name: "mon-feature",
+        steps: {
+          explore: { phase: "explore", status: "pending" },
+          discuss: { phase: "discuss", status: "pending" },
+          spec: { phase: "spec", status: "pending" },
+          challenge: { phase: "challenge", status: "pending" },
+          implement: { phase: "implement", status: "pending" },
+          review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const bar = formatStatusBar(tracker);
+      const lines = bar.split("\n");
+      expect(lines[0]).toContain("<b>Pipeline");
+      expect(lines[0]).toContain("</b>");
+    });
+
+    // V7-spec: artifact shortname in <code> tags
+    it("V7-spec: formatStatusBar wraps artifact shortname in <code> tags", () => {
+      const tracker: PipelineTracker = {
+        chatId: 12345,
+        name: "test",
+        steps: {
+          explore: {
+            phase: "explore",
+            status: "ok",
+            artifact: "docs/explorations/EXPLORE-mon-feature.md",
+          },
+          discuss: { phase: "discuss", status: "pending" },
+          spec: { phase: "spec", status: "pending" },
+          challenge: { phase: "challenge", status: "pending" },
+          implement: { phase: "implement", status: "pending" },
+          review: { phase: "review", status: "pending" },
+          doc: { phase: "doc", status: "pending" },
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const bar = formatStatusBar(tracker);
+      expect(bar).toContain("<code>EXPLORE-mon-feature.md</code>");
     });
 
     it("adds ... indicator for running status", () => {

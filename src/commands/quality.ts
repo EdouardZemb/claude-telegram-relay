@@ -8,6 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import { formatAlerts, runAllChecks } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
+import { escapeHtml } from "../bot-context.ts";
 import { buildQualityNavKeyboard } from "../inline-menus.ts";
 import { formatCostSummary, getSprintCostSummary, getTotalCost } from "../llm-ops.ts";
 import { createLogger } from "../logger.ts";
@@ -152,7 +153,7 @@ async function getAllSprintMetrics(supabase: SupabaseClient): Promise<SprintMetr
 function formatMetrics(metrics: SprintMetrics): string {
   if (!metrics) return "Pas de metriques disponibles pour ce sprint.";
   const lines = [
-    `Metriques Sprint ${metrics.sprint_id}`,
+    `<b>Metriques Sprint ${escapeHtml(metrics.sprint_id)}</b>`,
     "",
     `Taches: ${metrics.tasks_completed}/${metrics.tasks_planned} (${metrics.completion_rate ?? 0}%)`,
   ];
@@ -175,11 +176,13 @@ function formatMetrics(metrics: SprintMetrics): string {
 
 function formatMetricsComparison(metricsList: SprintMetrics[]): string {
   if (metricsList.length === 0) return "Pas de metriques disponibles.";
-  const lines = ["Evolution des sprints", ""];
+  const lines = ["<b>Evolution des sprints</b>", ""];
   for (const m of metricsList) {
     const rate = m.completion_rate ?? 0;
     const bar = "=".repeat(Math.round(rate / 5)) + " " + rate + "%";
-    lines.push(`${m.sprint_id}: ${bar} (${m.tasks_completed}/${m.tasks_planned})`);
+    lines.push(
+      `<code>${escapeHtml(m.sprint_id)}</code>: ${bar} (${m.tasks_completed}/${m.tasks_planned})`,
+    );
   }
   return lines.join("\n");
 }
@@ -335,7 +338,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     if (arg === "all" || arg === "compare") {
       const all = await getAllSprintMetrics(bctx.supabase);
-      await bctx.sendResponse(ctx, formatMetricsComparison(all));
+      await bctx.sendResponseHtml(ctx, formatMetricsComparison(all));
       return;
     }
 
@@ -354,7 +357,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       await ctx.reply("Aucune metrique disponible pour ce sprint.", bctx.threadOpts(ctx));
       return;
     }
-    await bctx.sendResponse(ctx, formatMetrics(metrics));
+    await bctx.sendResponseHtml(ctx, formatMetrics(metrics));
     // Navigation keyboard to other quality commands
     const navKb = buildQualityNavKeyboard();
     await ctx.reply("Voir aussi :", { ...bctx.threadOpts(ctx), reply_markup: navKb });
@@ -372,7 +375,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
       return;
     }
     const all = await getAllSprintMetrics(bctx.supabase);
-    await bctx.sendResponse(ctx, formatMetricsComparison(all));
+    await bctx.sendResponseHtml(ctx, formatMetricsComparison(all));
     const navKb = buildQualityNavKeyboard();
     await ctx.reply("Voir aussi :", { ...bctx.threadOpts(ctx), reply_markup: navKb });
   });
@@ -479,7 +482,7 @@ export default function qualityComposer(bctx: BotContext): Composer<Context> {
 
     await ctx.replyWithChatAction("typing");
     const alerts = await runAllChecks(bctx.supabase, sprintId);
-    await bctx.sendResponse(ctx, formatAlerts(alerts));
+    await bctx.sendResponseHtml(ctx, formatAlerts(alerts));
   });
 
   // /cost

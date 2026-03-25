@@ -241,6 +241,81 @@ describe("Task Formatting", () => {
     expect(formatBacklog([])).toContain("Backlog vide");
   });
 
+  // V1: formatBacklog returns <b>En cours</b> for in-progress tasks
+  it("V1: formatBacklog returns <b>En cours</b> section header", () => {
+    const tasks: Task[] = [
+      {
+        id: "aabbccdd-0000-0000-0000-000000000001",
+        title: "Task A",
+        status: "in_progress",
+        priority: 2,
+        sprint: "S12",
+      } as Task,
+    ];
+    const result = formatBacklog(tasks);
+    expect(result).toContain("<b>En cours</b>");
+  });
+
+  // V2: formatBacklog returns <code>${id}</code> for task IDs
+  it("V2: formatBacklog returns <code> for task IDs", () => {
+    const tasks: Task[] = [
+      {
+        id: "aabbccdd-eeff-0011-2233-445566778899",
+        title: "Task A",
+        status: "backlog",
+        priority: 2,
+        sprint: null,
+      } as Task,
+    ];
+    const result = formatBacklog(tasks);
+    expect(result).toContain("<code>");
+    expect(result).toContain("aabbccdd");
+  });
+
+  // V3: formatBacklog escapes special chars in task titles
+  it("V3: formatBacklog escapes XSS in task titles", () => {
+    const tasks: Task[] = [
+      {
+        id: "aabbccdd-0000-0000-0000-000000000001",
+        title: "<XSS>",
+        status: "backlog",
+        priority: 2,
+        sprint: null,
+      } as Task,
+    ];
+    const result = formatBacklog(tasks);
+    expect(result).toContain("&lt;XSS&gt;");
+    expect(result).not.toContain("<XSS>");
+  });
+
+  // V4: formatBacklog preserves [SDD] indicator
+  it("V4: formatBacklog preserves [SDD] for SDD tasks", () => {
+    const tasks: Task[] = [
+      {
+        id: "aabbccdd-0000-0000-0000-000000000001",
+        title: "Pipeline task",
+        status: "in_progress",
+        priority: 2,
+        sprint: "S12",
+        sdd_pipeline_name: "my-pipeline",
+      } as Task,
+    ];
+    const result = formatBacklog(tasks);
+    expect(result).toContain("[SDD]");
+  });
+
+  // V5: formatSprintSummary returns <b>Sprint S12</b>
+  it("V5: formatSprintSummary returns bold sprint title", () => {
+    const result = formatSprintSummary("S12", {
+      total: 16,
+      backlog: 3,
+      in_progress: 2,
+      review: 1,
+      done: 10,
+    });
+    expect(result).toContain("<b>Sprint S12</b>");
+  });
+
   it("formatSprintSummary produces correct output", () => {
     const result = formatSprintSummary("S12", {
       total: 16,

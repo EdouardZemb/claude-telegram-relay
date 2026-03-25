@@ -322,6 +322,7 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
             await ctx.answerCallbackQuery();
             await ctx.editMessageText(
               summary ? formatSprintSummary(sprintId, summary) : "Sprint non trouve.",
+              { parse_mode: "HTML" as const },
             );
           } else {
             await ctx.answerCallbackQuery({ text: "Pas de sprint actif." });

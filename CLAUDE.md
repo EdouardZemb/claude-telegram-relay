@@ -31,6 +31,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing and SDD pipeline context injection |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
+| `html-utils.ts` | HTML escaping for Telegram HTML parse_mode: escapeHtml() — extracted to avoid circular imports with memory sub-modules |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
 | `tasks.ts` | Task CRUD: backlog → in_progress → review → done lifecycle |
 | `memory.ts` | Barrel re-export for memory sub-modules (see `src/memory/`) |
@@ -172,7 +173,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)
-- Telegram responses: plain text only, no markdown formatting
+- Telegram responses: LLM responses (callClaude) use plain text via sendResponse. Bot-side formatting functions (formatBacklog, formatMetrics, etc.) use HTML via sendResponseHtml — escapeHtml() mandatory for all dynamic content interpolated in HTML strings.
 - Voice messages: always respond with voice + text (dual format)
 - Language: French for user-facing, English for code/comments
 - Barrel convention: any module refactored into a sub-directory MUST keep a barrel file at the original path (re-exports only, no logic) so existing imports remain unchanged

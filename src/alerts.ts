@@ -11,6 +11,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { escapeHtml } from "./bot-context.ts";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -502,15 +503,15 @@ export function checkModuleErrors(): Alert[] {
 }
 
 /**
- * Format monitoring stats for /monitor command (plain text).
+ * Format monitoring stats for /monitor command (HTML formatting for sendResponseHtml).
  * S35: Includes trust scores section.
  */
 export function formatMonitoringStats(): string {
-  const lines: string[] = ["Monitoring Production", ""];
+  const lines: string[] = ["<b>Monitoring Production</b>", ""];
 
   // Response time
   const rtStats = getResponseTimeStats();
-  lines.push("Temps de reponse:");
+  lines.push("<b>Temps de reponse:</b>");
   if (rtStats.count === 0) {
     lines.push("  Pas de mesures");
   } else {
@@ -523,20 +524,22 @@ export function formatMonitoringStats(): string {
   // Spawn stats
   const spawnStats = getSpawnStats();
   lines.push("");
-  lines.push("Spawn Claude par role:");
+  lines.push("<b>Spawn Claude par role:</b>");
   if (Object.keys(spawnStats).length === 0) {
     lines.push("  Aucune execution");
   } else {
     for (const [role, data] of Object.entries(spawnStats)) {
       const total = data.success + data.failure;
-      lines.push(`  ${role}: ${data.success}/${total} OK (${data.failureRate}% echec)`);
+      lines.push(
+        `  <code>${escapeHtml(role)}</code>: ${data.success}/${total} OK (${data.failureRate}% echec)`,
+      );
     }
   }
 
   // Module errors
   const modErrors = getModuleErrorCounts();
   lines.push("");
-  lines.push("Erreurs modules (derniere heure):");
+  lines.push("<b>Erreurs modules (derniere heure):</b>");
   const sorted = Object.entries(modErrors)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
@@ -544,7 +547,7 @@ export function formatMonitoringStats(): string {
     lines.push("  Aucune erreur");
   } else {
     for (const [mod, count] of sorted) {
-      lines.push(`  ${mod}: ${count}`);
+      lines.push(`  <code>${escapeHtml(mod)}</code>: ${count}`);
     }
   }
 
@@ -557,13 +560,13 @@ export function formatAlerts(alerts: Alert[]): string {
   if (alerts.length === 0) return "Aucune alerte active. Tout est nominal.";
 
   const lines = [
-    `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""} :`,
+    `<b>${alerts.length} alerte${alerts.length > 1 ? "s" : ""} detectee${alerts.length > 1 ? "s" : ""}</b> :`,
     "",
   ];
 
   for (const alert of alerts) {
     const icon = alert.severity === "critical" ? "!!" : alert.severity === "warning" ? "!" : "~";
-    lines.push(`  ${icon} ${alert.message}`);
+    lines.push(`  ${icon} ${escapeHtml(alert.message)}`);
   }
 
   return lines.join("\n");

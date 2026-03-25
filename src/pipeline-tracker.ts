@@ -10,6 +10,7 @@
 
 import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import { join } from "path";
+import { escapeHtml } from "./bot-context.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("pipeline-tracker");
@@ -248,10 +249,10 @@ export async function updateStep(
 
 /**
  * Format the status bar for a tracker (R6, V6, V7).
- * Plain-text only (Telegram convention).
+ * HTML formatting for Telegram (sendResponseHtml).
  */
 export function formatStatusBar(tracker: PipelineTracker): string {
-  const lines: string[] = [`Pipeline « ${tracker.name} »`];
+  const lines: string[] = [`<b>Pipeline « ${escapeHtml(tracker.name)} »</b>`];
 
   for (const phase of ALL_PHASES) {
     const step = tracker.steps[phase];
@@ -262,13 +263,13 @@ export function formatStatusBar(tracker: PipelineTracker): string {
 
     // Append summary if present
     if (step.summary) {
-      line += ` (${step.summary})`;
+      line += ` (${escapeHtml(step.summary)})`;
     }
 
     // Append artifact reference if present
     if (step.artifact) {
       const shortArtifact = step.artifact.split("/").pop() || step.artifact;
-      line += ` — ${shortArtifact}`;
+      line += ` — <code>${escapeHtml(shortArtifact)}</code>`;
     }
 
     // Append running indicator
