@@ -6,18 +6,17 @@
  * S45-T4: Document detection in photo + document handlers with extraction/classification pipeline.
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { unlink, writeFile } from "fs/promises";
-import { Composer, type Context, InlineKeyboard } from "grammy";
+import { Composer, type Context } from "grammy";
 import { join } from "path";
-import { type ActionDefinition, formatActionsForLLM, getAction } from "../action-registry.ts";
+import { formatActionsForLLM } from "../action-registry.ts";
 import { recordResponseTime } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, BOT_TOKEN, formatDocumentContext, UPLOADS_DIR } from "../bot-context.ts";
 import type { DocumentCreateInput, DocumentSearchResult } from "../documents.ts";
 import { checkDuplicate, computeFileHash, createDocument, searchDocuments } from "../documents.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
-import { type DetectedIntent, detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
+import { detectIntent, detectIntentWithLLM } from "../intent-detection.ts";
 import { createLogger } from "../logger.ts";
 import {
   autoRemember,
@@ -29,6 +28,12 @@ import {
   type ThoughtClassification,
 } from "../memory.ts";
 import { transcribe } from "../transcribe.ts";
+import {
+  buildSyntheticUpdate,
+  checkPendingClarification,
+  handleConfirmationCallback,
+  routeIntent,
+} from "./command-router.ts";
 import {
   buildClassificationKeyboard,
   buildDuplicateKeyboard,
@@ -108,228 +113,6 @@ export function isPhotoDocument(caption: string | undefined, fileSize: number): 
   }
 
   return false;
-}
-
-// ── Command Router (inlined from command-router.ts) ──────────────
-
-interface RouteResult {
-  handled: boolean;
-  pendingAction?: string;
-}
-
-interface RouterContext {
-  supabase: SupabaseClient | null;
-  getThreadId: (ctx: Context) => number | undefined;
-  threadOpts: (ctx: Context) => { message_thread_id?: number };
-  dispatchCommand: (ctx: Context, command: string) => Promise<void>;
-}
-
-interface PendingConfirmation {
-  command: string;
-  args: string;
-  timestamp: number;
-}
-
-interface PendingClarification {
-  command: string;
-  missingParam: string;
-  timestamp: number;
-}
-
-const pendingConfirmations = new Map<string, PendingConfirmation>();
-const pendingClarifications = new Map<string, PendingClarification>();
-const CONFIRMATION_TTL_MS = 60_000;
-const CLARIFICATION_TTL_MS = 60_000;
-
-function confirmationKey(ctx: Context): string {
-  const chatId = ctx.chat?.id || 0;
-  const threadId = (ctx.message as { message_thread_id?: number })?.message_thread_id || 0;
-  return `${chatId}:${threadId}`;
-}
-
-async function resolveTaskId(
-  supabase: SupabaseClient | null,
-  text: string,
-): Promise<string | undefined> {
-  if (!supabase) return undefined;
-  const idMatch = text.match(/\b([a-f0-9]{4,8})\b/);
-  if (idMatch) return idMatch[1];
-  if (/\b(la|cette|ma)\s+tache\b/i.test(text)) {
-    const { data } = await supabase
-      .from("tasks")
-      .select("id, title")
-      .eq("status", "in_progress")
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (data?.[0]) return data[0].id.substring(0, 8);
-  }
-  if (/\b(derniere|precedente)\s+tache\b/i.test(text)) {
-    const { data } = await supabase
-      .from("tasks")
-      .select("id, title")
-      .neq("status", "done")
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (data?.[0]) return data[0].id.substring(0, 8);
-  }
-  return undefined;
-}
-
-async function resolveSprintId(supabase: SupabaseClient | null): Promise<string | undefined> {
-  if (!supabase) return undefined;
-  const { data } = await supabase
-    .from("tasks")
-    .select("sprint")
-    .not("sprint", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  return data?.[0]?.sprint || undefined;
-}
-
-function buildClarificationQuestion(action: ActionDefinition, paramName: string): string {
-  switch (paramName) {
-    case "taskId":
-      return `Quelle tache veux-tu ${actionVerb(action.command)} ? Donne-moi l'ID ou les premiers caracteres.`;
-    case "title":
-      return "Quel titre pour la tache ?";
-    case "request":
-      return "Que veux-tu planifier ? Decris-moi ce que tu veux realiser.";
-    case "taskCount":
-      return "Combien de taches dans le sprint ?";
-    case "time":
-      return "A quelle heure ? (ex: 14h30, ou 2h pour dans 2 heures)";
-    case "text":
-      return "Quel texte pour le rappel ?";
-    default:
-      return `Quel ${paramName} ?`;
-  }
-}
-
-function actionVerb(command: string): string {
-  switch (command) {
-    case "exec":
-      return "executer";
-    case "start":
-      return "demarrer";
-    case "done":
-      return "terminer";
-    default:
-      return "traiter";
-  }
-}
-
-async function routeIntent(
-  ctx: Context,
-  intent: DetectedIntent,
-  rctx: RouterContext,
-): Promise<RouteResult> {
-  const action = intent.action || getAction(intent.command);
-  if (!action) return { handled: false };
-  if (action.requiresSupabase && !rctx.supabase) return { handled: false };
-
-  let args = intent.args || "";
-  const missingParams = action.params.filter((p) => p.required && !args.trim());
-
-  if (missingParams.length > 0) {
-    const paramName = missingParams[0].name;
-    if (paramName === "taskId") {
-      const resolved = await resolveTaskId(rctx.supabase, ctx.message?.text || "");
-      if (resolved) args = resolved;
-    } else if (paramName === "sprintId") {
-      const resolved = await resolveSprintId(rctx.supabase);
-      if (resolved) args = resolved;
-    }
-    if (!args.trim() && missingParams[0].required) {
-      const key = confirmationKey(ctx);
-      pendingClarifications.set(key, {
-        command: action.command,
-        missingParam: paramName,
-        timestamp: Date.now(),
-      });
-      const question = buildClarificationQuestion(action, paramName);
-      await ctx.reply(question, rctx.threadOpts(ctx));
-      return { handled: true };
-    }
-  }
-
-  if (action.risk === "high") {
-    const key = confirmationKey(ctx);
-    pendingConfirmations.set(key, { command: action.command, args, timestamp: Date.now() });
-    const cmdStr = args ? `/${action.command} ${args}` : `/${action.command}`;
-    const keyboard = new InlineKeyboard()
-      .text("Confirmer", `intent_confirm:${action.command}`)
-      .text("Annuler", "intent_cancel");
-    await ctx.reply(
-      `Action detectee : ${cmdStr}\n${action.description}\n\nConfirmer l'execution ?`,
-      { ...rctx.threadOpts(ctx), reply_markup: keyboard },
-    );
-    return { handled: true, pendingAction: action.command };
-  }
-
-  const cmdStr = args ? `/${action.command} ${args}` : `/${action.command}`;
-  await ctx.reply(cmdStr, rctx.threadOpts(ctx));
-  await rctx.dispatchCommand(ctx, cmdStr);
-  return { handled: true };
-}
-
-function checkPendingClarification(ctx: Context, text: string): string | null {
-  const key = confirmationKey(ctx);
-  const pending = pendingClarifications.get(key);
-  if (!pending) return null;
-  if (Date.now() - pending.timestamp > CLARIFICATION_TTL_MS) {
-    pendingClarifications.delete(key);
-    return null;
-  }
-  pendingClarifications.delete(key);
-  return `/${pending.command} ${text.trim()}`;
-}
-
-function handleConfirmationCallback(ctx: Context, data: string): string | null {
-  if (data === "intent_cancel") {
-    const key = confirmationKey(ctx);
-    pendingConfirmations.delete(key);
-    return null;
-  }
-  if (data.startsWith("intent_confirm:")) {
-    const chatId = ctx.callbackQuery?.message?.chat?.id || 0;
-    const threadId =
-      (ctx.callbackQuery?.message as { message_thread_id?: number })?.message_thread_id || 0;
-    const key = `${chatId}:${threadId}`;
-    const pending = pendingConfirmations.get(key);
-    if (!pending || Date.now() - pending.timestamp > CONFIRMATION_TTL_MS) {
-      pendingConfirmations.delete(key);
-      return null;
-    }
-    pendingConfirmations.delete(key);
-    return pending.args ? `/${pending.command} ${pending.args}` : `/${pending.command}`;
-  }
-  return null;
-}
-
-let _syntheticUpdateCounter = 0;
-
-function buildSyntheticUpdate(ctx: Context, command: string): Record<string, unknown> {
-  const slashEnd = command.indexOf(" ");
-  const cmdLength = slashEnd !== -1 ? slashEnd : command.length;
-  const chat = ctx.chat || ctx.callbackQuery?.message?.chat;
-  const from = ctx.from || ctx.callbackQuery?.from;
-  type MsgWithThread = { message_thread_id?: number };
-  const threadId =
-    (ctx.message as MsgWithThread)?.message_thread_id ||
-    (ctx.callbackQuery?.message as MsgWithThread)?.message_thread_id;
-  _syntheticUpdateCounter++;
-  return {
-    update_id: Date.now() + _syntheticUpdateCounter,
-    message: {
-      message_id: Date.now() + _syntheticUpdateCounter,
-      from,
-      chat,
-      date: Math.floor(Date.now() / 1000),
-      text: command,
-      entities: [{ type: "bot_command", offset: 0, length: cmdLength }],
-      ...(threadId ? { message_thread_id: threadId } : {}),
-    },
-  };
 }
 
 export default function messagesComposer(bctx: BotContext): Composer<Context> {

@@ -26,6 +26,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
 | `commands/jobs.ts` | Composer: /jobs (list, cancel) |
+| `commands/command-router.ts` | Routing helpers: actionVerb, buildClarificationQuestion, routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate |
 | `commands/sdd-flow.ts` | Composer: SDD InlineKeyboard callbacks (sdd_ prefix), contextual keyboard construction, convergence detection |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing |

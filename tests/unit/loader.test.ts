@@ -17,7 +17,7 @@ import { join } from "path";
 import { loadComposers } from "../../src/loader.ts";
 
 // Minimal BotContext mock — factory functions just need to not crash
-function makeBotContext(): any {
+function makeBotContext() {
   return {
     callClaude: async () => "mock",
     sendResponse: async () => {},
@@ -41,7 +41,7 @@ function makeBot(): Bot {
  * - JSON mode: {"module":"loader","message":"Loaded: filename.ts",...}
  * We capture any output containing "Loaded: " and extract the filename.
  */
-function extractLoadedFiles(calls: any[][]): string[] {
+function extractLoadedFiles(calls: string[][]): string[] {
   const files: string[] = [];
   for (const args of calls) {
     const msg = args.join(" ");
@@ -57,7 +57,7 @@ function extractLoadedFiles(calls: any[][]): string[] {
 /**
  * Extract the summary line "N/M composers loaded" from logger output.
  */
-function extractSummary(calls: any[][]): string | null {
+function extractSummary(calls: string[][]): string | null {
   for (const args of calls) {
     const msg = args.join(" ");
     if (msg.includes("composers loaded")) {
@@ -110,9 +110,9 @@ describe("loader", () => {
       const ctx = makeBotContext();
 
       // Capture console.log output (the logger writes to console.log for info level)
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -138,9 +138,9 @@ describe("loader", () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -266,9 +266,9 @@ export default c;
       const ctx = makeBotContext();
 
       // Suppress logs and capture summary
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -296,9 +296,9 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -308,9 +308,13 @@ export default c;
         expect(summary).toBeTruthy();
         const match = summary!.match(/(\d+)\/(\d+)/);
         expect(match).toBeTruthy();
-        // All real modules should load successfully
-        expect(match![1]).toBe(match![2]);
-        expect(count).toBe(parseInt(match![2], 10));
+        // command-router.ts is a utility module (no default Composer export) — intentionally skipped.
+        // All other real Composer modules should load successfully.
+        const KNOWN_NON_COMPOSER_COUNT = 1; // command-router.ts
+        const total = parseInt(match![2], 10);
+        const loaded = parseInt(match![1], 10);
+        expect(loaded).toBe(total - KNOWN_NON_COMPOSER_COUNT);
+        expect(count).toBe(loaded);
       } finally {
         console.log = origLog;
       }
@@ -341,9 +345,9 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -365,9 +369,9 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -389,9 +393,9 @@ export default c;
       const bot = makeBot();
       const ctx = makeBotContext();
 
-      const logCalls: any[][] = [];
+      const logCalls: string[][] = [];
       const origLog = console.log;
-      console.log = (...args: any[]) => {
+      console.log = (...args: string[]) => {
         logCalls.push(args);
       };
 
@@ -433,7 +437,7 @@ export default c;
       const errors: string[] = [];
       const origErr = console.error;
       const origLog = console.log;
-      console.error = (...args: any[]) => errors.push(args.join(" "));
+      console.error = (...args: string[]) => errors.push(args.join(" "));
       console.log = () => {};
 
       try {
@@ -457,7 +461,7 @@ export default c;
       const origErr = console.error;
       const errors: string[] = [];
       console.log = () => {};
-      console.error = (...args: any[]) => errors.push(args.join(" "));
+      console.error = (...args: string[]) => errors.push(args.join(" "));
 
       try {
         const count = await loadComposers(bot, ctx);

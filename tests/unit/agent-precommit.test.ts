@@ -70,7 +70,7 @@ describe("AC-1: runPreCommitValidation fails → no commit, success:false, error
     const content = readFileSync(join(SRC_DIR, "agent.ts"), "utf-8");
 
     // runPreCommitValidation is called before git commit
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     const commitIdx = content.indexOf('git("commit"');
     expect(validationIdx).toBeGreaterThan(0);
     expect(commitIdx).toBeGreaterThan(0);
@@ -85,7 +85,7 @@ describe("AC-1: runPreCommitValidation fails → no commit, success:false, error
 
   test("executeTask code: error detail includes validation.errors joined", () => {
     const content = readFileSync(join(SRC_DIR, "agent.ts"), "utf-8");
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     const commitIdx = content.indexOf('git("commit"');
     const validationBlock = content.substring(validationIdx, commitIdx);
 
@@ -119,7 +119,7 @@ describe("AC-2: runPreCommitValidation passes → flow continues normally", () =
     const content = readFileSync(join(SRC_DIR, "agent.ts"), "utf-8");
 
     // Find the validation block
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     const commitIdx = content.indexOf('git("commit"');
 
     // git commit comes after validation — no early return when passed
@@ -136,7 +136,7 @@ describe("AC-2: runPreCommitValidation passes → flow continues normally", () =
     const content = readFileSync(join(SRC_DIR, "agent.ts"), "utf-8");
 
     const addIdx = content.indexOf('git("add", "-A")');
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     const commitIdx = content.indexOf('git("commit"');
 
     expect(addIdx).toBeGreaterThan(0);
@@ -172,7 +172,7 @@ describe("AC-3: TypeScript errors → branch not pushed, error reported", () => 
     expect(pushIdx).toBeGreaterThan(commitIdx);
 
     // The validation failure return is between add and commit
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     expect(validationIdx).toBeLessThan(commitIdx);
     expect(validationIdx).toBeLessThan(pushIdx);
   });

@@ -38,7 +38,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       "QUALITE & AMELIORATION",
       "  /metrics [sprint] -- Metriques (Scrum Master Bob)",
       "  /retro [sprint] -- Retrospective (Bob)",
-      "  /patterns -- Analyse multi-sprints (Analyste Mary)",
       "  /alerts -- Alertes proactives (QA Quinn)",
       "  /cost [sprint|total] -- Suivi couts tokens par agent/tache/sprint",
       "  /brain -- Synthese memoire (faits, decisions, patterns recents)",
@@ -49,7 +48,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       "  /project create|switch|archive -- Gerer",
       "",
       "PRODUCTION",
-      "  /estimate <n> [pipeline] -- Estimation cout sprint",
       "  /monitor -- Monitoring production (temps reponse, spawn, erreurs)",
       "  /feature [list|enable|disable] -- Feature flags",
       "  /rollback [raison] -- Rollback au commit precedent",
@@ -92,7 +90,6 @@ export default function helpCommands(bctx: BotContext): Composer<Context> {
       "SUIVI",
       "  /retro pour analyser le sprint",
       "  /metrics pour les donnees quantitatives",
-      "  /patterns pour les tendances multi-sprints",
     ].join("\n");
     await ctx.reply(workflow, threadOpts(ctx));
   });

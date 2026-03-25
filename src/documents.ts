@@ -10,6 +10,7 @@ import { createHash } from "crypto";
 import { unlink, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { getConfig } from "./config.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("documents");
@@ -80,7 +81,16 @@ export interface ListDocumentsOptions {
 
 // ── Constants ────────────────────────────────────────────────
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+// Lazy getter — getConfig() must not be called at module top-level
+// because it throws when required env vars are absent (e.g. in CI tests).
+// try/catch: graceful fallback when required env vars are missing (test env).
+function getClaudePath(): string {
+  try {
+    return getConfig().claudePath || "claude";
+  } catch {
+    return "claude";
+  }
+}
 const NEW_CATEGORY_CONFIDENCE_THRESHOLD = 0.6;
 const STORAGE_BUCKET = "documents";
 
@@ -91,7 +101,7 @@ const STORAGE_BUCKET = "documents";
  */
 async function callClaudeCLI(prompt: string): Promise<string> {
   const args = [
-    CLAUDE_PATH,
+    getClaudePath(),
     "-p",
     prompt,
     "--output-format",

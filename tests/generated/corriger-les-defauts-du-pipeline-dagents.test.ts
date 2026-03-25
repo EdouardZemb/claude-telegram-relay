@@ -112,10 +112,10 @@ describe("[V4] executeTask does not git commit when runPreCommitValidation fails
     const content = readFileSync(join(SRC_DIR, "agent.ts"), "utf-8");
 
     // runPreCommitValidation must be called
-    expect(content).toContain("runPreCommitValidation(PROJECT_DIR)");
+    expect(content).toContain("runPreCommitValidation(getProjectDir())");
 
     // The validation check must appear before git commit
-    const validationIdx = content.indexOf("runPreCommitValidation(PROJECT_DIR)");
+    const validationIdx = content.indexOf("runPreCommitValidation(getProjectDir())");
     const commitIdx = content.indexOf('git("commit"');
     expect(validationIdx).toBeLessThan(commitIdx);
 
