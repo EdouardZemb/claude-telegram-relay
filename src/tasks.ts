@@ -42,6 +42,7 @@ export interface Task {
   architecture_ref: string | null;
   subtasks: Subtask[];
   project_id: string | null;
+  sdd_pipeline_name: string | null;
 }
 
 // ── Queries ──────────────────────────────────────────────────
@@ -60,6 +61,7 @@ export async function addTask(
     dev_notes?: string;
     architecture_ref?: string;
     subtasks?: Subtask[];
+    sdd_pipeline_name?: string;
   },
 ): Promise<Task | null> {
   const { data, error } = await supabase
@@ -76,12 +78,23 @@ export async function addTask(
       dev_notes: opts?.dev_notes ?? null,
       architecture_ref: opts?.architecture_ref ?? null,
       subtasks: opts?.subtasks ?? [],
+      sdd_pipeline_name: opts?.sdd_pipeline_name ?? null,
     })
     .select()
     .single();
 
   if (error) {
     log.error("addTask error", { error: String(error) });
+    return null;
+  }
+  return data as Task;
+}
+
+export async function getTaskById(supabase: SupabaseClient, taskId: string): Promise<Task | null> {
+  const { data, error } = await supabase.from("tasks").select("*").eq("id", taskId).single();
+
+  if (error) {
+    log.error("getTaskById error", { error: String(error), taskId });
     return null;
   }
   return data as Task;
@@ -234,7 +247,8 @@ export function formatBacklog(tasks: Task[], title?: string): string {
       const prio = PRIORITY_LABELS[t.priority] || "";
       const sprint = t.sprint ? ` (${t.sprint})` : "";
       const id = t.id.substring(0, 8);
-      sections.push(`  ${prio} ${t.title}${sprint}  [${id}]`);
+      const sddTag = t.sdd_pipeline_name ? "[SDD] " : "";
+      sections.push(`  ${prio} ${sddTag}${t.title}${sprint}  [${id}]`);
     }
     sections.push("");
   }

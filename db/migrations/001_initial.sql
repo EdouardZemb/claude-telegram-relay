@@ -127,13 +127,15 @@ CREATE TABLE IF NOT EXISTS tasks (
   dev_notes TEXT,
   architecture_ref TEXT,
   subtasks JSONB DEFAULT '[]',
-  project_id UUID REFERENCES projects(id)
+  project_id UUID REFERENCES projects(id),
+  sdd_pipeline_name TEXT
 );
 
 COMMENT ON COLUMN tasks.acceptance_criteria IS 'BMad: Given/When/Then acceptance criteria';
 COMMENT ON COLUMN tasks.dev_notes IS 'BMad: Technical notes for the dev agent';
 COMMENT ON COLUMN tasks.architecture_ref IS 'BMad: Reference to architecture document/section';
 COMMENT ON COLUMN tasks.subtasks IS 'BMad: Array of {title, ac_mapping, done} subtask objects';
+COMMENT ON COLUMN tasks.sdd_pipeline_name IS 'SDD: pipeline name linking task to SDD pipeline tracker';
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_sprint ON tasks(sprint);

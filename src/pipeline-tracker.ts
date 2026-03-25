@@ -50,6 +50,7 @@ export interface PipelineTracker {
   chatId: number;
   threadId?: number;
   name: string;
+  taskId?: string;
   steps: Record<SddPhase, PipelineStep>;
   createdAt: string;
   updatedAt: string;
@@ -154,11 +155,13 @@ export function toPipelineName(description: string): string {
 /**
  * Create a new pipeline tracker (R3, V3).
  * All 7 steps initialized to 'pending'.
+ * Optionally links to a backlog task via taskId.
  */
 export async function createPipeline(
   chatId: number,
   threadId: number | undefined,
   name: string,
+  opts?: { taskId?: string },
 ): Promise<PipelineTracker> {
   await loadPipelines();
 
@@ -172,6 +175,7 @@ export async function createPipeline(
     chatId,
     threadId,
     name,
+    ...(opts?.taskId ? { taskId: opts.taskId } : {}),
     steps,
     createdAt: now,
     updatedAt: now,
