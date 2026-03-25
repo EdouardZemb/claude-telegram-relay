@@ -561,6 +561,83 @@ describe("job-manager", () => {
     });
   });
 
+  describe("SDD event emission (V11, V12)", () => {
+    it("V11: PHASE_TO_AGENT_ROLE maps challenge → spec-architect (source of truth)", async () => {
+      const { PHASE_TO_AGENT_ROLE } = await import("../../src/sdd-agents.ts");
+      expect(PHASE_TO_AGENT_ROLE["challenge"]).toBe("spec-architect");
+      expect(PHASE_TO_AGENT_ROLE["review"]).toBe("reviewer");
+      expect(PHASE_TO_AGENT_ROLE["implement"]).toBe("implementer");
+      expect(PHASE_TO_AGENT_ROLE["explore"]).toBe("explorer");
+      expect(PHASE_TO_AGENT_ROLE["spec"]).toBe("spec-architect");
+      // discuss is mapped (F-DA-1 fix)
+      expect(PHASE_TO_AGENT_ROLE["discuss"]).toBeDefined();
+    });
+
+    it("V11: SDD challenge job with NO-GO verdict completes normally (event emitted best-effort)", async () => {
+      const fakeBotInstance = {
+        api: { sendMessage: async () => {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+      initJobManager(fakeBotInstance);
+
+      // SDD challenge job — event emission happens best-effort (Supabase may fail in test env)
+      const id = await launch(
+        "sdd-challenge:my-spec",
+        12345,
+        async () =>
+          "SDD_CHALLENGE_NO-GO: my-spec — sections 6-7 vides. V-criteres sans niveau de test.",
+        { messageThreadId: 100 },
+      );
+
+      // Wait for job to complete (including post-completion hooks)
+      await new Promise((r) => setTimeout(r, 300));
+
+      const job = await get(id);
+      expect(job).toBeDefined();
+      // V12: job completes normally even if Supabase emitSddEvent fails
+      expect(job!.status).toBe("completed");
+      expect(job!.result).toContain("SDD_CHALLENGE_NO-GO");
+    });
+
+    it("V12: SDD job completes normally when emitSddEvent encounters Supabase error", async () => {
+      const fakeBotInstance = {
+        api: { sendMessage: async () => {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+      initJobManager(fakeBotInstance);
+
+      // This job type triggers emitSddEvent — even if Supabase is unavailable (test env)
+      // the job must complete without throwing (best-effort design)
+      const id = await launch(
+        "sdd-spec:another-feature",
+        12345,
+        async () => "SDD_SPEC_GO: another-feature — spec written",
+        { messageThreadId: 200 },
+      );
+
+      await new Promise((r) => setTimeout(r, 300));
+
+      const job = await get(id);
+      expect(job!.status).toBe("completed");
+      expect(job!.error).toBeNull();
+    });
+
+    it("V12: non-SDD jobs are not affected by SDD event emission logic", async () => {
+      const fakeBotInstance = {
+        api: { sendMessage: async () => {} },
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+      } as any;
+      initJobManager(fakeBotInstance);
+
+      const id = await launch("exec", 12345, async () => "non-sdd result");
+      await new Promise((r) => setTimeout(r, 150));
+
+      const job = await get(id);
+      expect(job!.status).toBe("completed");
+      expect(job!.result).toBe("non-sdd result");
+    });
+  });
+
   describe("getCompletionKeyboard", () => {
     const baseJob: Job = {
       id: "abc12345",

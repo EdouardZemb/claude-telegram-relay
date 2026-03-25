@@ -63,6 +63,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `feedback-analyzer.ts` | Agent feedback analysis: recurring failure pattern detection, overlay generation, runFeedbackLoop orchestrator |
 | `sdd-auto-advance.ts` | Event-driven SDD auto-advance: getNextSddPhase mapping, depth circuit breaker, tryAutoAdvance orchestration |
 | `sdd-task-sync.ts` | SDD-backlog sync: PHASE_TO_TASK_STATUS mapping, syncTaskStatusForPhase best-effort sync (no downgrade, errors logged) |
+| `sdd-event.ts` | SDD verdict emission: best-effort write to agent_events after SDD job completion, emitSddVerdict with PHASE_TO_AGENT_ROLE mapping |
 | `action-registry.ts` | Registry of bot commands: metadata, params, risk levels, aliases, categories |
 | `inline-menus.ts` | Progressive inline menu system: category grouping, dynamic keyboards, onboarding, quality/notify navigation |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback, feature_request intent for SDD pipeline trigger |

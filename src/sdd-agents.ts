@@ -147,6 +147,24 @@ async function readAgentFile(filename: string): Promise<string> {
   }
 }
 
+// ── Phase → Agent Role Mapping ───────────────────────────────
+
+/**
+ * Maps each SDD phase to the canonical agent role responsible for that phase.
+ * Used by job-manager to write agent_events with the correct agent_role.
+ * Source of truth: the readAgentFile() calls in each runSdd* function below.
+ * "discuss" maps to "spec-architect" (the architect drives the discussion).
+ */
+export const PHASE_TO_AGENT_ROLE: Record<string, string> = {
+  explore: "explorer",
+  discuss: "spec-architect",
+  spec: "spec-architect",
+  challenge: "spec-architect",
+  implement: "implementer",
+  review: "reviewer",
+  doc: "spec-architect",
+};
+
 // ── Public API ───────────────────────────────────────────────
 
 /** Run the SDD Explore phase (R5, R12). Builds prompt directly (no buildExploreFn reuse). */
