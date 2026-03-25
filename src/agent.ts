@@ -13,13 +13,14 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawn, spawnSync } from "bun";
+import { getConfig } from "./config.ts";
 import { createLogger } from "./logger.ts";
 import { type Task, updateTaskStatus } from "./tasks.ts";
 
 const log = createLogger("agent");
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
-const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
+const CLAUDE_PATH = getConfig().claudePath || "claude";
+const PROJECT_DIR = getConfig().projectDir || process.cwd();
 
 // ── SpawnClaude — Centralized CLI spawn (S28-T1) ─────────────
 
@@ -226,7 +227,7 @@ export async function spawnClaude(options: SpawnClaudeOptions): Promise<SpawnCla
   return spawnClaudeCore(options);
 }
 
-const GITHUB_REPO = process.env.GITHUB_REPO || "EdouardZemb/claude-telegram-relay";
+const GITHUB_REPO = getConfig().githubRepo || "EdouardZemb/claude-telegram-relay";
 const AGENT_HEARTBEAT_MS = 2 * 60 * 1000; // 2 minutes — send progress update
 
 export interface AgentResult {

@@ -121,8 +121,6 @@ describe("Coding standards — S2: no direct process.env", () => {
   // Each entry has a justification. These are legacy usages predating getConfig().
   // New code MUST use getConfig() instead of process.env.
   const ALLOWLIST: Record<string, string> = {
-    // Agent execution: PROJECT_DIR/CLAUDE_PATH needed before config is available
-    "agent.ts": "PROJECT_DIR, CLAUDE_PATH, GITHUB_REPO — agent spawn pre-config",
     // Infrastructure: environment bootstrap before config
     "heartbeat.ts":
       "PROJECT_DIR, RELAY_DIR, SUPABASE_URL/KEY, HEARTBEAT_DEBUG — standalone process",
@@ -131,17 +129,11 @@ describe("Coding standards — S2: no direct process.env", () => {
       "RELAY_DIR, TELEGRAM_USER_ID, USER_TIMEZONE, TELEGRAM_GROUP_ID, SPRINT/DEV_THREAD_ID — notification routing",
     "pipeline-tracker.ts": "RELAY_DIR — SDD pipeline persistence directory",
     "bot-context.ts": "HOME, VOICE_PROVIDER, TTS_PROVIDER — runtime provider detection",
-    // Code tooling: PROJECT_DIR for filesystem operations
-    "code-graph.ts": "PROJECT_DIR — project root for code graph indexing",
-    "profile-evolution.ts": "PROJECT_DIR — profile file path",
-    "workflow.ts": "PROJECT_DIR — workflow config path",
     // External tools: tool-specific env vars not in config
-    "documents.ts": "CLAUDE_PATH — document classification via Claude",
     "transcribe.ts":
       "VOICE_PROVIDER, WHISPER_LANGUAGE, WHISPER_BINARY, WHISPER_MODEL_PATH, TMPDIR — whisper config",
     "tts.ts": "TTS_PROVIDER, GROQ_API_KEY, GROQ_TTS_*, PIPER_*, TMPDIR — TTS provider config",
     // Commands: timezone and thread IDs for user-facing formatting
-    "commands/tasks.ts": "SPRINT_THREAD_ID, USER_TIMEZONE — sprint routing and formatting",
     "commands/memory-cmds.ts": "USER_TIMEZONE — timestamp formatting",
     "commands/zz-messages.ts": "VOICE_PROVIDER — voice detection",
     // Memory: timezone for context formatting
@@ -180,10 +172,7 @@ describe("Coding standards — S3: LOC threshold", () => {
 
   // Temporary allowlist for files currently above threshold.
   // These are tracked for future refactoring — see CLAUDE.md "File size guideline".
-  const LOC_ALLOWLIST: Record<string, number> = {
-    "workflow.ts": 848,
-    "commands/zz-messages.ts": 938,
-  };
+  const LOC_ALLOWLIST: Record<string, number> = {};
 
   const files = getAllSourceFiles().filter((f) => {
     if (f.endsWith(".d.ts")) return false;

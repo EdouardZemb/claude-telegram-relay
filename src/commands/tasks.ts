@@ -8,6 +8,7 @@
 import { Composer, type Context } from "grammy";
 import { z } from "zod";
 import type { BotContext } from "../bot-context.ts";
+import { getConfig } from "../config.ts";
 import { enqueue } from "../notification-queue.ts";
 import { err, ok, type Result } from "../result.ts";
 
@@ -246,12 +247,12 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       await ctx.reply(`Fait: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
       const currentThread = bctx.getThreadId(ctx);
-      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0", 10);
+      const sprintThread = getConfig().sprintThreadId || 0;
       if (currentThread !== sprintThread) {
         const ts = new Date().toLocaleTimeString("fr-FR", {
           hour: "2-digit",
           minute: "2-digit",
-          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+          timeZone: getConfig().userTimezone || "Europe/Paris",
         });
         await enqueue({
           type: "task",
@@ -306,12 +307,12 @@ export default function tasksCommands(bctx: BotContext): Composer<Context> {
       await ctx.reply(`En cours: ${updated.title}`, bctx.threadOpts(ctx));
       // Notify sprint topic if not already in it
       const currentThread = bctx.getThreadId(ctx);
-      const sprintThread = parseInt(process.env.SPRINT_THREAD_ID || "0", 10);
+      const sprintThread = getConfig().sprintThreadId || 0;
       if (currentThread !== sprintThread) {
         const ts = new Date().toLocaleTimeString("fr-FR", {
           hour: "2-digit",
           minute: "2-digit",
-          timeZone: process.env.USER_TIMEZONE || "Europe/Paris",
+          timeZone: getConfig().userTimezone || "Europe/Paris",
         });
         await enqueue({
           type: "task",

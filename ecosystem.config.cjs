@@ -35,6 +35,7 @@ module.exports = {
     },
     {
       name: "claude-heartbeat",
+      // heartbeat cron: runs every 10min via PM2 cron_restart, autorestart:false = no keep-alive between runs
       script: "bun",
       args: "run src/heartbeat.ts",
       cwd: "/home/edouard/claude-telegram-relay",

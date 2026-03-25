@@ -10,6 +10,7 @@ import { createHash } from "crypto";
 import { unlink, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { getConfig } from "./config.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("documents");
@@ -80,7 +81,7 @@ export interface ListDocumentsOptions {
 
 // ── Constants ────────────────────────────────────────────────
 
-const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const CLAUDE_PATH = getConfig().claudePath || "claude";
 const NEW_CATEGORY_CONFIDENCE_THRESHOLD = 0.6;
 const STORAGE_BUCKET = "documents";
 
