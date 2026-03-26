@@ -99,6 +99,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `/ideas` | Ideas pipeline: list, add, review, promote, archive |
 | `/notify` | Notification preferences: status, quiet hours, on/off per type, immediate mode |
 | `/feature` | Feature flags: list, enable, disable |
+| `/overlay` | Prompt overlays admin: list, deactivate, purge |
 | `/jobs` | Background job status (list, cancel) |
 | `/rollback` | Rollback to previous commit |
 | `/monitor` | Production monitoring: response time, spawn stats, module errors |

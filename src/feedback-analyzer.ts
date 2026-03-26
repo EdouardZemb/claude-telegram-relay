@@ -11,7 +11,12 @@
  */
 
 import { createLogger } from "./logger.ts";
-import { addOverlay, expireOverlays, getActiveOverlays } from "./prompt-overlay.ts";
+import {
+  addOverlay,
+  expireOverlays,
+  getActiveOverlays,
+  purgeInactiveOverlays,
+} from "./prompt-overlay.ts";
 
 const log = createLogger("feedback-analyzer");
 
@@ -40,6 +45,7 @@ export interface FeedbackLoopResult {
   overlaysCreated: number;
   expiredCount: number;
   patternsDetected: number;
+  purgedCount: number;
 }
 
 // ── Constants ────────────────────────────────────────────────
@@ -307,11 +313,18 @@ export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
 
   // Gate on feature flag
   if (!deps.isFeatureEnabled("prompt_feedback_loop")) {
-    return { skipped: true, overlaysCreated: 0, expiredCount: 0, patternsDetected: 0 };
+    return {
+      skipped: true,
+      overlaysCreated: 0,
+      expiredCount: 0,
+      patternsDetected: 0,
+      purgedCount: 0,
+    };
   }
 
-  // Step 1: Expire old overlays
+  // Step 1: Expire and purge old overlays
   const expiredCount = expireOverlays();
+  const purgedCount = purgeInactiveOverlays();
 
   // Step 2: Fetch recent signals
   let signals: AgentFeedbackSignal[];
@@ -319,7 +332,7 @@ export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
     signals = await deps.fetchSignals();
   } catch (err) {
     log.error("Failed to fetch feedback signals", { error: String(err) });
-    return { skipped: false, overlaysCreated: 0, expiredCount, patternsDetected: 0 };
+    return { skipped: false, overlaysCreated: 0, expiredCount, patternsDetected: 0, purgedCount };
   }
 
   // Step 3: Analyze for recurring patterns
@@ -385,5 +398,6 @@ export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
     overlaysCreated,
     expiredCount,
     patternsDetected: patterns.length,
+    purgedCount,
   };
 }
