@@ -23,6 +23,7 @@ export interface HeartbeatState {
   lastAuditAt: string | null; // when codebase audit last ran
   lastAuditScore: number | null; // last audit score (for regression detection)
   lastFeedbackLoopAt: string | null; // when feedback loop last ran (hourly)
+  lastPipelineWatchdogAt: string | null; // when SDD pipeline watchdog last ran (every pulse)
 }
 
 export interface HeartbeatAction {
@@ -230,5 +231,6 @@ export function createDefaultState(): HeartbeatState {
     lastAuditAt: null,
     lastAuditScore: null,
     lastFeedbackLoopAt: null,
+    lastPipelineWatchdogAt: null,
   };
 }

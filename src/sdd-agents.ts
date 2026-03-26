@@ -5,10 +5,12 @@
  * Imports restricted to agent.ts, conversation-handoff.ts, logger.ts (R13).
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnSync } from "bun";
 import { writeFile as _writeFileDefault, mkdir, readFile } from "fs/promises";
 import { dirname, join } from "path";
 import { spawnClaude } from "./agent.ts";
+import { buildAgentContext as _buildAgentContextDefault } from "./agent-context.ts";
 import type { BotContext } from "./bot-context.ts";
 import { formatHandoffForAgent, type HandoffSummary } from "./conversation-handoff.ts";
 import { isFeatureEnabled as _isFeatureEnabledDefault } from "./feature-flags.ts";
@@ -86,6 +88,45 @@ export function setBuildEnrichedPromptHook(
 function enrichPrompt(role: string, base: string): string {
   if (_buildEnrichedPromptHook) return _buildEnrichedPromptHook(role, base);
   return _buildEnrichedPromptDefault(role, base);
+}
+
+/**
+ * Optional test hook: replace buildAgentContext without importing agent-context in tests.
+ * In production this is undefined and the real buildAgentContext is used.
+ */
+let _buildAgentContextHook:
+  | ((supabase: SupabaseClient | null, role: string, phase: string) => Promise<string>)
+  | undefined;
+
+/** @internal — for tests only */
+export function setBuildAgentContextHook(
+  fn:
+    | ((supabase: SupabaseClient | null, role: string, phase: string) => Promise<string>)
+    | undefined,
+): void {
+  _buildAgentContextHook = fn;
+}
+
+function getAgentContext(
+  supabase: SupabaseClient | null,
+  role: string,
+  phase: string,
+): Promise<string> {
+  if (_buildAgentContextHook) return _buildAgentContextHook(supabase, role, phase);
+  return _buildAgentContextDefault(supabase, role, phase);
+}
+
+/**
+ * Append agent context to a system prompt string.
+ * If agentContext is empty, returns the original systemPrompt unchanged.
+ */
+function appendAgentContext(
+  systemPrompt: string | undefined,
+  agentContext: string,
+): string | undefined {
+  if (!agentContext) return systemPrompt;
+  if (!systemPrompt) return agentContext;
+  return `${systemPrompt}\n\n${agentContext}`;
 }
 
 const PROJECT_ROOT = dirname(dirname(import.meta.path));
@@ -172,9 +213,11 @@ export async function runSddExplore(
   name: string,
   _chatId?: number,
   _threadId?: number | undefined,
+  supabase?: SupabaseClient | null,
 ): Promise<string> {
   try {
     const agentDef = await readAgentFile("explorer.md");
+    const agentContext = await getAgentContext(supabase ?? null, "explorer", "explore");
     const humanName = name.replace(/-/g, " ");
 
     const prompt = [
@@ -194,7 +237,7 @@ export async function runSddExplore(
 
     const result = await spawnClaude({
       prompt,
-      systemPrompt: agentDef || undefined,
+      systemPrompt: appendAgentContext(agentDef || undefined, agentContext),
       model: "claude-sonnet-4-6",
       effort: "medium",
     });
@@ -222,6 +265,7 @@ export async function runSddSpec(
 ): Promise<string> {
   try {
     const agentDef = await readAgentFile("spec-architect.md");
+    const agentContext = await getAgentContext(bctx.supabase, "spec-architect", "spec");
     const formattedHandoff = formatHandoffForAgent(handoff);
     const humanName = name.replace(/-/g, " ");
 
@@ -244,7 +288,7 @@ export async function runSddSpec(
 
     const result = await spawnClaude({
       prompt,
-      systemPrompt: agentDef || undefined,
+      systemPrompt: appendAgentContext(agentDef || undefined, agentContext),
       model: "claude-sonnet-4-6",
       effort: "high",
     });
@@ -272,6 +316,8 @@ export async function runSddChallenge(name: string, bctx: BotContext): Promise<s
   try {
     const specPath = `docs/specs/SPEC-${name}.md`;
     const reportPath = join(PROJECT_ROOT, "docs", "reviews", `adversarial-SPEC-${name}.md`);
+    // Fetch context once, shared by all 3 challenge agents
+    const agentContext = await getAgentContext(bctx.supabase, "spec-architect", "challenge");
 
     const agents = [
       { file: "devils-advocate.md", label: "Devil's Advocate" },
@@ -294,7 +340,7 @@ export async function runSddChallenge(name: string, bctx: BotContext): Promise<s
       const agentDef = await readAgentFile(agent.file);
       return spawnClaude({
         prompt: basePrompt,
-        systemPrompt: agentDef || undefined,
+        systemPrompt: appendAgentContext(agentDef || undefined, agentContext),
         model: "claude-sonnet-4-6",
         effort: "medium",
       });
@@ -373,6 +419,7 @@ export async function runSddChallenge(name: string, bctx: BotContext): Promise<s
 /** Run the SDD Implement phase (R8). useWorktree: true, spec + adversarial refs. */
 export async function runSddImplement(name: string, bctx: BotContext): Promise<string> {
   try {
+    const agentContext = await getAgentContext(bctx.supabase, "implementer", "implement");
     const specRef = `docs/specs/SPEC-${name}.md`;
     const adversarialRef = `docs/reviews/adversarial-SPEC-${name}.md`;
 
@@ -392,6 +439,7 @@ export async function runSddImplement(name: string, bctx: BotContext): Promise<s
 
     const result = await spawnClaude({
       prompt,
+      systemPrompt: agentContext || undefined,
       model: "claude-sonnet-4-6",
       effort: "high",
       useWorktree: true,
@@ -429,6 +477,7 @@ export async function runSddDoc(name: string, bctx: BotContext): Promise<string>
     } catch {
       log.warn("dev-doc SKILL.md not found, running without system prompt");
     }
+    const agentContext = await getAgentContext(bctx.supabase, "spec-architect", "doc");
 
     const implRef = `docs/reviews/implement-${name}.md`;
 
@@ -446,7 +495,7 @@ export async function runSddDoc(name: string, bctx: BotContext): Promise<string>
 
     const result = await spawnClaude({
       prompt,
-      systemPrompt: skillContent || undefined,
+      systemPrompt: appendAgentContext(skillContent || undefined, agentContext),
       model: "claude-sonnet-4-6",
       effort: "medium",
     });
@@ -473,6 +522,7 @@ export async function runSddReview(
 ): Promise<string> {
   try {
     const agentDef = await readAgentFile("reviewer.md");
+    const agentContext = await getAgentContext(bctx.supabase, "reviewer", "review");
     const specRef = `docs/specs/SPEC-${name}.md`;
     const implRef = `docs/reviews/implement-${name}.md`;
 
@@ -495,7 +545,7 @@ export async function runSddReview(
 
     const result = await spawnClaude({
       prompt,
-      systemPrompt: agentDef || undefined,
+      systemPrompt: appendAgentContext(agentDef || undefined, agentContext),
       model: "claude-sonnet-4-6",
       effort: "medium",
     });

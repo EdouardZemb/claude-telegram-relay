@@ -38,14 +38,12 @@ describe("HeartbeatPrompt", () => {
 
   describe("buildHeartbeatPrompt", () => {
     const baseState: HeartbeatState = {
+      ...createDefaultState(),
       lastPulseAt: "2026-03-17T12:00:00.000Z",
       lastCommitSha: "abc123",
       lastSprintSnapshot: { sprint: "S44", done: 5, total: 10 },
       recentActions: [],
       cooldowns: {},
-      lastAlertCheckAt: null,
-      lastArchivalAt: null,
-      lastAutonomyScanAt: null,
     };
 
     const baseDelta: HeartbeatDelta = {
@@ -394,15 +392,17 @@ describe("Heartbeat Actions", () => {
  * Helper: creates a chainable mock object that resolves any method chain
  * to the given result (used for Supabase query chain mocking).
  */
-function chainResult(result: { data: any; error: any }): any {
+// biome-ignore lint/suspicious/noExplicitAny: Supabase query chain mock requires dynamic typing
+function chainResult(result: { data: unknown; error: unknown }): Record<string, unknown> {
   const handler: ProxyHandler<object> = {
     get(_, prop) {
       if (prop === "then") {
-        return (resolve: (v: any) => any, reject?: (e: any) => any) =>
+        // biome-ignore lint/suspicious/noExplicitAny: Promise callback types
+        return (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
           Promise.resolve(result).then(resolve, reject);
       }
       // Any method call returns a new chainable proxy
-      return (..._args: any[]) => new Proxy({}, handler);
+      return (..._args: unknown[]) => new Proxy({}, handler);
     },
   };
   return new Proxy({}, handler);
@@ -429,6 +429,7 @@ describe("V5: getSprintDelta Supabase error handling", () => {
     };
 
     const lastSnapshot = { sprint: "S44", done: 0, total: 2 };
+    // biome-ignore lint/suspicious/noExplicitAny: mock Supabase client
     const result = await getSprintDelta(supabase as any, lastSnapshot);
 
     expect(result.changed).toBe(false);
@@ -445,6 +446,7 @@ describe("V6: getStaleTasks Supabase error handling", () => {
       from: () => chainResult({ data: null, error: { message: "timeout" } }),
     };
 
+    // biome-ignore lint/suspicious/noExplicitAny: mock Supabase client
     const result = await getStaleTasks(supabase as any);
 
     expect(result.tasks).toBe("");

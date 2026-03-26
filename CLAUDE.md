@@ -31,6 +31,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing and SDD pipeline context injection |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
+| `agent-context.ts` | Enriched Supabase context builder for SDD agents: buildAgentContext(supabase, role, phase) with parallel fetch, timeout, size cap |
 | `html-format-helpers.ts` | Shared HTML formatting helpers for Telegram: sectionTitle, separator, progressBar, kvLine, statusIcon, bulletList, collapsibleSection |
 | `html-utils.ts` | HTML escaping for Telegram HTML parse_mode: escapeHtml() — extracted to avoid circular imports with memory sub-modules |
 | `result.ts` | Custom Result<T, E> discriminant type with ok/err constructors and isOk/isErr type guards (vague 3) |
@@ -68,7 +69,9 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `inline-menus.ts` | Progressive inline menu system: category grouping, dynamic keyboards, onboarding, quality/notify navigation |
 | `intent-detection.ts` | Two-tier intent detection: regex fast-path + LLM fallback, feature_request intent for SDD pipeline trigger |
 | `heartbeat.ts` | Autonomous heartbeat: periodic pulse, alert checks, memory archival |
+| `heartbeat-sdd-watchdog.ts` | SDD pipeline watchdog: detects orphaned/stuck pipeline phases (cross-process read) |
 | `heartbeat-prompt.ts` | Heartbeat prompt builder: system prompt, delta formatting, decision schema |
+| `heartbeat-sdd-watchdog.ts` | SDD pipeline watchdog for heartbeat: detects orphaned/stuck pipeline phases |
 
 ### Telegram Commands
 
