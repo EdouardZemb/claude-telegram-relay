@@ -98,6 +98,7 @@ class MockQueryBuilder {
   private _upsertConflict: string | null = null;
   private _mode: "select" | "insert" | "update" | "upsert" | "delete" = "select";
   private _orFilters: string | null = null;
+  private _countOnly = false;
 
   constructor(store: MockStore, table: string) {
     this.store = store;
@@ -105,8 +106,12 @@ class MockQueryBuilder {
     if (!this.store[table]) this.store[table] = [];
   }
 
-  select(_columns?: string) {
+  select(_columns?: string, opts?: { count?: string; head?: boolean }) {
     this._selectCalled = true;
+    // Support count: 'exact', head: true — returns { count } without data
+    if (opts?.count === "exact" && opts?.head === true) {
+      this._countOnly = true;
+    }
     // Only set mode to select if no write operation was initiated
     if (this._mode === "select") {
       this._mode = "select";
@@ -292,6 +297,10 @@ class MockQueryBuilder {
         let filtered = this._applyFilters(rows);
         filtered = this._applyOrder(filtered);
         if (this._limit !== null) filtered = filtered.slice(0, this._limit);
+        // Support count: 'exact', head: true — returns { count } without data
+        if (this._countOnly) {
+          return { data: null, count: filtered.length, error: null };
+        }
         return { data: this._single ? (filtered[0] ?? null) : filtered, error: null };
       }
     }

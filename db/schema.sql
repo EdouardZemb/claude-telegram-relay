@@ -81,6 +81,8 @@ CREATE INDEX IF NOT EXISTS idx_memory_created_at ON memory(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_idea_status ON memory(idea_status) WHERE idea_status IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory(importance_score DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_last_accessed ON memory(last_accessed_at DESC);
+-- Expression index for recentPromotions query (F-EC-3): eliminates full table scan on metadata JSONB
+CREATE INDEX IF NOT EXISTS idx_memory_metadata_source ON memory ((metadata->>'source'));
 
 COMMENT ON COLUMN memory.idea_status IS 'Lifecycle status for idea-type memories: new → reviewed → promoted → archived';
 
