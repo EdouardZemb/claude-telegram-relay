@@ -9,6 +9,10 @@
  *   V10 : formatMemoryHealth (unit, HTML assertions)
  *   V11, V18 : /brain health dispatch (structural, source-based)
  *
+ * Corrections adversariales (cycle 3) couvertes :
+ *   F-EC-1/F-SS-1 : LIMIT 5000 sur allMemories + COUNT SQL pour linksCount/archiveCount/embeddingCount/recentPromotions
+ *   F-EC-3 : index idx_memory_metadata_source dans schema.sql
+ *
  * V-criteres retires (code supprime dans nettoyage-du-code-mort) :
  *   V1-V5 : promoteWorkingMemory (supprime — orchestrator.ts retire)
  *   V12 : memory_promotion flag (supprime — flag retire de features.json)
@@ -432,5 +436,127 @@ describe("[V18] /brain health dispatch uniquement sur match exact 'health', tout
       /if\s*\(\s*brainInput\s*===\s*["']health["']\s*\)\s*\{[\s\S]*?return;\s*\}/,
     );
     expect(earlyReturn).not.toBeNull();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Corrections adversariales cycle 3 — F-EC-1/F-SS-1 :
+// COUNT SQL pour linksCount, archiveCount, embeddingCount, recentPromotions
+// ════════════════════════════════════════════════════════════════
+
+describe("[F-EC-1/F-EC-4] memoryHealthStats utilise COUNT SQL pour linksCount et archiveCount", () => {
+  let supabase: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    supabase = createMockSupabase();
+  });
+
+  it("linksCount reflète le nombre de rows dans memory_links sans fetcher les donnees", async () => {
+    const now = new Date().toISOString();
+    // Setup a memory row so total > 0 (sinon early return sur empty)
+    supabase._store.memory = [
+      {
+        id: "m1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+      },
+    ];
+    supabase._store.memory_links = [
+      { id: "l1", source_id: "m1", target_id: "m2" },
+      { id: "l2", source_id: "m2", target_id: "m1" },
+      { id: "l3", source_id: "m1", target_id: "m3" },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.linksCount).toBe(3);
+  });
+
+  it("archiveCount reflète le nombre de rows dans memory_archive sans fetcher les donnees", async () => {
+    const now = new Date().toISOString();
+    supabase._store.memory = [
+      {
+        id: "m1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+      },
+    ];
+    supabase._store.memory_archive = [
+      { id: "a1", type: "fact", archived_at: now },
+      { id: "a2", type: "goal", archived_at: now },
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    expect(stats.archiveCount).toBe(2);
+  });
+
+  it("recentPromotions utilise COUNT SQL (count property) et filtre par source et date", async () => {
+    const now = new Date().toISOString();
+    const oldDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    supabase._store.memory = [
+      {
+        id: "m1",
+        type: "fact",
+        importance_score: 50,
+        created_at: now,
+        access_count: 0,
+        content: "A",
+        metadata: { source: "working_memory_promotion" },
+      },
+      {
+        id: "m2",
+        type: "fact",
+        importance_score: 50,
+        created_at: oldDate,
+        access_count: 0,
+        content: "B",
+        metadata: { source: "working_memory_promotion" },
+      }, // trop vieux
+    ];
+
+    const stats = await memoryHealthStats(supabase);
+
+    // Only 1 recent promotion (m2 is too old)
+    expect(stats.recentPromotions).toBe(1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Corrections adversariales cycle 3 — F-EC-3 :
+// Index idx_memory_metadata_source dans db/schema.sql
+// ════════════════════════════════════════════════════════════════
+
+describe("[F-EC-3] schema.sql contient idx_memory_metadata_source pour les requetes recentPromotions", () => {
+  it("db/schema.sql definit idx_memory_metadata_source sur memory.metadata->>'source'", async () => {
+    const fs = await import("fs");
+    const schema = fs.readFileSync("db/schema.sql", "utf-8");
+
+    expect(schema).toContain("idx_memory_metadata_source");
+    expect(schema).toContain("metadata->>'source'");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Corrections adversariales cycle 3 — F-EC-1 :
+// LIMIT 5000 sur la query allMemories (protection contre full table scan)
+// ════════════════════════════════════════════════════════════════
+
+describe("[F-EC-1] memoryHealthStats applique LIMIT 5000 sur la query allMemories", () => {
+  it("graph.ts source: la query allMemories utilise .limit(5000)", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("src/memory/graph.ts", "utf-8");
+
+    // allMemories query should have a LIMIT
+    const limitMatch = source.match(
+      /from\("memory"\)\s*\n?\s*\.select\("type, importance_score, created_at, access_count"\)\s*\n?\s*\.limit\(5000\)/,
+    );
+    expect(limitMatch).not.toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 # Rapport d'implementation — SPEC-sante-systeme-memoire-permanente-multi
 
-> Date : 2026-03-23
+> Date initiale : 2026-03-23 | Mise à jour : 2026-03-26
 > Pipeline : dev-implement (Test Architect + Implementer + Tester)
 > Spec : docs/specs/SPEC-sante-systeme-memoire-permanente-multi.md
 > Review adversariale : docs/reviews/adversarial-SPEC-sante-systeme-memoire-permanente-multi.md (Cycle 3 — GO WITH CHANGES)
@@ -146,3 +146,55 @@ TypeScript typecheck : PASS (`bunx tsc --noEmit`)
 ### Etape suivante
 
 **DONE** — le conformance check puis la review sont geres par `/dev-pipeline`.
+
+---
+
+## Cycle 2 — Corrections adversariales cycle 3 (2026-03-26)
+
+### Contexte
+
+Suite à la review adversariale cycle 3, 3 MAJEURS actionnables de code ont été identifiés. Cette session implémente les corrections recommandées.
+
+### Fichiers modifiés
+
+| Fichier | Modification | Finding adressé |
+|---------|-------------|-----------------|
+| `db/schema.sql` | Ajout `idx_memory_metadata_source ON memory ((metadata->>'source'))` | F-EC-3 |
+| `db/migrations/001_initial.sql` | Même index (sync migration) | F-EC-3 |
+| `src/memory/graph.ts` | LIMIT 5000 + COUNT SQL (`{ count: 'exact', head: true }`) pour 4 queries | F-EC-1/F-EC-4/F-SS-1 |
+| `tests/fixtures/mock-supabase.ts` | Support `{ count: 'exact', head: true }` dans `select()` | Infrastructure test |
+| `tests/generated/sante-systeme-memoire-permanente-multi.test.ts` | +5 tests adversariaux | F-EC-1, F-EC-3, F-EC-4 |
+
+### Nouveaux tests (5)
+
+- `[F-EC-1/F-EC-4] linksCount reflète COUNT SQL sans fetcher les données` — PASS
+- `[F-EC-1/F-EC-4] archiveCount reflète COUNT SQL sans fetcher les données` — PASS
+- `[F-EC-1/F-EC-4] recentPromotions utilise COUNT SQL filtré par source et date` — PASS
+- `[F-EC-3] schema.sql définit idx_memory_metadata_source` — PASS
+- `[F-EC-1] graph.ts applique LIMIT 5000 sur allMemories` — PASS
+
+### Résultat bun test final
+
+```
+bun test
+2302 pass
+1 skip
+1 fail (pre-existing: tsc —— bun-types manquant dans l'environnement, non lié à ces changements)
+4717 expect() calls
+Ran 2304 tests across 82 files
+```
+
+Tests sante-memoire : **17 pass / 0 fail** (12 pre-existants + 5 nouveaux)
+
+### Findings adversariaux traités
+
+| Finding | Sévérité | Action |
+|---------|----------|--------|
+| F-EC-1/F-SS-1 | MAJEUR | LIMIT 5000 + COUNT SQL — IMPLÉMENTÉ |
+| F-EC-3 | MAJEUR | Index expression metadata source — IMPLÉMENTÉ |
+| F-EC-4 | MINEUR | COUNT SQL liens/archive — IMPLÉMENTÉ |
+| F-DA-1, F-DA-2, F-DA-3, F-DA-4 | MAJEUR/MINEUR | Corrections spec — hors scope code |
+| F-EC-2, F-EC-5 | MAJEUR/MINEUR | N/A (promoteWorkingMemory supprimé) |
+| F-SS-3 | MINEUR | Acceptable V1 |
+
+### Statut : DONE

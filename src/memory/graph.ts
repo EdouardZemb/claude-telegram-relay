@@ -586,24 +586,30 @@ export async function memoryHealthStats(
       topAccessedResult,
       recentPromotionsResult,
     ] = await Promise.all([
-      // All active memories with type, importance_score, created_at
-      supabase.from("memory").select("type, importance_score, created_at, access_count"),
-      // Count memories with non-null embedding
-      supabase.from("memory").select("id").not("embedding", "is", null),
-      // Total links
-      supabase.from("memory_links").select("id"),
-      // Total archived
-      supabase.from("memory_archive").select("id"),
+      // All active memories with type, importance_score, created_at (LIMIT 5000 to protect against unbounded scan — F-EC-1)
+      supabase
+        .from("memory")
+        .select("type, importance_score, created_at, access_count")
+        .limit(5000),
+      // Count memories with non-null embedding (COUNT SQL — F-EC-4)
+      supabase
+        .from("memory")
+        .select("*", { count: "exact", head: true })
+        .not("embedding", "is", null),
+      // Total links — COUNT SQL instead of fetching all IDs (F-EC-4)
+      supabase.from("memory_links").select("*", { count: "exact", head: true }),
+      // Total archived — COUNT SQL instead of fetching all IDs (F-EC-4)
+      supabase.from("memory_archive").select("*", { count: "exact", head: true }),
       // Top 5 most accessed
       supabase
         .from("memory")
         .select("content, access_count")
         .order("access_count", { ascending: false })
         .limit(5),
-      // Recent promotions (7 days, inserts only — R14 limitation)
+      // Recent promotions (7 days, inserts only — R14 limitation; uses idx_memory_metadata_source — F-EC-3)
       supabase
         .from("memory")
-        .select("id")
+        .select("*", { count: "exact", head: true })
         .eq("metadata->>source", "working_memory_promotion")
         .gte("created_at", sevenDaysAgo),
     ]);
@@ -626,7 +632,7 @@ export async function memoryHealthStats(
       totalAgeDays += (now - created) / (1000 * 60 * 60 * 24);
     }
 
-    const embeddingCount = withEmbedding.data?.length || 0;
+    const embeddingCount = withEmbedding.count ?? 0;
 
     return {
       total,
@@ -634,9 +640,9 @@ export async function memoryHealthStats(
       embeddingCoverage: total > 0 ? embeddingCount / total : 0,
       avgImportanceScore: total > 0 ? Math.round((totalImportance / total) * 10) / 10 : 0,
       avgAgeDays: total > 0 ? Math.round((totalAgeDays / total) * 10) / 10 : 0,
-      recentPromotions: recentPromotionsResult.data?.length || 0,
-      linksCount: linksResult.data?.length || 0,
-      archiveCount: archiveResult.data?.length || 0,
+      recentPromotions: recentPromotionsResult.count ?? 0,
+      linksCount: linksResult.count ?? 0,
+      archiveCount: archiveResult.count ?? 0,
       topAccessed: (topAccessedResult.data || [])
         .filter((r: { access_count: number; content: string }) => r.access_count > 0)
         .map((r: { access_count: number; content: string }) => ({
