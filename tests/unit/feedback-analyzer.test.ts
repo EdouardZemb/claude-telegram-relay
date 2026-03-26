@@ -15,7 +15,7 @@
  * V8: runFeedbackLoop expires old overlays before creating new ones
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
@@ -41,6 +41,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  try {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    // cleanup best-effort
+  }
+});
+
+afterAll(() => {
   try {
     rmSync(TEST_DIR, { recursive: true, force: true });
   } catch {
@@ -314,6 +322,18 @@ describe("feedback-analyzer — runFeedbackLoop", () => {
 
     const result = await runFeedbackLoop();
     expect(result.overlaysCreated).toBe(0);
+  });
+
+  it("V6-purge: runFeedbackLoop returns purgedCount as a number", async () => {
+    _setDependencies({
+      isFeatureEnabled: () => true,
+      fetchSignals: async () => [],
+    });
+
+    const result = await runFeedbackLoop();
+    expect(result.purgedCount).toBeDefined();
+    expect(typeof result.purgedCount).toBe("number");
+    expect(result.purgedCount).toBeGreaterThanOrEqual(0);
   });
 
   it("does not create duplicate overlay for same agent+source when existing overlay active", async () => {

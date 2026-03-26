@@ -188,6 +188,22 @@ export function expireOverlays(): number {
 }
 
 /**
+ * Physically remove all inactive overlays from the JSON file.
+ * Returns the count of purged entries.
+ * If no inactive overlays exist, the file is not rewritten.
+ */
+export function purgeInactiveOverlays(): number {
+  const overlays = loadOverlays();
+  const inactive = overlays.filter((o) => !o.active);
+  if (inactive.length === 0) return 0;
+
+  const active = overlays.filter((o) => o.active);
+  saveOverlays(active);
+  log.info("Purged inactive overlays", { count: inactive.length });
+  return inactive.length;
+}
+
+/**
  * Build an enriched system prompt by concatenating the base prompt with
  * active overlays for the given agent role.
  * Returns the base prompt unchanged if no active overlays exist.

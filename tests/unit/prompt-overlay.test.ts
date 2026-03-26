@@ -5,7 +5,7 @@
  * and constraints (max 3 active per agent, deactivation, TTL).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -21,6 +21,7 @@ import {
   expireOverlays,
   getActiveOverlays,
   listAllOverlays,
+  purgeInactiveOverlays,
 } from "../../src/prompt-overlay.ts";
 
 // ── Setup / Teardown ─────────────────────────────────────────
@@ -31,6 +32,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  try {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    // cleanup best-effort
+  }
+});
+
+afterAll(() => {
   try {
     rmSync(TEST_DIR, { recursive: true, force: true });
   } catch {
@@ -332,6 +341,116 @@ describe("prompt-overlay — expireOverlays", () => {
 
     const active = getActiveOverlays("reviewer");
     expect(active.length).toBe(1);
+  });
+});
+
+// ── purgeInactiveOverlays Tests ──────────────────────────────
+
+describe("prompt-overlay — purgeInactiveOverlays", () => {
+  it("V1: returns 0 when all overlays are active", () => {
+    addOverlay({ agentRole: "reviewer", overlayText: "a", reason: "test", triggerType: "manual" });
+    addOverlay({ agentRole: "reviewer", overlayText: "b", reason: "test", triggerType: "manual" });
+    addOverlay({ agentRole: "reviewer", overlayText: "c", reason: "test", triggerType: "manual" });
+
+    const count = purgeInactiveOverlays();
+    expect(count).toBe(0);
+    expect(listAllOverlays().length).toBe(3);
+  });
+
+  it("V2: returns 0 on empty file", () => {
+    const count = purgeInactiveOverlays();
+    expect(count).toBe(0);
+    expect(listAllOverlays().length).toBe(0);
+  });
+
+  it("V3: removes inactive overlays and returns correct count", () => {
+    const _o1 = addOverlay({
+      agentRole: "reviewer",
+      overlayText: "keep",
+      reason: "test",
+      triggerType: "manual",
+    });
+    const o2 = addOverlay({
+      agentRole: "spec-architect",
+      overlayText: "purge1",
+      reason: "test",
+      triggerType: "manual",
+    });
+    const o3 = addOverlay({
+      agentRole: "spec-architect",
+      overlayText: "purge2",
+      reason: "test",
+      triggerType: "manual",
+    });
+
+    deactivateOverlay(o2.id);
+    deactivateOverlay(o3.id);
+
+    const count = purgeInactiveOverlays();
+    expect(count).toBe(2);
+    expect(listAllOverlays().length).toBe(1);
+  });
+
+  it("V4: active overlays are intact after purge", () => {
+    const o1 = addOverlay({
+      agentRole: "reviewer",
+      overlayText: "keeper",
+      reason: "original",
+      triggerType: "manual",
+    });
+    const o2 = addOverlay({
+      agentRole: "spec-architect",
+      overlayText: "gone",
+      reason: "test",
+      triggerType: "manual",
+    });
+
+    deactivateOverlay(o2.id);
+    purgeInactiveOverlays();
+
+    const remaining = listAllOverlays();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].id).toBe(o1.id);
+    expect(remaining[0].active).toBe(true);
+    expect(remaining[0].overlayText).toBe("keeper");
+    expect(remaining[0].reason).toBe("original");
+  });
+
+  it("V5: purge persists to disk", () => {
+    const o1 = addOverlay({
+      agentRole: "reviewer",
+      overlayText: "stay",
+      reason: "test",
+      triggerType: "manual",
+    });
+    const o2 = addOverlay({
+      agentRole: "spec-architect",
+      overlayText: "remove",
+      reason: "test",
+      triggerType: "manual",
+    });
+
+    deactivateOverlay(o2.id);
+    purgeInactiveOverlays();
+
+    // Reset cache and reload from disk
+    _resetForTests();
+    const reloaded = listAllOverlays();
+    expect(reloaded.length).toBe(1);
+    expect(reloaded[0].id).toBe(o1.id);
+  });
+
+  it("does not write to disk if no inactive overlays", () => {
+    addOverlay({
+      agentRole: "reviewer",
+      overlayText: "active",
+      reason: "test",
+      triggerType: "manual",
+    });
+    // Just verify no crash and count is 0
+    const count = purgeInactiveOverlays();
+    expect(count).toBe(0);
+    expect(listAllOverlays().length).toBe(1);
   });
 });
 

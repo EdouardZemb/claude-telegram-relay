@@ -44,3 +44,5 @@ deploy_key*
 
 # Test temp files
 tests/unit/.tts-test-tmp/
+.test-prompt-overlay-*/
+.test-feedback-analyzer-*/

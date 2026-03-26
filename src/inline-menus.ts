@@ -69,6 +69,7 @@ export const MENU_CATEGORIES: MenuCategory[] = [
       "speak",
       "export",
       "feature",
+      "overlay",
       "rollback",
       "jobs",
     ],

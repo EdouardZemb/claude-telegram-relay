@@ -9,9 +9,12 @@ import { Composer, type Context, InputFile } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { formatFeatures, setFeature } from "../feature-flags.ts";
 import { overrideGate } from "../gates.ts";
+import { sectionTitle } from "../html-format-helpers.ts";
+import { escapeHtml } from "../html-utils.ts";
 import { isJobManagerEnabled, launch as launchJob } from "../job-manager.ts";
 import { createLogger } from "../logger.ts";
 import { archiveIdea, getIdea, promoteIdea } from "../memory.ts";
+import { deactivateOverlay, listAllOverlays, purgeInactiveOverlays } from "../prompt-overlay.ts";
 import {
   formatSprintSummary,
   getCurrentSprint,
@@ -158,6 +161,70 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     }
 
     await ctx.reply("Usage: /feature [list|enable <flag>|disable <flag>]", bctx.threadOpts(ctx));
+  });
+
+  // /overlay
+  composer.command("overlay", async (ctx) => {
+    const blocked = bctx.commandGuard(ctx, "overlay");
+    if (blocked) {
+      await ctx.reply(blocked, bctx.threadOpts(ctx));
+      return;
+    }
+
+    const input = ctx.match?.trim() || "";
+    const parts = input.split(/\s+/);
+    const sub = parts[0]?.toLowerCase();
+
+    if (!sub || sub === "list") {
+      const overlays = listAllOverlays();
+      if (overlays.length === 0) {
+        await bctx.sendResponseHtml(ctx, "Aucun overlay enregistré.");
+        return;
+      }
+
+      const activeCount = overlays.filter((o) => o.active).length;
+      const inactiveCount = overlays.length - activeCount;
+
+      const lines: string[] = [sectionTitle("Prompt Overlays")];
+      for (const o of overlays) {
+        const statut = o.active ? "actif" : "inactif";
+        const date = o.createdAt.slice(0, 10);
+        lines.push(
+          `\n<b>${escapeHtml(o.agentRole)}</b> — ${statut} | ${escapeHtml(date)}\n` +
+            `<code>${escapeHtml(o.id)}</code>\n` +
+            `Raison: ${escapeHtml(o.reason)}`,
+        );
+      }
+      lines.push(
+        `\nTotal: ${overlays.length} overlay(s) (${activeCount} actif, ${inactiveCount} inactif)`,
+      );
+
+      await bctx.sendResponseHtml(ctx, lines.join("\n"));
+      return;
+    }
+
+    if (sub === "deactivate") {
+      const id = parts[1];
+      if (!id) {
+        await ctx.reply("Usage: /overlay deactivate <id>", bctx.threadOpts(ctx));
+        return;
+      }
+      const found = deactivateOverlay(id);
+      if (found) {
+        await ctx.reply(`Overlay ${id} désactivé.`, bctx.threadOpts(ctx));
+      } else {
+        await ctx.reply(`Overlay ${id} introuvable.`, bctx.threadOpts(ctx));
+      }
+      return;
+    }
+
+    if (sub === "purge") {
+      const count = purgeInactiveOverlays();
+      await ctx.reply(`${count} overlay(s) inactif(s) purgé(s).`, bctx.threadOpts(ctx));
+      return;
+    }
+
+    await ctx.reply("Usage: /overlay [list|deactivate <id>|purge]", bctx.threadOpts(ctx));
   });
 
   // /rollback

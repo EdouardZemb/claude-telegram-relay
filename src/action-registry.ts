@@ -409,6 +409,20 @@ const ACTIONS: ActionDefinition[] = [
     category: "system",
   },
   {
+    command: "overlay",
+    description: "Administrer les prompt overlays (list, deactivate, purge)",
+    usage: "/overlay [list|deactivate <id>|purge]",
+    params: [
+      { name: "action", required: false, description: "list, deactivate, purge" },
+      { name: "id", required: false, description: "ID de l'overlay (pour deactivate)" },
+    ],
+    risk: "low",
+    module: "utilities",
+    requiresSupabase: false,
+    aliases: ["overlay list", "purge overlays"],
+    category: "system",
+  },
+  {
     command: "rollback",
     description: "Rollback au commit precedent",
     usage: "/rollback [raison]",
