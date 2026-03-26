@@ -51,6 +51,7 @@ import {
   type HeartbeatDelta,
   type HeartbeatState,
 } from "./heartbeat-prompt.ts";
+import { checkSddPipelines } from "./heartbeat-sdd-watchdog.ts";
 // LLM-Ops periodic check
 import { LLMOPS_CHECK_INTERVAL_MS, runLlmOpsCheck } from "./llm-ops.ts";
 import { createLogger } from "./logger.ts";
@@ -692,6 +693,35 @@ export async function pulse(): Promise<{
     }
   } catch (err) {
     log.error("Feedback loop error", { error: err });
+  }
+
+  // Every pulse (10min): SDD pipeline watchdog (gated on feature flag)
+  try {
+    if (isFeatureEnabled("sdd_pipeline_watchdog")) {
+      log.info("Running SDD pipeline watchdog...");
+      const watchdogResult = await checkSddPipelines(RELAY_DIR);
+      if (watchdogResult.orphansDetected > 0) {
+        log.info(`SDD watchdog: ${watchdogResult.orphansDetected} orphan(s) detected.`);
+        for (const notification of watchdogResult.notifications) {
+          // Use cooldown to avoid re-notifying the same stuck pipeline
+          const topic = `sdd-watchdog:${notification.substring(0, 50)}`;
+          if (state.cooldowns[topic] && state.cooldowns[topic] > now) {
+            log.info(`Cooldown actif pour: ${topic}`);
+            continue;
+          }
+
+          await writeMcpPending({
+            type: "alert",
+            severity: "normal",
+            message: `[SDD Watchdog] ${notification}`,
+          });
+          state.cooldowns[topic] = now + COOLDOWN_MS;
+        }
+      }
+      state.lastPipelineWatchdogAt = timestamp;
+    }
+  } catch (err) {
+    log.error("SDD pipeline watchdog error", { error: err });
   }
 
   // Daily: Lightweight audit (structure + tests)

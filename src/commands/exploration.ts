@@ -116,7 +116,7 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
       const jobId = await launchJob(
         `sdd-explore:${pipelineName}`,
         chatId,
-        () => runSddExplore(pipelineName, chatId, threadId),
+        () => runSddExplore(pipelineName, chatId, threadId, bctx.supabase),
         { messageThreadId: threadId },
       );
 
@@ -129,7 +129,7 @@ export default function explorationCommands(bctx: BotContext): Composer<Context>
     } else {
       await ctx.reply(`Exploration en cours: ${query}`, bctx.threadOpts(ctx));
       try {
-        const result = await runSddExplore(pipelineName, chatId, threadId);
+        const result = await runSddExplore(pipelineName, chatId, threadId, bctx.supabase);
         await updateStep(chatId, threadId, "explore", {
           status: "ok",
           summary: result.substring(0, 200),

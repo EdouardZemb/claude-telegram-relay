@@ -10,5 +10,7 @@
   "sdd_auto_deploy": true,
   "nlu_feature_request": true,
   "prompt_feedback_loop": true,
-  "sdd_feedback_llm_overlay": false
+  "sdd_feedback_llm_overlay": false,
+  "sdd_pipeline_watchdog": true,
+  "agent_context_injection": false
 }
