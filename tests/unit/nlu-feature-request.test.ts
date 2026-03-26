@@ -15,36 +15,26 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { readFileSync, writeFileSync } from "fs";
 import type { Context } from "grammy";
-import { join } from "path";
 import {
   handleFeatureRequestCallback,
   isFeatureRequestIntent,
 } from "../../src/commands/command-router.ts";
+import { _resetForTesting, setFeature } from "../../src/feature-flags.ts";
 import { detectIntent, detectIntentWithLLM } from "../../src/intent-detection.ts";
 
-const FLAGS_FILE = join(import.meta.dir, "..", "..", "config", "features.json");
-
-// Helper to backup and restore feature flags
-let originalFlags: string;
-
 beforeEach(() => {
-  try {
-    originalFlags = readFileSync(FLAGS_FILE, "utf-8");
-  } catch {
-    originalFlags = "{}";
-  }
+  _resetForTesting();
 });
 
 afterEach(() => {
-  writeFileSync(FLAGS_FILE, originalFlags, "utf-8");
+  _resetForTesting();
 });
 
 function setFlag(flag: string, value: boolean): void {
-  const flags = JSON.parse(readFileSync(FLAGS_FILE, "utf-8"));
-  flags[flag] = value;
-  writeFileSync(FLAGS_FILE, JSON.stringify(flags, null, 2) + "\n", "utf-8");
+  // Directly update the in-memory cache via setFeature (async but no Supabase = instant cache update)
+  // We use void to ignore the promise since without Supabase it's synchronous cache-only
+  void setFeature(flag, value);
 }
 
 // Minimal Context mock

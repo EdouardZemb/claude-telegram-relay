@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { join } from "path";
+import { _resetForTesting as _resetFeatureFlags, setFeature } from "../../src/feature-flags.ts";
 import {
   _resetForTests,
   cancel,
@@ -772,6 +773,16 @@ describe("job-manager", () => {
   });
 
   describe("direct notification", () => {
+    beforeEach(async () => {
+      _resetFeatureFlags();
+      // Disable auto-advance to isolate notification behavior
+      await setFeature("sdd_auto_advance", false);
+    });
+
+    afterEach(() => {
+      _resetFeatureFlags();
+    });
+
     it("sends to originating chat on completion when bot is initialized", async () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       let sentMessage: any = null;

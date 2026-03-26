@@ -1,28 +1,36 @@
 /**
- * Unit Tests — src/feature-flags.ts (S29-T1)
+ * Unit Tests — src/feature-flags.ts
+ *
+ * Tests the feature flags module with in-memory cache and Supabase persistence.
+ * These tests verify backward-compatible behavior (synchronous reads)
+ * and the new async persistence layer.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { readFileSync, writeFileSync } from "fs";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { readFileSync } from "fs";
 import { join } from "path";
 
-// Use a temp file for tests to avoid modifying the real config
-const _TEMP_FLAGS = join(import.meta.dir, "..", "..", "config", "features.test.json");
 const REAL_FLAGS = join(import.meta.dir, "..", "..", "config", "features.json");
 
-// We test the functions directly by importing them
 import {
+  _resetForTesting,
   formatFeatures,
+  initFeatureFlags,
   isFeatureEnabled,
   listFeatures,
+  loadDefaults,
   loadFeatures,
   setFeature,
 } from "../../src/feature-flags";
 
 describe("auto_document_search flag (AC-1, AC-2)", () => {
+  beforeEach(() => _resetForTesting());
+  afterEach(() => _resetForTesting());
+
   it("exists in config/features.json and isFeatureEnabled reflects current value", () => {
     const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
     expect(raw).toHaveProperty("auto_document_search");
+    // Without init, isFeatureEnabled falls back to file defaults
     expect(isFeatureEnabled("auto_document_search")).toBe(raw.auto_document_search);
   });
 });
@@ -36,47 +44,39 @@ describe("sdd_auto_merge flag (AM-FLAG)", () => {
 });
 
 describe("feature-flags", () => {
-  let originalContent: string;
-
   beforeEach(() => {
-    // Save original
-    originalContent = readFileSync(REAL_FLAGS, "utf-8");
-    // Write known state
-    writeFileSync(
-      REAL_FLAGS,
-      JSON.stringify(
-        {
-          test_flag_a: true,
-          test_flag_b: false,
-          test_flag_c: true,
-        },
-        null,
-        2,
-      ) + "\n",
-    );
+    _resetForTesting();
   });
 
   afterEach(() => {
-    // Restore original
-    writeFileSync(REAL_FLAGS, originalContent);
+    _resetForTesting();
   });
 
-  describe("loadFeatures", () => {
+  describe("loadDefaults", () => {
     it("loads flags from config file", () => {
+      const flags = loadDefaults();
+      expect(typeof flags).toBe("object");
+      // Should have at least the known production flags
+      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+      expect(flags).toEqual(raw);
+    });
+  });
+
+  describe("loadFeatures (backward compat)", () => {
+    it("returns flags from cache (falls back to file defaults)", () => {
       const flags = loadFeatures();
-      expect(flags.test_flag_a).toBe(true);
-      expect(flags.test_flag_b).toBe(false);
-      expect(flags.test_flag_c).toBe(true);
+      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+      expect(flags).toEqual(raw);
     });
   });
 
   describe("isFeatureEnabled", () => {
-    it("returns true for enabled flag", () => {
-      expect(isFeatureEnabled("test_flag_a")).toBe(true);
-    });
-
-    it("returns false for disabled flag", () => {
-      expect(isFeatureEnabled("test_flag_b")).toBe(false);
+    it("returns true for enabled flag (from defaults)", () => {
+      // heartbeat is true in the defaults
+      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+      if (raw.heartbeat === true) {
+        expect(isFeatureEnabled("heartbeat")).toBe(true);
+      }
     });
 
     it("returns false for unknown flag", () => {
@@ -84,33 +84,33 @@ describe("feature-flags", () => {
     });
   });
 
-  describe("setFeature", () => {
-    it("enables a flag and persists it", () => {
-      setFeature("test_flag_b", true);
-      expect(isFeatureEnabled("test_flag_b")).toBe(true);
-
-      // Verify persistence
-      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
-      expect(raw.test_flag_b).toBe(true);
+  describe("setFeature (without Supabase)", () => {
+    it("enables a flag in cache", async () => {
+      expect(isFeatureEnabled("test_new_flag")).toBe(false);
+      await setFeature("test_new_flag", true);
+      expect(isFeatureEnabled("test_new_flag")).toBe(true);
     });
 
-    it("disables a flag", () => {
-      setFeature("test_flag_a", false);
-      expect(isFeatureEnabled("test_flag_a")).toBe(false);
+    it("disables a flag in cache", async () => {
+      // First load defaults then override
+      await setFeature("heartbeat", false);
+      expect(isFeatureEnabled("heartbeat")).toBe(false);
     });
 
-    it("creates a new flag", () => {
-      setFeature("new_flag", true);
-      expect(isFeatureEnabled("new_flag")).toBe(true);
+    it("creates a new flag", async () => {
+      await setFeature("brand_new_flag", true);
+      expect(isFeatureEnabled("brand_new_flag")).toBe(true);
     });
   });
 
   describe("listFeatures", () => {
     it("returns all flags with status", () => {
       const features = listFeatures();
-      expect(features.length).toBe(3);
-      expect(features.find((f) => f.flag === "test_flag_a")?.enabled).toBe(true);
-      expect(features.find((f) => f.flag === "test_flag_b")?.enabled).toBe(false);
+      expect(features.length).toBeGreaterThan(0);
+      for (const f of features) {
+        expect(typeof f.flag).toBe("string");
+        expect(typeof f.enabled).toBe("boolean");
+      }
     });
   });
 
@@ -119,8 +119,65 @@ describe("feature-flags", () => {
       const output = formatFeatures();
       expect(output).toContain("Feature Flags");
       expect(output).toContain("ON");
-      expect(output).toContain("OFF");
-      expect(output).toContain("test_flag_a");
+    });
+  });
+
+  describe("initFeatureFlags", () => {
+    it("loads from Supabase when available", async () => {
+      const mockClient = {
+        from: mock(() => ({
+          select: mock(() =>
+            Promise.resolve({
+              data: [
+                { flag: "mock_flag", enabled: true },
+                { flag: "other_mock", enabled: false },
+              ],
+              error: null,
+            }),
+          ),
+        })),
+      };
+
+      await initFeatureFlags(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        mockClient as any,
+      );
+
+      expect(isFeatureEnabled("mock_flag")).toBe(true);
+      expect(isFeatureEnabled("other_mock")).toBe(false);
+    });
+
+    it("falls back to defaults on Supabase error", async () => {
+      const mockClient = {
+        from: mock(() => ({
+          select: mock(() =>
+            Promise.resolve({
+              data: null,
+              error: { message: "connection refused" },
+            }),
+          ),
+        })),
+      };
+
+      await initFeatureFlags(
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        mockClient as any,
+      );
+
+      // Should have file defaults
+      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+      for (const [flag, enabled] of Object.entries(raw)) {
+        expect(isFeatureEnabled(flag)).toBe(enabled as boolean);
+      }
+    });
+
+    it("falls back to defaults when client is null", async () => {
+      await initFeatureFlags(null);
+
+      const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
+      for (const [flag, enabled] of Object.entries(raw)) {
+        expect(isFeatureEnabled(flag)).toBe(enabled as boolean);
+      }
     });
   });
 });

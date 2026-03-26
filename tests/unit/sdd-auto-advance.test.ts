@@ -16,7 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { join } from "path";
-import { setFeature } from "../../src/feature-flags.ts";
+import { _resetForTesting, setFeature } from "../../src/feature-flags.ts";
 import {
   getAutoAdvanceDepth as _getAutoAdvanceDepth,
   _resetForTests,
@@ -127,7 +127,8 @@ describe("sdd-auto-advance", () => {
       _resetForTests();
       _clearTrackerForTests();
       // Enable the feature flag for integration tests
-      setFeature("sdd_auto_advance", true);
+      _resetForTesting();
+      await setFeature("sdd_auto_advance", true);
       try {
         await rm(TEST_RELAY_DIR, { recursive: true, force: true });
       } catch {
@@ -138,7 +139,8 @@ describe("sdd-auto-advance", () => {
 
     afterEach(async () => {
       // Restore the feature flag
-      setFeature("sdd_auto_advance", false);
+      await setFeature("sdd_auto_advance", false);
+      _resetForTesting();
       process.env.RELAY_DIR = origRelayDir;
       _resetForTests();
       _clearTrackerForTests();
@@ -261,7 +263,7 @@ describe("sdd-auto-advance", () => {
 
     it("V4-full: no auto-advance when feature flag is disabled (integration)", async () => {
       // Disable the flag that was enabled in beforeEach
-      setFeature("sdd_auto_advance", false);
+      await setFeature("sdd_auto_advance", false);
 
       const sentMessages: Array<{ chatId: number | string; text: string }> = [];
       const fakeBotInstance = {

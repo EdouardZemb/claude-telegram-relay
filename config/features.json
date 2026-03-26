@@ -6,9 +6,9 @@
   "llmops_monitoring": true,
   "agent_role_memory": true,
   "sdd_auto_merge": true,
-  "sdd_auto_advance": false,
+  "sdd_auto_advance": true,
   "sdd_auto_deploy": true,
-  "nlu_feature_request": false,
-  "prompt_feedback_loop": false,
+  "nlu_feature_request": true,
+  "prompt_feedback_loop": true,
   "sdd_feedback_llm_overlay": false
 }
