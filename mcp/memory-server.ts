@@ -334,7 +334,7 @@ import { randomUUID } from "crypto";
 import { rename as fsRename, mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { runAllChecks } from "../src/alerts.ts";
-import { listFeatures, setFeature } from "../src/feature-flags.ts";
+import { initFeatureFlags, listFeatures, setFeature } from "../src/feature-flags.ts";
 import { getSprintCostSummary, getTotalCost } from "../src/llm-ops.ts";
 import {
   addTask,
@@ -345,6 +345,10 @@ import {
 } from "../src/tasks.ts";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Initialize feature flags from Supabase (MCP server runs as separate process)
+await initFeatureFlags(supabase);
+
 const RELAY_DIR = process.env.RELAY_DIR || join(process.env.HOME || "~", ".claude-relay");
 const MCP_PENDING_FILE = join(RELAY_DIR, "mcp-pending-notifications.json");
 
@@ -761,7 +765,7 @@ server.tool(
       }
 
       const enabled = action === "enable";
-      setFeature(flag, enabled);
+      await setFeature(flag, enabled);
 
       await enqueueMcpNotification({
         type: "alert",

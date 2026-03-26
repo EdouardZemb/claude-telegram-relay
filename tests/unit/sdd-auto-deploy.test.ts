@@ -39,10 +39,12 @@ describe("sdd_auto_deploy flag (V1, V2)", () => {
   });
 
   it("V1: isFeatureEnabled reads sdd_auto_deploy correctly", () => {
-    const { isFeatureEnabled } = require("../../src/feature-flags");
-    // Should match what's in the file
+    const { isFeatureEnabled, _resetForTesting } = require("../../src/feature-flags");
+    _resetForTesting();
+    // Without Supabase init, falls back to file defaults
     const raw = JSON.parse(readFileSync(REAL_FLAGS, "utf-8"));
     expect(isFeatureEnabled("sdd_auto_deploy")).toBe(raw.sdd_auto_deploy);
+    _resetForTesting();
   });
 });
 
@@ -54,11 +56,13 @@ describe("deploy.yml feature flag check (V3, V4, V5)", () => {
     expect(content).toContain("sdd_auto_deploy");
   });
 
-  it("V3: deploy.yml uses jq or bun to read the flag from config/features.json", () => {
+  it("V3: deploy.yml uses curl to read from Supabase with fallback to bun/jq", () => {
     const content = readFileSync(DEPLOY_YML, "utf-8");
-    // Should read from features.json
+    // Primary: curl to Supabase
+    expect(content).toContain("curl");
+    expect(content).toContain("SUPABASE_URL");
+    // Fallback: features.json via bun
     expect(content).toContain("features.json");
-    // Should use one of these tools to parse
     const usesJqOrBun =
       content.includes("jq") || content.includes("bun -e") || content.includes("node -e");
     expect(usesJqOrBun).toBe(true);

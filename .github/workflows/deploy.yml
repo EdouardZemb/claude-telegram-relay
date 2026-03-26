@@ -13,25 +13,59 @@ jobs:
           cd /home/edouard/claude-telegram-relay
           git fetch origin master
           git checkout master
+          # Reset tracked files to match index (discard local modifications)
+          git checkout -- . || true
+          # Remove untracked files that would conflict with incoming changes
+          git clean -fd docs/specs/ docs/reviews/ docs/explorations/ || true
           git pull origin master
 
       - name: Check sdd_auto_deploy flag
         id: check_flag
         run: |
           cd /home/edouard/claude-telegram-relay
-          FLAGS_FILE="config/features.json"
-          if [ -f "$FLAGS_FILE" ]; then
-            # Use bun to read the flag (always available on self-hosted runner)
-            DEPLOY_ENABLED=$(bun -e "
-              try {
-                const f = require('./$FLAGS_FILE');
-                console.log(f.sdd_auto_deploy !== false ? 'true' : 'false');
-              } catch { console.log('true'); }
-            " 2>/dev/null || echo "true")
+          DEPLOY_ENABLED="true"
+
+          # Primary: read from Supabase feature_flags table via PostgREST
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            RESPONSE=$(curl -s -f \
+              "${SUPABASE_URL}/rest/v1/feature_flags?flag=eq.sdd_auto_deploy&select=enabled" \
+              -H "apikey: ${SUPABASE_ANON_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_ANON_KEY}" \
+              2>/dev/null || echo "")
+
+            if [ -n "$RESPONSE" ] && echo "$RESPONSE" | grep -q '"enabled"'; then
+              FLAG_VALUE=$(echo "$RESPONSE" | grep -o '"enabled":[a-z]*' | head -1 | cut -d: -f2)
+              if [ "$FLAG_VALUE" = "false" ]; then
+                DEPLOY_ENABLED="false"
+              fi
+              echo "[check_flag] Read sdd_auto_deploy=$DEPLOY_ENABLED from Supabase"
+            else
+              echo "[check_flag] Supabase query failed or empty, falling back to file"
+              # Fallback: read from config/features.json
+              FLAGS_FILE="config/features.json"
+              if [ -f "$FLAGS_FILE" ]; then
+                DEPLOY_ENABLED=$(bun -e "
+                  try {
+                    const f = require('./$FLAGS_FILE');
+                    console.log(f.sdd_auto_deploy !== false ? 'true' : 'false');
+                  } catch { console.log('true'); }
+                " 2>/dev/null || echo "true")
+              fi
+            fi
           else
-            # Backward compat: deploy by default if file is missing
-            DEPLOY_ENABLED="true"
+            echo "[check_flag] No Supabase credentials, falling back to file"
+            # Fallback: read from config/features.json
+            FLAGS_FILE="config/features.json"
+            if [ -f "$FLAGS_FILE" ]; then
+              DEPLOY_ENABLED=$(bun -e "
+                try {
+                  const f = require('./$FLAGS_FILE');
+                  console.log(f.sdd_auto_deploy !== false ? 'true' : 'false');
+                } catch { console.log('true'); }
+              " 2>/dev/null || echo "true")
+            fi
           fi
+
           echo "DEPLOY_ENABLED=$DEPLOY_ENABLED" >> "$GITHUB_OUTPUT"
           echo "[check_flag] sdd_auto_deploy=$DEPLOY_ENABLED"
 

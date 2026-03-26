@@ -146,13 +146,13 @@ export default function utilitiesComposer(bctx: BotContext): Composer<Context> {
     }
 
     if (sub === "enable" && parts[1]) {
-      setFeature(parts[1], true);
+      await setFeature(parts[1], true);
       await ctx.reply(`Feature "${parts[1]}" activee.`, bctx.threadOpts(ctx));
       return;
     }
 
     if (sub === "disable" && parts[1]) {
-      setFeature(parts[1], false);
+      await setFeature(parts[1], false);
       await ctx.reply(`Feature "${parts[1]}" desactivee.`, bctx.threadOpts(ctx));
       return;
     }

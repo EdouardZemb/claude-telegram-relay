@@ -30,6 +30,7 @@ import {
   TEMP_DIR,
   UPLOADS_DIR,
 } from "./bot-context.ts";
+import { initFeatureFlags } from "./feature-flags.ts";
 import { initJobManager } from "./job-manager.ts";
 import { loadComposers } from "./loader.ts";
 import { createLogger } from "./logger.ts";
@@ -100,6 +101,10 @@ export async function createBot(token: string): Promise<Bot> {
 
   // Create shared context and load all Composers
   _bctx = await createBotContext(bot);
+
+  // Initialize feature flags from Supabase (falls back to file defaults)
+  await initFeatureFlags(_bctx.supabase);
+
   await loadComposers(bot, _bctx);
 
   // Global error handler

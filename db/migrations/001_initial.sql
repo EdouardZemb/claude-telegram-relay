@@ -1267,3 +1267,37 @@ CREATE TRIGGER agent_memory_auto_embed
   AFTER INSERT ON agent_memory
   FOR EACH ROW
   EXECUTE FUNCTION auto_embed_agent_memory();
+
+-- ============================================================
+-- FEATURE FLAGS TABLE (Runtime feature flag persistence)
+-- ============================================================
+-- Replaces the file-based config/features.json for runtime state.
+-- config/features.json is kept as source of default values only.
+CREATE TABLE IF NOT EXISTS feature_flags (
+  flag TEXT PRIMARY KEY,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  description TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by TEXT DEFAULT 'system'
+);
+
+COMMENT ON TABLE feature_flags IS 'Runtime feature flags. Persists toggle state across deploys. Defaults loaded from config/features.json.';
+
+ALTER TABLE feature_flags ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for feature_flags" ON feature_flags;
+CREATE POLICY "Allow all for feature_flags" ON feature_flags FOR ALL USING (true);
+
+-- Seed with default values from config/features.json
+INSERT INTO feature_flags (flag, enabled, description, updated_by) VALUES
+  ('heartbeat', true, 'Enable heartbeat process', 'system'),
+  ('job_manager', true, 'Enable background job manager', 'system'),
+  ('auto_document_search', true, 'Auto-search documents on message', 'system'),
+  ('prd_to_deploy', true, 'PRD to deploy pipeline', 'system'),
+  ('llmops_monitoring', true, 'LLM-Ops monitoring', 'system'),
+  ('agent_role_memory', true, 'Agent role-specific memory', 'system'),
+  ('sdd_auto_merge', true, 'Auto-merge SDD PRs when CI green', 'system'),
+  ('sdd_auto_advance', true, 'Auto-advance SDD pipeline phases', 'system'),
+  ('sdd_auto_deploy', true, 'Auto-deploy on master push', 'system'),
+  ('nlu_feature_request', true, 'NLU feature request intent detection', 'system'),
+  ('prompt_feedback_loop', true, 'Prompt overlay feedback loop', 'system')
+ON CONFLICT (flag) DO NOTHING;
