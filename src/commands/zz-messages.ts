@@ -205,6 +205,31 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
 
     await bctx.saveMessage("user", options.saveMessageText, meta);
 
+    // Maturation clarify: intercept messages when a Socratic question is pending
+    const { checkMaturationClarify } = await import("../maturation/clarify.ts");
+    const matRun = await checkMaturationClarify(ctx.chat?.id ?? 0, threadId);
+    if (matRun) {
+      const { handleClarifyResponse } = await import("../maturation/clarify.ts");
+      const clarifyResult = await handleClarifyResponse(matRun, input, bctx.callClaude);
+      if (clarifyResult.status === "waiting" && clarifyResult.question) {
+        await bctx.sendResponseHtml(ctx, `\u2753 ${clarifyResult.question}`);
+      } else if (clarifyResult.status === "done") {
+        await bctx.sendResponseHtml(
+          ctx,
+          "\u2705 Clarification terminee. Reprise de la maturation...",
+        );
+        const { resumeMaturationAfterClarify } = await import("./maturation.ts");
+        await resumeMaturationAfterClarify(
+          matRun,
+          clarifyResult.enrichedInput ?? matRun.rawInput,
+          ctx.chat?.id ?? 0,
+          threadId,
+          bctx,
+        );
+      }
+      return;
+    }
+
     // S37: Check if this is a response to a pending clarification
     const clarificationCmd = checkPendingClarification(ctx, input);
     if (clarificationCmd) {
