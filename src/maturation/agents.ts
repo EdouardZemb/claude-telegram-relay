@@ -1,4 +1,7 @@
+import { createLogger } from "../logger.ts";
 import type { MaturationDocType } from "./types.ts";
+
+const log = createLogger("maturation/agents");
 
 export interface AgentConfig {
   agentFile: string;

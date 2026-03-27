@@ -1,4 +1,7 @@
 import { randomUUID } from "crypto";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("maturation/types");
 
 // Phase types
 export type MaturationPhase =

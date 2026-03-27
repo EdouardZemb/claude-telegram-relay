@@ -1,4 +1,7 @@
+import { createLogger } from "../logger.ts";
 import type { GateResult } from "./types.ts";
+
+const log = createLogger("maturation/scoring");
 
 const MATURITY_THRESHOLD = 7;
 

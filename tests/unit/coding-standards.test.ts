@@ -70,7 +70,7 @@ function getAllSourceFiles(): string[] {
 // ── Barrel detection ──
 
 function isBarrelFile(filePath: string): boolean {
-  const knownBarrels = ["memory.ts"];
+  const knownBarrels = ["memory.ts", "maturation.ts"];
   const base = basename(filePath);
   if (!knownBarrels.includes(base)) return false;
   // Verify it's at src/ root level (not inside a subdirectory)
