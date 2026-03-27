@@ -122,6 +122,7 @@ type OnProgress = (msg: string) => Promise<void>;
 export async function runMaturationPipeline(
   run: MaturationRun,
   onProgress: OnProgress,
+  bctx: BotContext,
 ): Promise<string> {
   const phases = [
     { name: "understand" as const, fn: runUnderstandPhase },
@@ -131,12 +132,18 @@ export async function runMaturationPipeline(
     { name: "advocate" as const, fn: runAdvocatePhase },
   ];
 
-  // If currentPhase is "clarify" (not yet implemented), skip it and advance to explore
+  // If currentPhase is "clarify", start the Socratic loop and pause the pipeline
   if (run.currentPhase === "clarify") {
-    run.steps.clarify.status = "skipped";
-    run.currentPhase = "explore";
-    await saveRunMeta(run);
-    log.info("clarify phase skipped (not yet implemented)", { runId: run.id });
+    const { startClarification } = await import("../maturation/clarify.ts");
+    const result = await startClarification(run, bctx.callClaude);
+    if (result) {
+      // Question sent — pipeline pauses, message handler takes over
+      await onProgress(buildMaturationStatusBar(run));
+      await onProgress(`\u2753 ${result.question}`);
+      return `MATURATION_CLARIFYING:${run.name}:${run.id}`;
+    }
+    // Clarifier said DONE immediately — continue to explore
+    log.info("clarify skipped by clarifier agent", { runId: run.id });
   }
 
   for (const { name: phaseName, fn: phaseFn } of phases) {
@@ -176,11 +183,57 @@ export async function runMaturationPipeline(
 
     // If advocate looped back to explore, recurse
     if (phaseName === "advocate" && run.currentPhase === "explore") {
-      return await runMaturationPipeline(run, onProgress);
+      return await runMaturationPipeline(run, onProgress, bctx);
     }
   }
 
   return `MATURATION_READY:${run.name}:${run.id}`;
+}
+
+/**
+ * Resumes the maturation pipeline after clarification is complete.
+ * Re-runs the understander with enriched input, then continues explore → advocate.
+ */
+export async function resumeMaturationAfterClarify(
+  run: MaturationRun,
+  enrichedInput: string,
+  chatId: number | string,
+  threadId: number | undefined,
+  bctx: BotContext,
+): Promise<void> {
+  const { launch, sendProgressMessage } = await import("../job-manager.ts");
+
+  await launch(
+    `maturation-resume:${run.name}`,
+    chatId,
+    async () => {
+      const onProgress: OnProgress = async (msg: string) => {
+        await sendProgressMessage(chatId, threadId, msg);
+      };
+
+      // Re-run understander with enriched input
+      run.rawInput = enrichedInput;
+      run.steps.understand.status = "pending";
+      await saveRunMeta(run);
+
+      await onProgress("Comprehension enrichie en cours...");
+      const { runUnderstandPhase } = await import("../maturation/phases.ts");
+      const result = await runUnderstandPhase(run);
+      const { handlePhaseResult } = await import("../maturation/engine.ts");
+      run = handlePhaseResult(run, "understand", result);
+      // Force skip clarify after re-run (already clarified)
+      run.steps.clarify.status = "ok";
+      run.currentPhase = "explore";
+      await saveRunMeta(run);
+
+      if (result.status === "failed") {
+        return `MATURATION_FAILED:understand-v2:${run.name}`;
+      }
+
+      return await runMaturationPipeline(run, onProgress, bctx);
+    },
+    { messageThreadId: threadId },
+  );
 }
 
 // ── Composer factory ───────────────────────────────────────────
@@ -231,7 +284,7 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
         const onProgress: OnProgress = async (msg: string) => {
           await sendProgressMessage(chatId, threadId, msg);
         };
-        return await runMaturationPipeline(run, onProgress);
+        return await runMaturationPipeline(run, onProgress, bctx);
       },
       { messageThreadId: threadId },
     );
