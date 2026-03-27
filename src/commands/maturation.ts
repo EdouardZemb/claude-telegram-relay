@@ -111,7 +111,7 @@ export function formatRunSummary(run: MaturationRun): string {
 
 // ── Pipeline orchestration ─────────────────────────────────────
 
-type OnProgress = (msg: string) => Promise<void>;
+type OnProgress = (msg: string, extra?: Record<string, unknown>) => Promise<void>;
 
 /**
  * Runs the maturation pipeline phases sequentially.
@@ -183,14 +183,18 @@ export async function runMaturationPipeline(
 
     // Post-synthesize checkpoint: pause if open questions found
     if (phaseName === "synthesize" && result.status === "ok") {
-      const { startCheckpoint } = await import("../maturation/checkpoint.ts");
+      const { startCheckpoint, buildCheckpointKeyboard } = await import(
+        "../maturation/checkpoint.ts"
+      );
       const { readDocument } = await import("../maturation/documents.ts");
       const specContent = (await readDocument(run.id, "SPEC-UNIFIEE")) ?? "";
       const cp = await startCheckpoint(run, specContent, "synthesize", bctx.callClaude);
       if (cp) {
         const recLabel = cp.recommendation === "RE-EXPLORE" ? "Re-explorer" : "Continuer";
+        const keyboard = buildCheckpointKeyboard(run.id, cp.options);
         await onProgress(
           `\u26A0\uFE0F <b>Decision requise</b> (synthese)\n\n${cp.summary}\n\n<i>Recommandation : ${recLabel}</i>`,
+          { parse_mode: "HTML", reply_markup: keyboard },
         );
         return `MATURATION_CHECKPOINT:${run.name}:${run.id}`;
       }
@@ -211,14 +215,18 @@ export async function runMaturationPipeline(
 
     // Post-advocate checkpoint: pause if showstopper found
     if (phaseName === "advocate" && result.status === "ok") {
-      const { startCheckpoint } = await import("../maturation/checkpoint.ts");
+      const { startCheckpoint, buildCheckpointKeyboard } = await import(
+        "../maturation/checkpoint.ts"
+      );
       const { readDocument } = await import("../maturation/documents.ts");
       const advocateContent = (await readDocument(run.id, "DEVILS-ADVOCATE")) ?? "";
       const cp = await startCheckpoint(run, advocateContent, "advocate", bctx.callClaude);
       if (cp) {
         const recLabel = cp.recommendation === "RE-EXPLORE" ? "Re-explorer" : "Continuer";
+        const keyboard = buildCheckpointKeyboard(run.id, cp.options);
         await onProgress(
           `\u26A0\uFE0F <b>Decision requise</b> (advocate)\n\n${cp.summary}\n\n<i>Recommandation : ${recLabel}</i>`,
+          { parse_mode: "HTML", reply_markup: keyboard },
         );
         return `MATURATION_CHECKPOINT:${run.name}:${run.id}`;
       }
@@ -249,8 +257,8 @@ export async function resumeMaturationAfterClarify(
     `maturation-resume:${run.name}`,
     chatId,
     async () => {
-      const onProgress: OnProgress = async (msg: string) => {
-        await sendProgressMessage(chatId, threadId, msg);
+      const onProgress: OnProgress = async (msg: string, extra?: Record<string, unknown>) => {
+        await sendProgressMessage(chatId, threadId, msg, extra);
       };
 
       // Re-run understander with enriched input
@@ -332,8 +340,8 @@ export async function resumeMaturationAfterCheckpoint(
     `maturation-checkpoint:${run.name}`,
     chatId,
     async () => {
-      const onProgress: OnProgress = async (msg: string) => {
-        await sendProgressMessage(chatId, threadId, msg);
+      const onProgress: OnProgress = async (msg: string, extra?: Record<string, unknown>) => {
+        await sendProgressMessage(chatId, threadId, msg, extra);
       };
       return await runMaturationPipeline(run, onProgress, bctx);
     },

@@ -111,10 +111,11 @@ export async function sendProgressMessage(
   chatId: number | string,
   messageThreadId: number | undefined,
   message: string,
+  extra?: Record<string, unknown>,
 ): Promise<void> {
   if (!botInstance) return;
   try {
-    const opts: Record<string, unknown> = {};
+    const opts: Record<string, unknown> = { ...extra };
     if (messageThreadId) opts.message_thread_id = messageThreadId;
     await botInstance.api.sendMessage(chatId, message, opts);
   } catch (error) {
