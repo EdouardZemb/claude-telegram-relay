@@ -181,6 +181,21 @@ export async function runMaturationPipeline(
 
     await onProgress(buildMaturationStatusBar(run));
 
+    // Post-synthesize checkpoint: pause if open questions found
+    if (phaseName === "synthesize" && result.status === "ok") {
+      const { startCheckpoint } = await import("../maturation/checkpoint.ts");
+      const { readDocument } = await import("../maturation/documents.ts");
+      const specContent = (await readDocument(run.id, "SPEC-UNIFIEE")) ?? "";
+      const cp = await startCheckpoint(run, specContent, "synthesize", bctx.callClaude);
+      if (cp) {
+        const recLabel = cp.recommendation === "RE-EXPLORE" ? "Re-explorer" : "Continuer";
+        await onProgress(
+          `\u26A0\uFE0F <b>Decision requise</b> (synthese)\n\n${cp.summary}\n\n<i>Recommandation : ${recLabel}</i>`,
+        );
+        return `MATURATION_CHECKPOINT:${run.name}:${run.id}`;
+      }
+    }
+
     // If understand triggered clarify, pause the pipeline for Socratic loop
     if (phaseName === "understand" && run.currentPhase === "clarify") {
       const { startClarification } = await import("../maturation/clarify.ts");
@@ -194,9 +209,23 @@ export async function runMaturationPipeline(
       log.info("clarify skipped by clarifier agent", { runId: run.id });
     }
 
-    // If advocate looped back to explore, recurse
-    if (phaseName === "advocate" && run.currentPhase === "explore") {
-      return await runMaturationPipeline(run, onProgress, bctx);
+    // Post-advocate checkpoint: pause if showstopper found
+    if (phaseName === "advocate" && result.status === "ok") {
+      const { startCheckpoint } = await import("../maturation/checkpoint.ts");
+      const { readDocument } = await import("../maturation/documents.ts");
+      const advocateContent = (await readDocument(run.id, "DEVILS-ADVOCATE")) ?? "";
+      const cp = await startCheckpoint(run, advocateContent, "advocate", bctx.callClaude);
+      if (cp) {
+        const recLabel = cp.recommendation === "RE-EXPLORE" ? "Re-explorer" : "Continuer";
+        await onProgress(
+          `\u26A0\uFE0F <b>Decision requise</b> (advocate)\n\n${cp.summary}\n\n<i>Recommandation : ${recLabel}</i>`,
+        );
+        return `MATURATION_CHECKPOINT:${run.name}:${run.id}`;
+      }
+      // No showstopper — if state machine triggered loop-back, recurse
+      if (run.currentPhase === "explore") {
+        return await runMaturationPipeline(run, onProgress, bctx);
+      }
     }
   }
 
@@ -243,6 +272,69 @@ export async function resumeMaturationAfterClarify(
         return `MATURATION_FAILED:understand-v2:${run.name}`;
       }
 
+      return await runMaturationPipeline(run, onProgress, bctx);
+    },
+    { messageThreadId: threadId },
+  );
+}
+
+/**
+ * Resumes the maturation pipeline after a checkpoint decision.
+ * RE-EXPLORE: resets explore→advocate phases and increments iteration.
+ * CONTINUE: advances currentPhase based on checkpoint source.
+ */
+export async function resumeMaturationAfterCheckpoint(
+  run: MaturationRun,
+  action: "CONTINUE" | "RE-EXPLORE",
+  chatId: number | string,
+  threadId: number | undefined,
+  bctx: BotContext,
+): Promise<void> {
+  const { launch, sendProgressMessage } = await import("../job-manager.ts");
+
+  if (action === "RE-EXPLORE") {
+    const resetPhases: Array<"explore" | "confront" | "synthesize" | "advocate"> = [
+      "explore",
+      "confront",
+      "synthesize",
+      "advocate",
+    ];
+    for (const p of resetPhases) {
+      run.steps[p].status = "pending";
+      run.steps[p].documents = [];
+      run.steps[p].verdict = undefined;
+      run.steps[p].score = undefined;
+      run.steps[p].startedAt = undefined;
+      run.steps[p].completedAt = undefined;
+    }
+    run.currentPhase = "explore";
+    run.iteration += 1;
+    await saveRunMeta(run);
+    log.info("checkpoint RE-EXPLORE: resetting to explore", {
+      runId: run.id,
+      iteration: run.iteration,
+    });
+  } else {
+    // CONTINUE: advance to next phase based on checkpoint source
+    if (run.resolvedCheckpoints?.length) {
+      const lastCp = run.resolvedCheckpoints[run.resolvedCheckpoints.length - 1];
+      if (lastCp.source === "synthesize") {
+        run.currentPhase = "advocate";
+      } else {
+        run.currentPhase = "validate";
+      }
+    }
+    await saveRunMeta(run);
+    log.info("checkpoint CONTINUE: advancing", { runId: run.id, phase: run.currentPhase });
+  }
+
+  await launch(
+    `maturation-checkpoint:${run.name}`,
+    chatId,
+    async () => {
+      const onProgress: OnProgress = async (msg: string) => {
+        await sendProgressMessage(chatId, threadId, msg);
+      };
       return await runMaturationPipeline(run, onProgress, bctx);
     },
     { messageThreadId: threadId },
@@ -344,6 +436,53 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
         `<b>Maturation rejetee</b>\n<code>${escapeHtml(run.name)}</code>`,
       );
     }
+  });
+
+  // Checkpoint callbacks
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+
+    if (!data.startsWith("mat_cp_opt:") && !data.startsWith("mat_cp_other:")) {
+      await next();
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+    const threadId = getThreadId(ctx);
+
+    if (data.startsWith("mat_cp_other:")) {
+      const runId = data.split(":")[1];
+      const run = await loadRunMeta(runId);
+      if (!run?.pendingCheckpoint) {
+        await ctx.reply("Checkpoint expire.", bctx.threadOpts(ctx));
+        return;
+      }
+      run.pendingCheckpoint.awaitingFreeText = true;
+      await saveRunMeta(run);
+      await sendResponseHtml(
+        ctx,
+        `${run.pendingCheckpoint.summary}\n\nEnvoyez votre reponse en texte libre.`,
+      );
+      return;
+    }
+
+    // mat_cp_opt:{runId}:{index}
+    const parts = data.split(":");
+    const runId = parts[1];
+    const optIndex = parseInt(parts[2], 10);
+
+    const run = await loadRunMeta(runId);
+    if (!run?.pendingCheckpoint) {
+      await ctx.reply("Checkpoint expire.", bctx.threadOpts(ctx));
+      return;
+    }
+
+    const choice = run.pendingCheckpoint.options[optIndex] ?? `Option ${optIndex + 1}`;
+    const { handleCheckpointResponse } = await import("../maturation/checkpoint.ts");
+    const cpResult = await handleCheckpointResponse(run, choice);
+
+    await sendResponseHtml(ctx, `\u2705 Decision enregistree : <b>${escapeHtml(choice)}</b>`);
+    await resumeMaturationAfterCheckpoint(run, cpResult.action, ctx.chat!.id, threadId, bctx);
   });
 
   return composer;
