@@ -230,6 +230,27 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       return;
     }
 
+    // Maturation checkpoint: intercept free-text response when "Autre" was clicked
+    const { checkMaturationCheckpoint } = await import("../maturation/checkpoint.ts");
+    const matCheckpoint = await checkMaturationCheckpoint(ctx.chat?.id ?? 0, threadId);
+    if (matCheckpoint?.pendingCheckpoint?.awaitingFreeText) {
+      const { handleCheckpointResponse } = await import("../maturation/checkpoint.ts");
+      const cpResult = await handleCheckpointResponse(matCheckpoint, input);
+      await bctx.sendResponseHtml(
+        ctx,
+        `\u2705 Decision enregistree. ${cpResult.action === "RE-EXPLORE" ? "Re-exploration en cours..." : "Pipeline continue..."}`,
+      );
+      const { resumeMaturationAfterCheckpoint } = await import("./maturation.ts");
+      await resumeMaturationAfterCheckpoint(
+        matCheckpoint,
+        cpResult.action,
+        ctx.chat?.id ?? 0,
+        threadId,
+        bctx,
+      );
+      return;
+    }
+
     // S37: Check if this is a response to a pending clarification
     const clarificationCmd = checkPendingClarification(ctx, input);
     if (clarificationCmd) {
