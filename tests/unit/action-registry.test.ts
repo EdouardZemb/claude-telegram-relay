@@ -98,7 +98,7 @@ describe("action-registry", () => {
     });
 
     it("every action has a category for menu grouping", () => {
-      const validCategories = ["tasks", "quality", "knowledge", "project", "system"];
+      const validCategories = ["tasks", "quality", "knowledge", "project", "system", "dev"];
       for (const action of getAllActions()) {
         expect(action.category).toBeTruthy();
         expect(validCategories).toContain(action.category);

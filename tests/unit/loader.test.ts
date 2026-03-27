@@ -389,7 +389,7 @@ export default c;
       }
     });
 
-    it("loads all 12 known command files", async () => {
+    it("loads all 13 known command files", async () => {
       const bot = makeBot();
       const ctx = makeBotContext();
 
@@ -409,6 +409,7 @@ export default c;
           "exploration.ts",
           "help.ts",
           "jobs.ts",
+          "maturation.ts",
           "memory-cmds.ts",
           "profile.ts",
           "project.ts",

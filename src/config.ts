@@ -52,6 +52,7 @@ const OptionalEnvSchema = z.object({
   LOG_LEVEL: z.string().default(""),
   HEARTBEAT_DEBUG: z.string().default(""),
   TMPDIR: z.string().default(""),
+  MATURATION_DIR: z.string().default(""),
 });
 
 // ============================================================
@@ -91,6 +92,7 @@ export type AppConfig = {
   logLevel: string;
   heartbeatDebug: string;
   tmpDir: string;
+  maturationDir: string;
 };
 
 // ============================================================
@@ -157,6 +159,7 @@ export function getConfig(): AppConfig {
     logLevel: optionalResult.LOG_LEVEL,
     heartbeatDebug: optionalResult.HEARTBEAT_DEBUG,
     tmpDir: optionalResult.TMPDIR,
+    maturationDir: optionalResult.MATURATION_DIR,
   };
 
   return _config;

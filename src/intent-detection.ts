@@ -211,6 +211,29 @@ const INTENT_PATTERNS: IntentPattern[] = [
     ],
   },
   {
+    intent: "maturation",
+    command: "idea",
+    patterns: [
+      /j'ai une id[eé]e/i,
+      /nouvelle id[eé]e/i,
+      /on pourrait\s+(?:faire|ajouter|cr[eé]er|am[eé]liorer)/i,
+      /il faudrait\s+(?:pouvoir|qu'on|que le)/i,
+      /ce serait (?:bien|cool|utile)\s+(?:de|d'|si)/i,
+      /faire m[uû]rir/i,
+      /lancer.*maturation/i,
+    ],
+    argExtractor: (text: string) => {
+      return (
+        text
+          .replace(
+            /^(j'ai une id[eé]e|nouvelle id[eé]e|on pourrait|il faudrait|ce serait (?:bien|cool|utile) (?:de|d'|si)|faire m[uû]rir|lancer.*maturation)\s*/i,
+            "",
+          )
+          .trim() || undefined
+      );
+    },
+  },
+  {
     intent: "explore_topic",
     command: "explore",
     patterns: [

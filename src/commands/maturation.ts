@@ -1,0 +1,277 @@
+/**
+ * @module commands/maturation
+ * @description Grammy Composer handling the /idea command.
+ * Launches the maturation pipeline (understand → explore → confront → synthesize → advocate)
+ * via job-manager, with inline keyboard for validate/modify/reject.
+ */
+
+import { Composer, type Context, InlineKeyboard } from "grammy";
+import type { BotContext } from "../bot-context.ts";
+import { escapeHtml } from "../bot-context.ts";
+import { createLogger } from "../logger.ts";
+import { initRun, loadRunMeta, saveRunMeta } from "../maturation/documents.ts";
+import { handlePhaseResult } from "../maturation/engine.ts";
+import {
+  runAdvocatePhase,
+  runConfrontPhase,
+  runExplorePhase,
+  runSynthesizePhase,
+  runUnderstandPhase,
+} from "../maturation/phases.ts";
+import {
+  ALL_MATURATION_PHASES,
+  createEmptyRun,
+  type MaturationRun,
+  PHASE_LABELS,
+  toMaturationName,
+} from "../maturation/types.ts";
+
+const log = createLogger("maturation");
+
+// ── Status symbols ─────────────────────────────────────────────
+
+const STATUS_SYMBOLS: Record<string, string> = {
+  pending: "\u25CB", // ○
+  running: "\u25D4", // ◔
+  ok: "\u25CF", // ●
+  failed: "\u2717", // ✗
+  skipped: "\u2013", // –
+};
+
+// ── Exported helpers ───────────────────────────────────────────
+
+/**
+ * Extracts the description from a "/idea <description>" string.
+ * Returns null if the description is empty or only whitespace.
+ */
+export function parseIdeaCommand(text: string): string | null {
+  const match = text.match(/^\/idea\s+([\s\S]+)/);
+  if (!match) return null;
+  const description = match[1].trim();
+  return description.length > 0 ? description : null;
+}
+
+/**
+ * Builds an inline keyboard with 3 buttons: Valider, Modifier, Rejeter.
+ */
+export function buildValidationKeyboard(runId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Valider", `mat_validate:${runId}`)
+    .text("✏️ Modifier", `mat_modify:${runId}`)
+    .text("❌ Rejeter", `mat_reject:${runId}`);
+}
+
+/**
+ * Builds an HTML-formatted status bar showing all pipeline phases with symbols.
+ */
+export function buildMaturationStatusBar(run: MaturationRun): string {
+  const parts: string[] = [];
+
+  for (const phase of ALL_MATURATION_PHASES) {
+    const step = run.steps[phase];
+    const symbol = STATUS_SYMBOLS[step.status] ?? STATUS_SYMBOLS.pending;
+    const label = escapeHtml(PHASE_LABELS[phase]);
+    parts.push(`${symbol} ${label}`);
+  }
+
+  let bar = parts.join(" · ");
+  if (run.iteration > 0) {
+    bar += ` <i>(iteration ${run.iteration})</i>`;
+  }
+  return bar;
+}
+
+/**
+ * Formats a full summary of a maturation run for Telegram (HTML).
+ */
+export function formatRunSummary(run: MaturationRun): string {
+  const lines: string[] = [
+    `<b>Maturation: ${escapeHtml(run.name)}</b>`,
+    `<i>${escapeHtml(run.rawInput)}</i>`,
+    "",
+    buildMaturationStatusBar(run),
+    "",
+  ];
+
+  for (const phase of ALL_MATURATION_PHASES) {
+    const step = run.steps[phase];
+    if (step.status === "pending") continue;
+    const symbol = STATUS_SYMBOLS[step.status] ?? STATUS_SYMBOLS.pending;
+    const label = escapeHtml(PHASE_LABELS[phase]);
+    const line = `${symbol} <b>${label}</b>`;
+    if (step.verdict) {
+      lines.push(`${line}: ${escapeHtml(step.verdict)}`);
+    } else {
+      lines.push(line);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// ── Pipeline orchestration ─────────────────────────────────────
+
+type OnProgress = (msg: string) => Promise<void>;
+
+/**
+ * Runs the maturation pipeline phases sequentially.
+ * Phases: understand → (clarify?) → explore → confront → synthesize → advocate
+ * Returns "MATURATION_READY:{name}:{id}" on success or "MATURATION_FAILED:{phase}:{name}" on failure.
+ * If advocate loops back (currentPhase becomes explore), recursively calls itself.
+ */
+export async function runMaturationPipeline(
+  run: MaturationRun,
+  onProgress: OnProgress,
+): Promise<string> {
+  const phases = [
+    { name: "understand" as const, fn: runUnderstandPhase },
+    { name: "explore" as const, fn: runExplorePhase },
+    { name: "confront" as const, fn: runConfrontPhase },
+    { name: "synthesize" as const, fn: runSynthesizePhase },
+    { name: "advocate" as const, fn: runAdvocatePhase },
+  ];
+
+  for (const { name: phaseName, fn: phaseFn } of phases) {
+    // Skip if step is already done or not the current phase (e.g. clarify skipped)
+    const step = run.steps[phaseName];
+    if (step.status === "skipped") continue;
+    if (run.currentPhase !== phaseName && step.status !== "pending") continue;
+    // Only run the current phase or pending ones in order
+    if (run.currentPhase !== phaseName) continue;
+
+    // Mark as running
+    run.steps[phaseName].status = "running";
+    run.steps[phaseName].startedAt = new Date().toISOString();
+    run.updatedAt = new Date().toISOString();
+    await saveRunMeta(run);
+    await onProgress(buildMaturationStatusBar(run));
+
+    log.info("running maturation phase", { runId: run.id, phase: phaseName });
+
+    let result;
+    try {
+      result = await phaseFn(run);
+    } catch (err) {
+      log.error("phase threw", { runId: run.id, phase: phaseName, error: String(err) });
+      result = { status: "failed" as const, documents: [] };
+    }
+
+    // Apply result to run state machine
+    run = handlePhaseResult(run, phaseName, result);
+    await saveRunMeta(run);
+
+    if (result.status === "failed") {
+      await onProgress(buildMaturationStatusBar(run));
+      return `MATURATION_FAILED:${phaseName}:${run.name}`;
+    }
+
+    await onProgress(buildMaturationStatusBar(run));
+
+    // If advocate looped back to explore, recurse
+    if (phaseName === "advocate" && run.currentPhase === "explore") {
+      return await runMaturationPipeline(run, onProgress);
+    }
+  }
+
+  return `MATURATION_READY:${run.name}:${run.id}`;
+}
+
+// ── Composer factory ───────────────────────────────────────────
+
+export default function maturationCommands(bctx: BotContext): Composer<Context> {
+  const composer = new Composer<Context>();
+  const { sendResponseHtml, getThreadId } = bctx;
+
+  // /idea <description> — launch maturation pipeline
+  composer.command("idea", async (ctx) => {
+    const rawInput = ctx.message?.text ?? "";
+    const description = parseIdeaCommand(rawInput);
+
+    if (!description) {
+      await ctx.reply(
+        "Usage: /idea <description>\n\nEx: /idea Export CSV des taches",
+        bctx.threadOpts(ctx),
+      );
+      return;
+    }
+
+    const chatId = ctx.chat?.id ?? 0;
+    const threadId = getThreadId(ctx);
+    const name = toMaturationName(description);
+
+    // Create run
+    const run = createEmptyRun(chatId, threadId, name, description);
+    await initRun(run);
+
+    const statusBar = buildMaturationStatusBar(run);
+    await sendResponseHtml(
+      ctx,
+      `<b>Maturation lancee</b>\n<code>${escapeHtml(name)}</code>\n\n${statusBar}`,
+    );
+
+    // Lazy import to avoid circular deps
+    const { launch, isJobManagerEnabled, sendProgressMessage } = await import("../job-manager.ts");
+
+    if (!isJobManagerEnabled()) {
+      await sendResponseHtml(ctx, "⚠️ Job manager desactive. Pipeline non lance.");
+      return;
+    }
+
+    const jobId = await launch(
+      "maturation",
+      chatId,
+      async () => {
+        const onProgress: OnProgress = async (msg: string) => {
+          await sendProgressMessage(chatId, threadId, msg);
+        };
+        return await runMaturationPipeline(run, onProgress);
+      },
+      { messageThreadId: threadId },
+    );
+
+    log.info("maturation job launched", { jobId, runId: run.id, name });
+  });
+
+  // mat_validate callback
+  composer.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+
+    if (
+      !data.startsWith("mat_validate:") &&
+      !data.startsWith("mat_modify:") &&
+      !data.startsWith("mat_reject:")
+    ) {
+      await next();
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+
+    const [action, runId] = data.split(":");
+
+    const run = await loadRunMeta(runId);
+    if (!run) {
+      await ctx.reply("Run introuvable.", bctx.threadOpts(ctx));
+      return;
+    }
+
+    if (action === "mat_validate") {
+      await sendResponseHtml(
+        ctx,
+        `<b>Maturation validee</b>\n<code>${escapeHtml(run.name)}</code>\n\n${formatRunSummary(run)}`,
+      );
+    } else if (action === "mat_modify") {
+      await sendResponseHtml(
+        ctx,
+        `<b>Modification demandee</b>\n<code>${escapeHtml(run.name)}</code>\n\nEnvoyez la description modifiee avec /idea pour relancer.`,
+      );
+    } else if (action === "mat_reject") {
+      await sendResponseHtml(
+        ctx,
+        `<b>Maturation rejetee</b>\n<code>${escapeHtml(run.name)}</code>`,
+      );
+    }
+  });
+
+  return composer;
+}
