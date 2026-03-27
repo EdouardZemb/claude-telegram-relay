@@ -144,6 +144,31 @@ const ACTIONS: ActionDefinition[] = [
     category: "tasks",
   },
 
+  // ─── maturation ───
+  {
+    command: "idea",
+    description: "Lancer la maturation d'une idee",
+    usage: "/idea <description de l'idee>",
+    params: [
+      { name: "description", required: true, description: "Description de l'idee a faire murir" },
+    ],
+    risk: "medium",
+    module: "maturation",
+    requiresSupabase: false,
+    aliases: [
+      "nouvelle idee",
+      "j ai une idee",
+      "idee d amelioration",
+      "on pourrait",
+      "il faudrait",
+      "ce serait bien",
+      "maturation",
+      "faire murir",
+    ],
+    backgroundEligible: true,
+    category: "dev",
+  },
+
   // ─── exploration.ts ───
   {
     command: "explore",
