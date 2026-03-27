@@ -131,12 +131,19 @@ export async function runMaturationPipeline(
     { name: "advocate" as const, fn: runAdvocatePhase },
   ];
 
+  // If currentPhase is "clarify" (not yet implemented), skip it and advance to explore
+  if (run.currentPhase === "clarify") {
+    run.steps.clarify.status = "skipped";
+    run.currentPhase = "explore";
+    await saveRunMeta(run);
+    log.info("clarify phase skipped (not yet implemented)", { runId: run.id });
+  }
+
   for (const { name: phaseName, fn: phaseFn } of phases) {
-    // Skip if step is already done or not the current phase (e.g. clarify skipped)
+    // Skip if step is already done or not the current phase
     const step = run.steps[phaseName];
-    if (step.status === "skipped") continue;
-    if (run.currentPhase !== phaseName && step.status !== "pending") continue;
-    // Only run the current phase or pending ones in order
+    if (step.status === "skipped" || step.status === "ok") continue;
+    // Only run the current phase
     if (run.currentPhase !== phaseName) continue;
 
     // Mark as running
