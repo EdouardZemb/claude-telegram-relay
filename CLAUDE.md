@@ -37,6 +37,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `maturation/engine.ts` | Maturation state machine: phase transitions, loop logic, circuit breaker |
 | `maturation/phases.ts` | Phase execution: P0-P3b runners with parallel agent spawning |
 | `maturation/agents.ts` | Maturation agent configuration: prompt builders, model/effort mapping |
+| `maturation/checkpoint.ts` | Interactive decision checkpoints: pipeline pause, advisor, keyboard, global decisions |
 | `maturation/clarify.ts` | Socratic clarification loop: async Q&A via Telegram, clarifier agent calls, pipeline pause/resume |
 | `maturation/index.ts` | Barrel re-export for maturation sub-modules |
 | `maturation.ts` | Root barrel re-export for maturation module (barrel convention) |
