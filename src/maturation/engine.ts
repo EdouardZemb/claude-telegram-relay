@@ -109,9 +109,18 @@ export function handlePhaseResult(
     run.steps.clarify.status = "skipped";
   }
 
-  // Handle loop from advocate back to explore
+  // Handle loop from advocate back to explore — reset phases for re-run
   if (phase === "advocate" && next === "explore") {
     run.iteration += 1;
+    const resetPhases: MaturationPhase[] = ["explore", "confront", "synthesize", "advocate"];
+    for (const p of resetPhases) {
+      run.steps[p].status = "pending";
+      run.steps[p].documents = [];
+      run.steps[p].verdict = undefined;
+      run.steps[p].score = undefined;
+      run.steps[p].startedAt = undefined;
+      run.steps[p].completedAt = undefined;
+    }
     log.info(`Maturation run ${run.id} looping back (iteration ${run.iteration})`);
   }
 
