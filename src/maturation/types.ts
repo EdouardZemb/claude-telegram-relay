@@ -83,6 +83,7 @@ export interface MaturationRun {
   maxIterations: number;
   createdAt: string;
   updatedAt: string;
+  clarification?: ClarificationState;
 }
 
 // Quality gate
@@ -91,6 +92,21 @@ export interface GateResult {
   score: number;
   issues: string[];
   recommendation: "advance" | "loop" | "human" | "abort";
+}
+
+// Clarification types
+export interface ClarificationQA {
+  question: string;
+  answer: string;
+  turn: number;
+  timestamp: string;
+}
+
+export interface ClarificationState {
+  questions: ClarificationQA[];
+  currentTurn: number;
+  maxTurns: number;
+  pendingQuestion?: string;
 }
 
 // Helpers

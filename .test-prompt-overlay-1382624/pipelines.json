@@ -1,0 +1,43 @@
+[
+  {
+    "key": "99999:main",
+    "tracker": {
+      "chatId": 99999,
+      "name": "test-explore",
+      "steps": {
+        "explore": {
+          "phase": "explore",
+          "status": "running",
+          "jobId": "job-123",
+          "startedAt": "2026-03-26T05:31:05.092Z"
+        },
+        "discuss": {
+          "phase": "discuss",
+          "status": "pending"
+        },
+        "spec": {
+          "phase": "spec",
+          "status": "pending"
+        },
+        "challenge": {
+          "phase": "challenge",
+          "status": "pending"
+        },
+        "implement": {
+          "phase": "implement",
+          "status": "pending"
+        },
+        "review": {
+          "phase": "review",
+          "status": "pending"
+        },
+        "doc": {
+          "phase": "doc",
+          "status": "pending"
+        }
+      },
+      "createdAt": "2026-03-26T05:31:05.092Z",
+      "updatedAt": "2026-03-26T05:31:05.092Z"
+    }
+  }
+]

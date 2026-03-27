@@ -1,0 +1,14 @@
+[
+  {
+    "type": "alert",
+    "severity": "normal",
+    "message": "[Pouls] Sprint S44 en retard: seulement 3/10 taches",
+    "createdAt": 1774610901984
+  },
+  {
+    "type": "alert",
+    "severity": "critical",
+    "message": "[Pouls] CI cassee sur feature/x",
+    "createdAt": 1774610901985
+  }
+]

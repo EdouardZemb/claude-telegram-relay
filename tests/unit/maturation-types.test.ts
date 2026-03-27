@@ -91,4 +91,11 @@ describe("maturation/types", () => {
       expect(run.updatedAt).toBe(run.createdAt);
     });
   });
+
+  describe("ClarificationState", () => {
+    it("V1: createEmptyRun has no clarification by default", () => {
+      const run = createEmptyRun(1, undefined, "test", "input");
+      expect(run.clarification).toBeUndefined();
+    });
+  });
 });
