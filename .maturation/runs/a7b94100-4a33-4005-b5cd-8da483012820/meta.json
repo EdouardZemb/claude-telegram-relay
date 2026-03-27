@@ -1,0 +1,54 @@
+{
+  "id": "a7b94100-4a33-4005-b5cd-8da483012820",
+  "chatId": 8252350821,
+  "name": "tu-sois-capable-de-consulter-mon-solde-bancaire",
+  "rawInput": "tu sois capable de consulter mon solde bancaire à la banque postale et que tu puisses suivre mes dépenses, me conseiller sur mon budget, ce genre de choses là. J'aimerais avoir une suite de fonctionnalités liées à mon activité bancaire",
+  "steps": {
+    "understand": {
+      "phase": "understand",
+      "status": "ok",
+      "documents": [
+        "/home/edouard/claude-telegram-relay/.maturation/runs/a7b94100-4a33-4005-b5cd-8da483012820/UNDERSTANDING.md"
+      ],
+      "startedAt": "2026-03-27T13:20:24.356Z",
+      "verdict": "ambiguity:7",
+      "score": 7,
+      "completedAt": "2026-03-27T13:22:12.434Z"
+    },
+    "clarify": {
+      "phase": "clarify",
+      "status": "pending",
+      "documents": []
+    },
+    "explore": {
+      "phase": "explore",
+      "status": "pending",
+      "documents": []
+    },
+    "confront": {
+      "phase": "confront",
+      "status": "pending",
+      "documents": []
+    },
+    "synthesize": {
+      "phase": "synthesize",
+      "status": "pending",
+      "documents": []
+    },
+    "advocate": {
+      "phase": "advocate",
+      "status": "pending",
+      "documents": []
+    },
+    "validate": {
+      "phase": "validate",
+      "status": "pending",
+      "documents": []
+    }
+  },
+  "currentPhase": "clarify",
+  "iteration": 0,
+  "maxIterations": 2,
+  "createdAt": "2026-03-27T13:20:24.240Z",
+  "updatedAt": "2026-03-27T13:22:12.434Z"
+}

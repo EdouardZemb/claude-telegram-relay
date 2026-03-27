@@ -84,6 +84,8 @@ export interface MaturationRun {
   createdAt: string;
   updatedAt: string;
   clarification?: ClarificationState;
+  pendingCheckpoint?: CheckpointDecision;
+  resolvedCheckpoints?: CheckpointDecision[];
 }
 
 // Quality gate
@@ -107,6 +109,30 @@ export interface ClarificationState {
   currentTurn: number;
   maxTurns: number;
   pendingQuestion?: string;
+}
+
+// Checkpoint types
+export interface CheckpointDecision {
+  id: string;
+  source: "synthesize" | "advocate";
+  summary: string;
+  options: string[];
+  recommendation: "CONTINUE" | "RE-EXPLORE";
+  tags: string[];
+  awaitingFreeText?: boolean;
+  userChoice?: string;
+  resolvedAt?: string;
+}
+
+export interface GlobalDecision {
+  id: string;
+  runId: string;
+  runName: string;
+  source: "synthesize" | "advocate";
+  summary: string;
+  userChoice: string;
+  timestamp: string;
+  tags: string[];
 }
 
 // Helpers

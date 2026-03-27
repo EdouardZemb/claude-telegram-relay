@@ -1,0 +1,54 @@
+{
+  "id": "1c56b0d0-4a57-4eca-8ac3-bc299fa1a679",
+  "chatId": 8252350821,
+  "name": "consultation-solde-bancaire-et-fonctionnalites",
+  "rawInput": "Consultation solde bancaire et fonctionnalités de gestion bancaire : suivi du solde, des dépenses, gestion financière intégrée dans la conversation",
+  "steps": {
+    "understand": {
+      "phase": "understand",
+      "status": "ok",
+      "documents": [
+        "/home/edouard/claude-telegram-relay/.maturation/runs/1c56b0d0-4a57-4eca-8ac3-bc299fa1a679/UNDERSTANDING.md"
+      ],
+      "startedAt": "2026-03-27T13:08:23.432Z",
+      "verdict": "ambiguity:7",
+      "score": 7,
+      "completedAt": "2026-03-27T13:10:02.560Z"
+    },
+    "clarify": {
+      "phase": "clarify",
+      "status": "pending",
+      "documents": []
+    },
+    "explore": {
+      "phase": "explore",
+      "status": "pending",
+      "documents": []
+    },
+    "confront": {
+      "phase": "confront",
+      "status": "pending",
+      "documents": []
+    },
+    "synthesize": {
+      "phase": "synthesize",
+      "status": "pending",
+      "documents": []
+    },
+    "advocate": {
+      "phase": "advocate",
+      "status": "pending",
+      "documents": []
+    },
+    "validate": {
+      "phase": "validate",
+      "status": "pending",
+      "documents": []
+    }
+  },
+  "currentPhase": "clarify",
+  "iteration": 0,
+  "maxIterations": 2,
+  "createdAt": "2026-03-27T13:08:23.362Z",
+  "updatedAt": "2026-03-27T13:10:02.560Z"
+}

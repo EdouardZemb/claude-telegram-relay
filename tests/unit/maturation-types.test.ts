@@ -98,4 +98,12 @@ describe("maturation/types", () => {
       expect(run.clarification).toBeUndefined();
     });
   });
+
+  describe("CheckpointDecision", () => {
+    it("V1: createEmptyRun has no pendingCheckpoint by default", () => {
+      const run = createEmptyRun(1, undefined, "test", "input");
+      expect(run.pendingCheckpoint).toBeUndefined();
+      expect(run.resolvedCheckpoints).toBeUndefined();
+    });
+  });
 });
