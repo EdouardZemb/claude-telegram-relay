@@ -49,7 +49,7 @@ export const MENU_CATEGORIES: MenuCategory[] = [
     id: "knowledge",
     label: "Memoire & Docs",
     description: "Memoire, idees, documents et exploration",
-    commands: ["brain", "ideas", "docs", "explore", "remind"],
+    commands: ["brain", "ideas", "idea", "docs", "explore", "remind"],
   },
   {
     id: "project",

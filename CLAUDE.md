@@ -38,6 +38,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `maturation/phases.ts` | Phase execution: P0-P3b runners with parallel agent spawning |
 | `maturation/agents.ts` | Maturation agent configuration: prompt builders, model/effort mapping |
 | `maturation/index.ts` | Barrel re-export for maturation sub-modules |
+| `maturation.ts` | Root barrel re-export for maturation module (barrel convention) |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
 | `agent-context.ts` | Enriched Supabase context builder for SDD agents: buildAgentContext(supabase, role, phase) with parallel fetch, timeout, size cap |
 | `html-format-helpers.ts` | Shared HTML formatting helpers for Telegram: sectionTitle, separator, progressBar, kvLine, statusIcon, bulletList, collapsibleSection |
