@@ -181,6 +181,19 @@ export async function runMaturationPipeline(
 
     await onProgress(buildMaturationStatusBar(run));
 
+    // If understand triggered clarify, pause the pipeline for Socratic loop
+    if (phaseName === "understand" && run.currentPhase === "clarify") {
+      const { startClarification } = await import("../maturation/clarify.ts");
+      const clarifyResult = await startClarification(run, bctx.callClaude);
+      if (clarifyResult) {
+        await onProgress(buildMaturationStatusBar(run));
+        await onProgress(`\u2753 ${clarifyResult.question}`);
+        return `MATURATION_CLARIFYING:${run.name}:${run.id}`;
+      }
+      // Clarifier said DONE immediately — continue to explore
+      log.info("clarify skipped by clarifier agent", { runId: run.id });
+    }
+
     // If advocate looped back to explore, recurse
     if (phaseName === "advocate" && run.currentPhase === "explore") {
       return await runMaturationPipeline(run, onProgress, bctx);
