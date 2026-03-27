@@ -47,10 +47,29 @@ async function spawnAgent(run: MaturationRun, role: string): Promise<string | nu
   const documents = await collectDocuments(run.id, config.requiredDocs);
   const runDir = getRunDir(run.id);
 
+  let globalDecisions: Array<{ source: string; summary: string; userChoice: string }> = [];
+  try {
+    const { loadGlobalDecisions } = await import("./checkpoint.ts");
+    const gd = await loadGlobalDecisions();
+    globalDecisions = gd.slice(0, 5).map((d) => ({
+      source: d.source,
+      summary: d.summary,
+      userChoice: d.userChoice,
+    }));
+  } catch {
+    // checkpoint module may not be available, ignore
+  }
+
   const prompt = buildPhasePrompt(role, {
     rawInput: run.rawInput,
     runDir,
     documents,
+    resolvedCheckpoints: run.resolvedCheckpoints?.map((cp) => ({
+      source: cp.source,
+      summary: cp.summary,
+      userChoice: cp.userChoice ?? "",
+    })),
+    globalDecisions,
   });
 
   const result = await spawnClaude({

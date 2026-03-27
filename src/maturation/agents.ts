@@ -112,6 +112,8 @@ export interface PromptContext {
   rawInput: string;
   runDir: string;
   documents: Partial<Record<string, string>>;
+  resolvedCheckpoints?: Array<{ source: string; summary: string; userChoice: string }>;
+  globalDecisions?: Array<{ source: string; summary: string; userChoice: string }>;
 }
 
 export function buildPhasePrompt(role: string, ctx: PromptContext): string {
@@ -131,6 +133,22 @@ export function buildPhasePrompt(role: string, ctx: PromptContext): string {
     for (const [name, content] of docEntries) {
       parts.push(`<document name="${name}">\n${content}\n</document>\n`);
     }
+  }
+
+  if (ctx.resolvedCheckpoints && ctx.resolvedCheckpoints.length > 0) {
+    parts.push("## Decisions humaines (ce run)\n");
+    for (const cp of ctx.resolvedCheckpoints) {
+      parts.push(`- [${cp.source}] "${cp.summary}" -> Choix: "${cp.userChoice}"`);
+    }
+    parts.push("");
+  }
+
+  if (ctx.globalDecisions && ctx.globalDecisions.length > 0) {
+    parts.push("## Decisions historiques\n");
+    for (const gd of ctx.globalDecisions) {
+      parts.push(`- [${gd.source}] "${gd.summary}" -> "${gd.userChoice}"`);
+    }
+    parts.push("");
   }
 
   parts.push(`## Output\n\nWrite your output to: ${ctx.runDir}/${config.outputDoc}.md`);
