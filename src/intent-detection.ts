@@ -57,7 +57,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "feature_request",
-    command: "explore",
+    command: "idea",
     patterns: [
       /\b(il\s+faudrait\s+pouvoir|ce\s+serait\s+bien\s+(de|d')|on\s+pourrait\s+ajouter|j'aimerais\s+(que|pouvoir))\b/i,
       /\b(pourquoi\s+pas|et\s+si\s+on)\s+(ajouter|ajoutait|faisait|implementait|creait)\b/i,
@@ -235,7 +235,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
   },
   {
     intent: "explore_topic",
-    command: "explore",
+    command: "idea",
     patterns: [
       /\b(explore|investigu[ée]?r?|etudi[ée]?r?)\s+(le\s+|la\s+|l'|les?\s+|un\s+|une?\s+)?(\w+)/i,
       /\b(comment\s+fonctionne|c'?est\s+quoi|qu'?est[- ]ce\s+que)\s+(le\s+|la\s+|l')?(\w+)/i,
@@ -368,7 +368,7 @@ export async function detectIntentWithLLM(
       "Reponds UNIQUEMENT en JSON valide, sans markdown:",
       '{"command": "nom_commande_sans_slash", "args": "arguments extraits ou vide", "confidence": 0.0-1.0}',
       "",
-      "FEATURE REQUEST: Si le message decrit une fonctionnalite souhaitee, un changement ou amelioration qui n'existe pas encore (ex: 'le bot devrait pouvoir X', 'ca serait top d'avoir Y'), classifier comme feature_request avec command=explore et les args decrivant le sujet.",
+      "FEATURE REQUEST: Si le message decrit une fonctionnalite souhaitee, un changement ou amelioration qui n'existe pas encore (ex: 'le bot devrait pouvoir X', 'ca serait top d'avoir Y'), classifier comme feature_request avec command=idea et les args decrivant le sujet.",
       "",
       'Si aucune commande ne correspond, reponds: {"command": null, "args": "", "confidence": 0}',
       "Ne force pas un match si le message est juste une conversation normale.",

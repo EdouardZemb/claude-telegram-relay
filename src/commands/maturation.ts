@@ -162,7 +162,7 @@ export async function runMaturationPipeline(
 
     log.info("running maturation phase", { runId: run.id, phase: phaseName });
 
-    let result;
+    let result: import("../maturation/engine.ts").PhaseResult;
     try {
       result = await phaseFn(run);
     } catch (err) {

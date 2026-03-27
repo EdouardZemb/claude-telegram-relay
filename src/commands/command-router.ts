@@ -278,14 +278,14 @@ export async function showFeatureRequestConfirmation(
   pendingFeatureRequests.set(key, { subject, timestamp: Date.now() });
 
   const keyboard = new InlineKeyboard()
-    .text("Explorer", "feature_request_confirm")
+    .text("Maturer", "feature_request_confirm")
     .text("Non merci", "feature_request_cancel");
 
   const displaySubject = subject ? ` : "${subject}"` : "";
-  await ctx.reply(
-    `Ca ressemble a une demande de feature${displaySubject}.\nLancer une exploration SDD ?`,
-    { ...threadOpts, reply_markup: keyboard },
-  );
+  await ctx.reply(`Ca ressemble a une idee${displaySubject}.\nLancer la maturation ?`, {
+    ...threadOpts,
+    reply_markup: keyboard,
+  });
 }
 
 /**
@@ -317,7 +317,7 @@ export function handleFeatureRequestCallback(
       resolvedSubject = pending.subject;
     }
     pendingFeatureRequests.delete(key);
-    return resolvedSubject ? `/explore ${resolvedSubject}` : "/explore";
+    return resolvedSubject ? `/idea ${resolvedSubject}` : "/idea";
   }
   return null;
 }
