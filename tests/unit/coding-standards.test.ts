@@ -342,6 +342,8 @@ describe("Coding standards — S6: createLogger mandatory", () => {
       "Thin Composer delegating to notification-queue.ts — logging in dependency",
     "commands/project.ts": "Thin Composer delegating to projects.ts — logging in dependency",
     "commands/tasks.ts": "Thin Composer delegating to tasks.ts — logging in dependency",
+    // Pipeline V3: pure type definitions and constants
+    "pipeline-v3/types.ts": "Pure types, interfaces and constants — no runtime logic",
   };
 
   const files = getAllSourceFiles().filter((f) => {
