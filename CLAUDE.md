@@ -41,6 +41,12 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `maturation/clarify.ts` | Socratic clarification loop: async Q&A via Telegram, clarifier agent calls, pipeline pause/resume |
 | `maturation/index.ts` | Barrel re-export for maturation sub-modules |
 | `maturation.ts` | Root barrel re-export for maturation module (barrel convention) |
+| `pipeline-v3/types.ts` | V3 pipeline types: phases, reviewer roles, panel verdict, V3Run, constants (quorum 2/3, circuit breaker 3) |
+| `pipeline-v3/reviewers.ts` | Multi-critic panel: 3 specialized reviewer agents (security/performance/architecture), quorum logic, fail-closed verdict extraction (F-TC-2) |
+| `pipeline-v3/engine.ts` | Reflective loop state machine: implement -> review -> fix cycle with circuit breaker |
+| `pipeline-v3/orchestrator.ts` | V3 orchestrator: SPEC-UNIFIEE bridge (AM-1), reflective loop coordination, fix agent on existing branch (AM-2), progress reporting |
+| `pipeline-v3/index.ts` | Barrel re-export for pipeline-v3 sub-modules |
+| `pipeline-v3.ts` | Root barrel re-export for pipeline-v3 module (barrel convention) |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
 | `agent-context.ts` | Enriched Supabase context builder for SDD agents: buildAgentContext(supabase, role, phase) with parallel fetch, timeout, size cap |
 | `html-format-helpers.ts` | Shared HTML formatting helpers for Telegram: sectionTitle, separator, progressBar, kvLine, statusIcon, bulletList, collapsibleSection |
@@ -134,6 +140,8 @@ Local MCP server (`.mcp.json`, stdio) exposing tools: memory CRUD, task manageme
 
 The orchestration TypeScript modules (orchestrator/, blackboard, deliberation, gate-evaluator, pipeline-selection, etc.) have been removed in favour of the SDD (Spec-Driven Development) pipeline managed via `.claude/skills/` and `.claude/agents/`.
 
+**Pipeline V3** (post-maturation): Reflective loop pipeline behind feature flag `pipeline_v3` (disabled by default). Takes SPEC-UNIFIEE from maturation, implements via agent, reviews via 3-critic panel (security/performance/architecture) with quorum 2/3, fixes in loop until convergence or circuit breaker (3 iterations). Coexists with SDD pipeline.
+
 Workflow steps (config/workflow.yaml): request → decomposition → validation → execution → review → closure
 
 Details: see CHANGELOG.md and docs/sprints/ for version history.
@@ -153,16 +161,17 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 ### Project Structure
 
 ```
-src/                    64 TypeScript modules (core logic)
+src/                    76 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
   maturation/           7 sub-modules (types, documents, scoring, engine, phases, agents, barrel)
+  pipeline-v3/          5 sub-modules (types, reviewers, engine, orchestrator, barrel)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/
 db/schema.sql           Authoritative database schema
 mcp/                    MCP memory server (memory-server.ts)
 supabase/functions/     Edge Functions (embed, search, classify-thought, memory-mcp)
-tests/                  2478 tests (unit + integration + E2E)
+tests/                  2629 tests (unit + integration + E2E)
 scripts/                Deployment, token rotation, setup, per-file coverage check
 docs/specs/             Formal specifications (SPEC-{name}.md)
 docs/reviews/           Adversarial reviews, impact analysis, pipeline reports
@@ -191,7 +200,7 @@ Details : voir [docs/WORKFLOW-PIPELINE.md](docs/WORKFLOW-PIPELINE.md) et [docs/W
 ### Conventions
 
 - Runtime: Bun
-- Tests: `bun test` (2478 tests, all must pass before merge)
+- Tests: `bun test` (2629 tests, all must pass before merge)
 - Git workflow: feature branch → PR → CI (must pass) → merge to master
 - CI verification: after creating a PR, always run `./scripts/wait-ci.sh` to verify CI passes before announcing completion. Never declare a PR ready without confirmed green CI.
 - Error handling: always destructure `{ error }` from Supabase operations and log with `log.error` (via `createLogger` from `src/logger.ts`)

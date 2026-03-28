@@ -12,5 +12,6 @@
   "prompt_feedback_loop": true,
   "sdd_feedback_llm_overlay": false,
   "sdd_pipeline_watchdog": true,
-  "agent_context_injection": false
+  "agent_context_injection": false,
+  "pipeline_v3": false
 }

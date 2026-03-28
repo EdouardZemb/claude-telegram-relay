@@ -70,11 +70,13 @@ function getAllSourceFiles(): string[] {
 // ── Barrel detection ──
 
 function isBarrelFile(filePath: string): boolean {
-  const knownBarrels = ["memory.ts", "maturation.ts"];
+  const knownBarrels = ["memory.ts", "maturation.ts", "pipeline-v3.ts"];
   const base = basename(filePath);
-  if (!knownBarrels.includes(base)) return false;
-  // Verify it's at src/ root level (not inside a subdirectory)
-  return dirname(filePath) === ".";
+  // Root-level barrels (e.g. src/memory.ts, src/pipeline-v3.ts)
+  if (knownBarrels.includes(base) && dirname(filePath) === ".") return true;
+  // Sub-directory index.ts barrels (e.g. src/pipeline-v3/index.ts)
+  if (base === "index.ts" && dirname(filePath) !== ".") return true;
+  return false;
 }
 
 // ── S1: No direct console calls ──────────────────────────────

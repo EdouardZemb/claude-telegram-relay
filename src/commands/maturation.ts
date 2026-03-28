@@ -433,6 +433,39 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
         ctx,
         `<b>Maturation validee</b>\n<code>${escapeHtml(run.name)}</code>\n\n${formatRunSummary(run)}`,
       );
+
+      // V3 pipeline: if feature flag is on, launch post-maturation implementation
+      const { isFeatureEnabled } = await import("../feature-flags.ts");
+      if (isFeatureEnabled("pipeline_v3")) {
+        const { getRunDir } = await import("../maturation/documents.ts");
+        const { join } = await import("path");
+        const specPath = join(getRunDir(run.id), "SPEC-UNIFIEE.md");
+        const chatId = ctx.chat?.id ?? 0;
+        const threadId = getThreadId(ctx);
+
+        const { launch, isJobManagerEnabled, sendProgressMessage } = await import(
+          "../job-manager.ts"
+        );
+        if (isJobManagerEnabled()) {
+          const { runV3Pipeline } = await import("../pipeline-v3.ts");
+          await launch(
+            `v3-pipeline:${run.name}`,
+            chatId,
+            async () => {
+              const onProgress = async (msg: string) => {
+                await sendProgressMessage(chatId, threadId, msg);
+              };
+              const { result } = await runV3Pipeline(run.id, run.name, specPath, onProgress);
+              return result;
+            },
+            { messageThreadId: threadId },
+          );
+          await sendResponseHtml(
+            ctx,
+            `<b>Pipeline V3 lance</b>\n<code>${escapeHtml(run.name)}</code>`,
+          );
+        }
+      }
     } else if (action === "mat_modify") {
       await sendResponseHtml(
         ctx,
