@@ -48,6 +48,7 @@ const OptionalEnvSchema = z.object({
   WHISPER_MODEL_PATH: z.string().default(""),
   WHISPER_LANGUAGE: z.string().default(""),
   GITHUB_REPO: z.string().default(""),
+  GITHUB_PROJECT_NUMBER: z.coerce.number().default(0),
   NODE_ENV: z.string().default(""),
   LOG_LEVEL: z.string().default(""),
   HEARTBEAT_DEBUG: z.string().default(""),
@@ -88,6 +89,7 @@ export type AppConfig = {
   whisperModelPath: string;
   whisperLanguage: string;
   githubRepo: string;
+  githubProjectNumber: number;
   nodeEnv: string;
   logLevel: string;
   heartbeatDebug: string;
@@ -155,6 +157,7 @@ export function getConfig(): AppConfig {
     whisperModelPath: optionalResult.WHISPER_MODEL_PATH,
     whisperLanguage: optionalResult.WHISPER_LANGUAGE,
     githubRepo: optionalResult.GITHUB_REPO,
+    githubProjectNumber: optionalResult.GITHUB_PROJECT_NUMBER,
     nodeEnv: optionalResult.NODE_ENV,
     logLevel: optionalResult.LOG_LEVEL,
     heartbeatDebug: optionalResult.HEARTBEAT_DEBUG,

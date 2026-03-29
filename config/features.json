@@ -13,5 +13,6 @@
   "sdd_feedback_llm_overlay": false,
   "sdd_pipeline_watchdog": true,
   "agent_context_injection": false,
-  "pipeline_v3": false
+  "pipeline_v3": false,
+  "github_sync": false
 }
