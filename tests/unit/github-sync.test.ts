@@ -3,12 +3,14 @@ import {
   _ghExecForTests,
   _setGhExecHookForTests,
   addToProject,
+  chunkDocument,
   closeIssue,
   commentOnIssue,
   createIssue,
   type EntityMapEntry,
   type GhResult,
   getRunIssue,
+  postDocument,
   saveEntity,
 } from "../../src/github-sync.ts";
 
@@ -205,5 +207,54 @@ describe("entity map CRUD", () => {
     expect(result!.issue_number).toBe(42);
     expect(filters.run_id).toBe("abc");
     expect(filters.entity_type).toBe("run_issue");
+  });
+});
+
+describe("document operations", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+  });
+
+  it("V12: chunkDocument returns single chunk for small content", () => {
+    const chunks = chunkDocument("Hello world", 60000);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toBe("Hello world");
+  });
+
+  it("V13: chunkDocument splits at line boundary for large content", () => {
+    const lines = Array.from({ length: 2000 }, (_, i) => `Line ${i}: ${"x".repeat(40)}`);
+    const content = lines.join("\n");
+    const chunks = chunkDocument(content, 500);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(500 + 100); // tolerance for last line
+    }
+    expect(chunks.join("\n")).toBe(content);
+  });
+
+  it("V14: postDocument posts single comment for small doc", () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", exitCode: 0 };
+    });
+    const ok = postDocument(42, "UNDERSTANDING", "Small content here");
+    expect(ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    const bodyArg = calls[0][calls[0].indexOf("--body") + 1];
+    expect(bodyArg).toContain("UNDERSTANDING");
+    expect(bodyArg).toContain("Small content here");
+  });
+
+  it("V15: postDocument posts multiple comments for large doc", () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "ok", stderr: "", exitCode: 0 };
+    });
+    const bigContent = "x".repeat(70000);
+    const ok = postDocument(42, "SPEC-UNIFIEE", bigContent);
+    expect(ok).toBe(true);
+    expect(calls.length).toBeGreaterThan(1);
   });
 });

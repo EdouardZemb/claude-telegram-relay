@@ -215,3 +215,57 @@ export async function getPhaseIssue(
   }
   return data;
 }
+
+// ============================================================
+// DOCUMENT OPERATIONS
+// ============================================================
+
+const MAX_COMMENT_LENGTH = 60000; // GitHub limit is 65536, leave margin
+
+export function chunkDocument(content: string, maxLen: number = MAX_COMMENT_LENGTH): string[] {
+  if (content.length <= maxLen) return [content];
+
+  const lines = content.split("\n");
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const line of lines) {
+    // If a single line exceeds maxLen, split it by character
+    if (line.length > maxLen) {
+      if (current.length > 0) {
+        chunks.push(current);
+        current = "";
+      }
+      let remaining = line;
+      while (remaining.length > maxLen) {
+        chunks.push(remaining.slice(0, maxLen));
+        remaining = remaining.slice(maxLen);
+      }
+      current = remaining;
+      continue;
+    }
+
+    if (current.length + line.length + 1 > maxLen && current.length > 0) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = current ? current + "\n" + line : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+export function postDocument(issueNumber: number, docType: string, content: string): boolean {
+  const chunks = chunkDocument(content);
+  let allOk = true;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const header =
+      chunks.length === 1 ? `## ${docType}\n\n` : `## ${docType} (${i + 1}/${chunks.length})\n\n`;
+    const ok = commentOnIssue(issueNumber, header + chunks[i]);
+    if (!ok) allOk = false;
+  }
+
+  return allOk;
+}
