@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { spawnSync } from "bun";
 import { getConfig } from "./config.ts";
 import { createLogger } from "./logger.ts";
@@ -160,4 +161,57 @@ export function addToProject(issueUrl: string): string | null {
   } catch {
     return result.stdout.trim() || null;
   }
+}
+
+// ============================================================
+// ENTITY MAP CRUD (Supabase)
+// ============================================================
+
+const TABLE = "github_entity_map";
+
+export async function saveEntity(
+  supabase: SupabaseClient,
+  entry: Omit<EntityMapEntry, "id" | "created_at">,
+): Promise<void> {
+  const { error } = await supabase.from(TABLE).upsert(entry);
+  if (error) {
+    log.error("Failed to save entity map entry", { run_id: entry.run_id, error: error.message });
+  }
+}
+
+export async function getRunIssue(
+  supabase: SupabaseClient,
+  runId: string,
+): Promise<EntityMapEntry | null> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select()
+    .eq("run_id", runId)
+    .eq("entity_type", "run_issue")
+    .is("phase", null)
+    .maybeSingle();
+  if (error) {
+    log.error("Failed to load run issue", { runId, error: error.message });
+    return null;
+  }
+  return data;
+}
+
+export async function getPhaseIssue(
+  supabase: SupabaseClient,
+  runId: string,
+  phase: string,
+): Promise<EntityMapEntry | null> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select()
+    .eq("run_id", runId)
+    .eq("entity_type", "phase_issue")
+    .eq("phase", phase)
+    .maybeSingle();
+  if (error) {
+    log.error("Failed to load phase issue", { runId, phase, error: error.message });
+    return null;
+  }
+  return data;
 }

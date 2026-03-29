@@ -6,7 +6,10 @@ import {
   closeIssue,
   commentOnIssue,
   createIssue,
+  type EntityMapEntry,
   type GhResult,
+  getRunIssue,
+  saveEntity,
 } from "../../src/github-sync.ts";
 
 describe("github-sync config", () => {
@@ -134,5 +137,73 @@ describe("project board operations", () => {
     }));
     const itemId = addToProject("https://github.com/o/r/issues/42");
     expect(itemId).toBeNull();
+  });
+});
+
+describe("entity map CRUD", () => {
+  it("V10: saveEntity calls supabase upsert on github_entity_map", async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    let upsertedRow: any = null;
+    const sb = {
+      from: (_table: string) => ({
+        // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+        upsert: (row: any) => {
+          upsertedRow = row;
+          return { data: row, error: null };
+        },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    await saveEntity(sb as any, {
+      run_id: "abc",
+      pipeline_type: "maturation",
+      entity_type: "run_issue",
+      phase: null,
+      issue_number: 42,
+      issue_url: "https://github.com/o/r/issues/42",
+      project_item_id: null,
+    });
+    expect(upsertedRow).not.toBeNull();
+    expect(upsertedRow.run_id).toBe("abc");
+    expect(upsertedRow.issue_number).toBe(42);
+  });
+
+  it("V11: getRunIssue queries by run_id and entity_type=run_issue", async () => {
+    const entry: EntityMapEntry = {
+      run_id: "abc",
+      pipeline_type: "maturation",
+      entity_type: "run_issue",
+      phase: null,
+      issue_number: 42,
+      issue_url: "https://github.com/o/r/issues/42",
+      project_item_id: "PVTI_x",
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    const filters: Record<string, any> = {};
+    const sb = {
+      from: () => ({
+        select: () => ({
+          // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+          eq: (col: string, val: any) => {
+            filters[col] = val;
+            return {
+              // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+              eq: (col2: string, val2: any) => {
+                filters[col2] = val2;
+                return {
+                  is: () => ({ maybeSingle: () => ({ data: entry, error: null }) }),
+                };
+              },
+            };
+          },
+        }),
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    const result = await getRunIssue(sb as any, "abc");
+    expect(result).not.toBeNull();
+    expect(result!.issue_number).toBe(42);
+    expect(filters.run_id).toBe("abc");
+    expect(filters.entity_type).toBe("run_issue");
   });
 });
