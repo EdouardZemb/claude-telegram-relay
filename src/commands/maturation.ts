@@ -207,6 +207,38 @@ export async function runMaturationPipeline(
 
     await onProgress(buildMaturationStatusBar(run));
 
+    // Contradiction detection: check if phase output invalidates prior decisions
+    const contradictionEligible = ["explore", "confront", "synthesize", "advocate"];
+    if (contradictionEligible.includes(phaseName) && result.documents.length > 0) {
+      let phaseOutput = "";
+      for (const docPath of result.documents) {
+        try {
+          phaseOutput += (await Bun.file(docPath).text()) + "\n\n";
+        } catch {
+          /* ignore read errors */
+        }
+      }
+      if (phaseOutput.trim()) {
+        const { startContradictionCheckpoint, buildCheckpointKeyboard } = await import(
+          "../maturation/checkpoint.ts"
+        );
+        const cp = await startContradictionCheckpoint(
+          run,
+          phaseOutput.trim(),
+          phaseName,
+          bctx.callClaude,
+        );
+        if (cp) {
+          const keyboard = buildCheckpointKeyboard(run.id, cp.options);
+          await onProgress(
+            `\u26A0\uFE0F <b>Contradiction détectée</b> (${escapeHtml(PHASE_LABELS[phaseName])})\n\n${escapeHtml(cp.summary)}`,
+            { parse_mode: "HTML", reply_markup: keyboard },
+          );
+          return `MATURATION_CHECKPOINT:${run.name}:${run.id}`;
+        }
+      }
+    }
+
     // Post-synthesize checkpoint: pause if open questions found
     if (phaseName === "synthesize" && result.status === "ok") {
       const { startCheckpoint, buildCheckpointKeyboard } = await import(
@@ -388,7 +420,10 @@ export async function resumeMaturationAfterCheckpoint(
       const lastCp = run.resolvedCheckpoints[run.resolvedCheckpoints.length - 1];
       if (lastCp.source === "synthesize") {
         run.currentPhase = "advocate";
+      } else if (lastCp.source === "contradiction") {
+        // F-TC-1: preserve currentPhase — contradiction checkpoint does not advance the pipeline
       } else {
+        // "advocate" source → advance to validate
         run.currentPhase = "validate";
       }
     }

@@ -11,11 +11,26 @@ import { join } from "path";
 import { createLogger } from "../logger.ts";
 import { getMaturationDir, listRuns, saveRunMeta } from "./documents.ts";
 import { extractShowstopper } from "./scoring.ts";
-import type { CheckpointDecision, GlobalDecision, MaturationRun } from "./types.ts";
+import type {
+  CheckpointDecision,
+  GlobalDecision,
+  MaturationPhase,
+  MaturationRun,
+} from "./types.ts";
 
 const log = createLogger("maturation/checkpoint");
 
+// ── Constants ─────────────────────────────────────────────────
+
+export const CONTRADICTION_THRESHOLD = 0.85;
+export const MAX_CONTRADICTION_PAUSES = 2;
+
 // ── Public types ─────────────────────────────────────────────
+
+export interface ContradictionResult {
+  score: number;
+  summary: string;
+}
 
 export interface CheckpointAdvice {
   summary: string;
@@ -315,18 +330,20 @@ export async function handleCheckpointResponse(
   run.pendingCheckpoint = undefined;
   run.updatedAt = new Date().toISOString();
 
-  // Save global decision
-  const globalDecision: GlobalDecision = {
-    id: randomUUID(),
-    runId: run.id,
-    runName: run.name,
-    source: checkpoint.source,
-    summary: checkpoint.summary,
-    userChoice,
-    timestamp: new Date().toISOString(),
-    tags: checkpoint.tags,
-  };
-  await saveGlobalDecision(globalDecision);
+  // Save global decision — skipped for contradiction source to avoid polluting decisions.json
+  if (checkpoint.source !== "contradiction") {
+    const globalDecision: GlobalDecision = {
+      id: randomUUID(),
+      runId: run.id,
+      runName: run.name,
+      source: checkpoint.source,
+      summary: checkpoint.summary,
+      userChoice,
+      timestamp: new Date().toISOString(),
+      tags: checkpoint.tags,
+    };
+    await saveGlobalDecision(globalDecision);
+  }
 
   // Save run meta
   await saveRunMeta(run);
@@ -358,6 +375,188 @@ export async function checkMaturationCheckpoint(
     return chatMatch && threadMatch && hasPending;
   });
   return match ?? null;
+}
+
+// ── Contradiction detection ───────────────────────────────────
+
+/**
+ * Builds a prompt asking Claude to evaluate if phase output invalidates existing decisions.
+ */
+export function buildContradictionDetectorPrompt(
+  phaseOutput: string,
+  decisions: GlobalDecision[],
+  phaseName: string,
+): string {
+  const truncatedOutput = phaseOutput.slice(0, 2000);
+  const decisionsText = decisions
+    .slice(0, 10)
+    .map((d, i) => `${i + 1}. [${d.source}] ${d.summary} → Choix: ${d.userChoice}`)
+    .join("\n");
+
+  return `Tu es un détecteur de contradictions pour un pipeline de maturation d'idées logicielles.
+
+## Phase analysée : ${phaseName}
+
+## Sortie de la phase (extrait)
+${truncatedOutput}
+
+## Décisions précédemment validées par l'utilisateur
+${decisionsText}
+
+## Ta mission
+Évalue si la sortie de la phase **invalide ou contredit** des décisions déjà validées par l'utilisateur.
+
+Réponds UNIQUEMENT avec un objet JSON valide :
+{
+  "score": 0.0,
+  "summary": "Résumé de la contradiction détectée ou 'Aucune contradiction'"
+}
+
+Règles :
+- score : float entre 0.0 (aucune contradiction) et 1.0 (contradiction forte et claire)
+- Un score >= 0.85 déclenche une alerte à l'utilisateur
+- summary : description concise de la contradiction (ou "Aucune contradiction" si score < 0.85)
+- Ne signale que des contradictions réelles avec les DÉCISIONS VALIDÉES, pas des tensions mineures`;
+}
+
+/**
+ * Parses a ContradictionResult from detector response text.
+ * Returns null on invalid input.
+ */
+export function parseContradictionResponse(text: string): ContradictionResult | null {
+  if (!text || typeof text !== "string") return null;
+
+  let jsonStr: string | null = null;
+
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    jsonStr = codeBlockMatch[1].trim();
+  }
+
+  if (!jsonStr) {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) jsonStr = jsonMatch[0];
+  }
+
+  if (!jsonStr) {
+    log.warn("parseContradictionResponse: no JSON found");
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (err) {
+    log.warn("parseContradictionResponse: parse error", { error: String(err) });
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj.score !== "number" || obj.score < 0 || obj.score > 1) {
+    log.warn("parseContradictionResponse: invalid score", { score: obj.score });
+    return null;
+  }
+
+  if (typeof obj.summary !== "string") {
+    log.warn("parseContradictionResponse: invalid summary");
+    return null;
+  }
+
+  return { score: obj.score, summary: obj.summary };
+}
+
+/**
+ * Detects if phase output contradicts existing decisions.
+ * Returns null when no decisions exist, score is below threshold, or on error (fail-open).
+ */
+export async function detectContradiction(
+  phaseOutput: string,
+  decisions: GlobalDecision[],
+  callClaude: (prompt: string) => Promise<string>,
+  phaseName: string,
+): Promise<ContradictionResult | null> {
+  const effectiveCall = _callClaudeHook ?? callClaude;
+
+  if (decisions.length === 0) return null;
+
+  const prompt = buildContradictionDetectorPrompt(phaseOutput, decisions, phaseName);
+
+  let responseText: string;
+  try {
+    responseText = await effectiveCall(prompt);
+  } catch (err) {
+    log.warn("detectContradiction: callClaude failed (fail-open)", {
+      phaseName,
+      error: String(err),
+    });
+    return null;
+  }
+
+  const result = parseContradictionResponse(responseText);
+  if (!result) return null;
+
+  if (result.score < CONTRADICTION_THRESHOLD) return null;
+
+  return result;
+}
+
+/**
+ * Checks for contradictions between phase output and existing decisions.
+ * Respects circuit breaker (MAX_CONTRADICTION_PAUSES).
+ * Returns null if no contradiction or circuit breaker reached.
+ */
+export async function startContradictionCheckpoint(
+  run: MaturationRun,
+  phaseOutput: string,
+  phaseName: MaturationPhase,
+  callClaude: (prompt: string) => Promise<string>,
+): Promise<CheckpointDecision | null> {
+  const pauseCount = run.contradictionPauseCount ?? 0;
+  if (pauseCount >= MAX_CONTRADICTION_PAUSES) {
+    log.info("startContradictionCheckpoint: circuit breaker reached", {
+      runId: run.id,
+      contradictionPauseCount: pauseCount,
+    });
+    return null;
+  }
+
+  const existingDecisions = await loadGlobalDecisions();
+
+  const contradiction = await detectContradiction(
+    phaseOutput,
+    existingDecisions,
+    callClaude,
+    phaseName,
+  );
+  if (!contradiction) return null;
+
+  const checkpoint: CheckpointDecision = {
+    id: randomUUID(),
+    source: "contradiction",
+    summary: contradiction.summary,
+    options: [
+      "Ignorer cette contradiction et continuer",
+      "Revoir la décision précédente",
+      "Mettre en pause et réévaluer",
+    ],
+    recommendation: "CONTINUE",
+    tags: ["contradiction"],
+  };
+
+  run.pendingCheckpoint = checkpoint;
+  run.contradictionPauseCount = pauseCount + 1;
+  run.updatedAt = new Date().toISOString();
+  await saveRunMeta(run);
+
+  log.info("startContradictionCheckpoint: checkpoint set", {
+    runId: run.id,
+    phaseName,
+    score: contradiction.score,
+  });
+
+  return checkpoint;
 }
 
 // ── Global decisions ──────────────────────────────────────────

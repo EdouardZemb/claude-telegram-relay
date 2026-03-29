@@ -86,6 +86,7 @@ export interface MaturationRun {
   clarification?: ClarificationState;
   pendingCheckpoint?: CheckpointDecision;
   resolvedCheckpoints?: CheckpointDecision[];
+  contradictionPauseCount?: number;
 }
 
 // Quality gate
@@ -114,7 +115,7 @@ export interface ClarificationState {
 // Checkpoint types
 export interface CheckpointDecision {
   id: string;
-  source: "synthesize" | "advocate";
+  source: "synthesize" | "advocate" | "contradiction";
   summary: string;
   options: string[];
   recommendation: "CONTINUE" | "RE-EXPLORE";
