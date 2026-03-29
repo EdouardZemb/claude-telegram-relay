@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   _ghExecForTests,
   _setGhExecHookForTests,
+  _setSyncEnabledForTests,
   addToProject,
   chunkDocument,
   closeIssue,
@@ -12,6 +13,9 @@ import {
   getRunIssue,
   postDocument,
   saveEntity,
+  syncPhaseComplete,
+  syncRunComplete,
+  syncRunStart,
 } from "../../src/github-sync.ts";
 
 describe("github-sync config", () => {
@@ -256,5 +260,157 @@ describe("document operations", () => {
     const ok = postDocument(42, "SPEC-UNIFIEE", bigContent);
     expect(ok).toBe(true);
     expect(calls.length).toBeGreaterThan(1);
+  });
+});
+
+describe("high-level sync API", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _setSyncEnabledForTests(undefined);
+  });
+
+  const makeMockSupabase = () => {
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    const saved: any[] = [];
+    return {
+      sb: {
+        from: () => ({
+          // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+          upsert: (row: any) => {
+            saved.push(row);
+            return { data: row, error: null };
+          },
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                is: () => ({ maybeSingle: () => ({ data: null, error: null }) }),
+                eq: () => ({ maybeSingle: () => ({ data: null, error: null }) }),
+              }),
+            }),
+          }),
+        }),
+      },
+      saved,
+    };
+  };
+
+  it("V16: syncRunStart creates parent issue and saves entity", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      if (args[1] === "create") {
+        return { stdout: "https://github.com/o/r/issues/10", stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "item-add") {
+        return { stdout: "PVTI_123", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    const { sb, saved } = makeMockSupabase();
+    await syncRunStart(
+      // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+      sb as any,
+      {
+        id: "run-1",
+        name: "test-run",
+        rawInput: "Build something",
+      },
+      "maturation",
+    );
+
+    expect(ghCalls.some((c) => c[1] === "create")).toBe(true);
+    expect(saved.length).toBeGreaterThan(0);
+    expect(saved[0].run_id).toBe("run-1");
+    expect(saved[0].issue_number).toBe(10);
+  });
+
+  it("V17: syncPhaseComplete creates sub-issue and posts documents", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      if (args[1] === "create") {
+        return { stdout: "https://github.com/o/r/issues/11", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    // Mock: parent issue exists
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    const saved: any[] = [];
+    const sb = {
+      from: () => ({
+        // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+        upsert: (row: any) => {
+          saved.push(row);
+          return { data: row, error: null };
+        },
+        select: () => ({
+          // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+          eq: (_col: string, _val: any) => ({
+            // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+            eq: (_col2: string, _val2: any) => ({
+              is: () => ({
+                maybeSingle: () => ({
+                  data: {
+                    run_id: "run-1",
+                    issue_number: 10,
+                    issue_url: "https://github.com/o/r/issues/10",
+                  },
+                  error: null,
+                }),
+              }),
+              eq: () => ({
+                maybeSingle: () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    await syncPhaseComplete(
+      // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+      sb as any,
+      "run-1",
+      "understand",
+      "maturation",
+      ["Doc content"],
+      "ambiguity:4",
+    );
+
+    const creates = ghCalls.filter((c) => c[1] === "create");
+    expect(creates.length).toBeGreaterThanOrEqual(1);
+    const comments = ghCalls.filter((c) => c[1] === "comment");
+    expect(comments.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("V18: syncRunComplete closes the parent issue", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    const sb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              is: () => ({
+                maybeSingle: () => ({
+                  data: { run_id: "run-1", issue_number: 10 },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    await syncRunComplete(sb as any, "run-1", "done");
+    const closes = ghCalls.filter((c) => c[1] === "close");
+    expect(closes).toHaveLength(1);
   });
 });
