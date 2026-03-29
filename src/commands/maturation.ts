@@ -302,6 +302,16 @@ export async function runMaturationPipeline(
     { parse_mode: "HTML", reply_markup: validationKb },
   );
 
+  // Fire-and-forget GitHub sync: close the run issue on maturation completion
+  if (bctx.supabase) {
+    const sb = bctx.supabase;
+    import("../github-sync.ts").then(({ syncRunComplete }) => {
+      syncRunComplete(sb, run.id, "maturation_ready").catch((err: unknown) =>
+        log.warn("GitHub sync failed for run complete", { error: String(err) }),
+      );
+    });
+  }
+
   return `MATURATION_READY:${run.name}:${run.id}`;
 }
 
