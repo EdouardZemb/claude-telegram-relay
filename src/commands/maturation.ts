@@ -263,6 +263,13 @@ export async function runMaturationPipeline(
     }
   }
 
+  // Show validation keyboard when maturation is complete
+  const validationKb = buildValidationKeyboard(run.id);
+  await onProgress(
+    formatRunSummary(run) + "\n\n<b>Maturation terminee</b> — que souhaitez-vous faire ?",
+    { parse_mode: "HTML", reply_markup: validationKb },
+  );
+
   return `MATURATION_READY:${run.name}:${run.id}`;
 }
 
@@ -457,8 +464,8 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
       "maturation",
       chatId,
       async () => {
-        const onProgress: OnProgress = async (msg: string) => {
-          await sendProgressMessage(chatId, threadId, msg);
+        const onProgress: OnProgress = async (msg: string, extra?: Record<string, unknown>) => {
+          await sendProgressMessage(chatId, threadId, msg, extra);
         };
         return await runMaturationPipeline(run, onProgress, bctx);
       },
