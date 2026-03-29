@@ -67,6 +67,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `logger.ts` | Structured logger: JSON (production) / colored (dev), correlation IDs, log level filtering |
 | `alerts.ts` | Anomaly detection: stuck tasks, rework spikes, schedule slips |
 | `doc-utils.ts` | Documentation parsing utilities: module/command extraction, test count, gap detection |
+| `doc-auto-update.ts` | Automatic doc update rules: 3-tier stratification (Tier1 auto-merge, Tier2 PR+notify, Tier3 excluded), classifyDoc, buildDocUpdatePlan, anti-recursion gate |
 | `documents.ts` | Document management: extraction, classification, CRUD, semantic search |
 | `document-sharding.ts` | Intelligent context cache: splits large docs, loads relevant shards |
 | `projects.ts` | Multi-project CRUD with topic-based routing |
