@@ -30,6 +30,7 @@ ALLOWLIST=(
   "src/commands/exploration.ts"
   "src/commands/help.ts"
   "src/commands/jobs.ts"
+  "src/commands/maturation.ts"
   "src/commands/memory-cmds.ts"
   "src/commands/profile.ts"
   "src/commands/project.ts"
