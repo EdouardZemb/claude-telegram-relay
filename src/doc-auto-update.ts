@@ -77,12 +77,13 @@ export function classifyDoc(docPath: string): DocTier {
 }
 
 /**
- * Anti-recursion gate (barrier 1/3): returns true only when src/** files are
- * present in the changed-files list. Prevents doc-only commits from triggering
- * another doc update cycle.
+ * Anti-recursion gate (barrier 1/3): returns true only when src/** or config/**
+ * files are present in the changed-files list.
+ * Prevents doc-only commits from triggering another doc update cycle.
+ * Note: scripts/ is excluded intentionally — doc-auto-update.ts itself lives there.
  */
 export function shouldTriggerUpdate(changedFiles: string[]): boolean {
-  return changedFiles.some((f) => f.startsWith("src/"));
+  return changedFiles.some((f) => f.startsWith("src/") || f.startsWith("config/"));
 }
 
 /** Plan describing which stale documents need updating and how to handle each */

@@ -108,9 +108,13 @@ async function ensureLabel(label: string): Promise<void> {
   if (_ensuredLabels.has(label)) return;
 
   const { githubRepo } = getConfig();
-  const result = await ghExec(["label", "create", label, "--repo", githubRepo, "--force"]);
+  const result = await ghExec(["label", "create", label, "--repo", githubRepo]);
   if (result.exitCode === 0) {
     _ensuredLabels.add(label);
+  } else if (result.stderr.toLowerCase().includes("already exists")) {
+    // Label already exists (possibly with custom color/description) — don't overwrite
+    _ensuredLabels.add(label);
+    log.debug("Label already exists, keeping custom definition", { label });
   } else {
     log.warn("Failed to ensure label, will try issue creation anyway", {
       label,
@@ -429,38 +433,43 @@ export async function syncPhaseComplete(
     }
 
     const existingPhaseIssue = await getPhaseIssue(supabase, runId, phase);
-    let phaseIssueNumber: number;
-
     if (existingPhaseIssue) {
-      phaseIssueNumber = existingPhaseIssue.issue_number;
-    } else {
-      const title = `[${phase}] ${pipelineType === "maturation" ? "Maturation" : "V3"} — #${parentIssue.issue_number}`;
-      const body = [
-        `Phase: **${phase}**`,
-        `Parent: #${parentIssue.issue_number}`,
-        verdict ? `Verdict: ${verdict}` : "",
-        "",
-        `Part of ${parentIssue.issue_url}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const result = await createIssue(title, body, [pipelineType, `phase:${phase}`]);
-      if (!result) return;
-
-      phaseIssueNumber = result.number;
-      await saveEntity(supabase, {
-        run_id: runId,
-        pipeline_type: pipelineType,
-        entity_type: "phase_issue",
+      // Crash recovery: issue was already created and closed — skip to avoid duplicate documents
+      log.debug("Phase issue already exists, skipping (crash recovery)", {
+        runId,
         phase,
-        issue_number: result.number,
-        issue_url: result.url,
-        project_item_id: null,
+        issueNumber: existingPhaseIssue.issue_number,
       });
-
-      log.info("Created phase sub-issue", { runId, phase, issueNumber: result.number });
+      return;
     }
+
+    const title = `[${phase}] ${pipelineType === "maturation" ? "Maturation" : "V3"} — #${parentIssue.issue_number}`;
+    const body = [
+      `Phase: **${phase}**`,
+      `Parent: #${parentIssue.issue_number}`,
+      verdict ? `Verdict: ${verdict}` : "",
+      "",
+      `Part of ${parentIssue.issue_url}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const result = await createIssue(title, body, [pipelineType, `phase:${phase}`]);
+    if (!result) return;
+
+    const phaseIssueNumber = result.number;
+    const phaseProjectItemId = await addToProject(result.url);
+    await saveEntity(supabase, {
+      run_id: runId,
+      pipeline_type: pipelineType,
+      entity_type: "phase_issue",
+      phase,
+      issue_number: result.number,
+      issue_url: result.url,
+      project_item_id: phaseProjectItemId,
+    });
+
+    log.info("Created phase sub-issue", { runId, phase, issueNumber: result.number });
 
     for (const content of documentContents) {
       if (content.trim()) {

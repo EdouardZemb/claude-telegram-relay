@@ -8,6 +8,7 @@
 import { Composer, type Context, InlineKeyboard } from "grammy";
 import type { BotContext } from "../bot-context.ts";
 import { escapeHtml } from "../bot-context.ts";
+import { syncPhaseComplete, syncRunComplete, syncRunStart } from "../github-sync.ts";
 import { createLogger } from "../logger.ts";
 import { initRun, loadRunMeta, saveRunMeta } from "../maturation/documents.ts";
 import { handlePhaseResult } from "../maturation/engine.ts";
@@ -177,26 +178,24 @@ export async function runMaturationPipeline(
     // Fire-and-forget GitHub sync
     if (bctx.supabase) {
       const sb = bctx.supabase;
-      import("../github-sync.ts").then(({ syncPhaseComplete }) => {
-        const docContents = result.documents.map((docPath: string) => {
-          try {
-            return Bun.file(docPath).text();
-          } catch {
-            return Promise.resolve("");
-          }
-        });
-        Promise.all(docContents).then((contents) => {
-          syncPhaseComplete(
-            sb,
-            run.id,
-            phaseName,
-            "maturation",
-            contents.filter(Boolean),
-            result.verdict,
-          ).catch((err: unknown) =>
-            log.warn("GitHub sync failed for phase", { phase: phaseName, error: String(err) }),
-          );
-        });
+      const docContents = result.documents.map((docPath: string) => {
+        try {
+          return Bun.file(docPath).text();
+        } catch {
+          return Promise.resolve("");
+        }
+      });
+      Promise.all(docContents).then((contents) => {
+        syncPhaseComplete(
+          sb,
+          run.id,
+          phaseName,
+          "maturation",
+          contents.filter(Boolean),
+          result.verdict,
+        ).catch((err: unknown) =>
+          log.warn("GitHub sync failed for phase", { phase: phaseName, error: String(err) }),
+        );
       });
     }
 
@@ -302,6 +301,14 @@ export async function runMaturationPipeline(
     { parse_mode: "HTML", reply_markup: validationKb },
   );
 
+  // Fire-and-forget GitHub sync for run complete
+  if (bctx.supabase) {
+    const sb = bctx.supabase;
+    syncRunComplete(sb, run.id, "success").catch((err: unknown) =>
+      log.warn("GitHub sync failed for run complete", { error: String(err) }),
+    );
+  }
+
   return `MATURATION_READY:${run.name}:${run.id}`;
 }
 
@@ -340,26 +347,24 @@ export async function resumeMaturationAfterClarify(
       // Fire-and-forget GitHub sync
       if (bctx.supabase) {
         const sb = bctx.supabase;
-        import("../github-sync.ts").then(({ syncPhaseComplete }) => {
-          const docContents = result.documents.map((docPath: string) => {
-            try {
-              return Bun.file(docPath).text();
-            } catch {
-              return Promise.resolve("");
-            }
-          });
-          Promise.all(docContents).then((contents) => {
-            syncPhaseComplete(
-              sb,
-              run.id,
-              "understand",
-              "maturation",
-              contents.filter(Boolean),
-              result.verdict,
-            ).catch((err: unknown) =>
-              log.warn("GitHub sync failed for phase", { phase: "understand", error: String(err) }),
-            );
-          });
+        const docContents = result.documents.map((docPath: string) => {
+          try {
+            return Bun.file(docPath).text();
+          } catch {
+            return Promise.resolve("");
+          }
+        });
+        Promise.all(docContents).then((contents) => {
+          syncPhaseComplete(
+            sb,
+            run.id,
+            "understand",
+            "maturation",
+            contents.filter(Boolean),
+            result.verdict,
+          ).catch((err: unknown) =>
+            log.warn("GitHub sync failed for phase", { phase: "understand", error: String(err) }),
+          );
         });
       }
 
@@ -474,11 +479,9 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
     // Fire-and-forget GitHub sync for run start
     if (bctx.supabase) {
       const sb = bctx.supabase;
-      import("../github-sync.ts").then(({ syncRunStart }) => {
-        syncRunStart(sb, { id: run.id, name: run.name, rawInput: description }, "maturation").catch(
-          (err: unknown) => log.warn("GitHub sync failed for run start", { error: String(err) }),
-        );
-      });
+      syncRunStart(sb, { id: run.id, name: run.name, rawInput: description }, "maturation").catch(
+        (err: unknown) => log.warn("GitHub sync failed for run start", { error: String(err) }),
+      );
     }
 
     const statusBar = buildMaturationStatusBar(run);
