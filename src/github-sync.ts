@@ -124,3 +124,40 @@ export function closeIssue(issueNumber: number): boolean {
   }
   return true;
 }
+
+// ============================================================
+// PROJECT BOARD OPERATIONS
+// ============================================================
+
+export function addToProject(issueUrl: string): string | null {
+  const { githubProjectNumber } = getConfig();
+  if (!githubProjectNumber) {
+    log.debug("No GITHUB_PROJECT_NUMBER configured, skipping project board");
+    return null;
+  }
+
+  const owner = getConfig().githubRepo.split("/")[0];
+  const result = ghExec([
+    "project",
+    "item-add",
+    String(githubProjectNumber),
+    "--owner",
+    owner,
+    "--url",
+    issueUrl,
+    "--format",
+    "json",
+  ]);
+
+  if (result.exitCode !== 0) {
+    log.error("Failed to add issue to project", { issueUrl, stderr: result.stderr.slice(0, 300) });
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(result.stdout);
+    return data.id || result.stdout.trim();
+  } catch {
+    return result.stdout.trim() || null;
+  }
+}

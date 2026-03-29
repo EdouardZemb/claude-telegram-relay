@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   _ghExecForTests,
   _setGhExecHookForTests,
+  addToProject,
   closeIssue,
   commentOnIssue,
   createIssue,
@@ -101,5 +102,37 @@ describe("issue operations", () => {
     const ok = closeIssue(42);
     expect(ok).toBe(true);
     expect(calls[0]).toContain("close");
+  });
+});
+
+describe("project board operations", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+  });
+
+  it("V8: addToProject calls gh project item-add and returns item ID", async () => {
+    const { _resetConfigForTesting } = await import("../../src/config.ts");
+    process.env.GITHUB_PROJECT_NUMBER = "1";
+    _resetConfigForTesting();
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "PVTI_abc123", stderr: "", exitCode: 0 };
+    });
+    const itemId = addToProject("https://github.com/o/r/issues/42");
+    delete process.env.GITHUB_PROJECT_NUMBER;
+    _resetConfigForTesting();
+    expect(itemId).toBe("PVTI_abc123");
+    expect(calls[0]).toContain("item-add");
+  });
+
+  it("V9: addToProject returns null when no project number configured", () => {
+    _setGhExecHookForTests(() => ({
+      stdout: "",
+      stderr: "no project",
+      exitCode: 1,
+    }));
+    const itemId = addToProject("https://github.com/o/r/issues/42");
+    expect(itemId).toBeNull();
   });
 });
