@@ -21,8 +21,19 @@ export interface AgentFeedbackSignal {
   agentRole: string;
   outcome: "GO" | "GO_WITH_CHANGES" | "NO-GO" | "APPROVED" | "CHANGES_REQUESTED" | "FAILED";
   timestamp: string;
-  /** Phase that emitted the signal (F-EC-1: "spec" and "discuss" added) */
-  source: "challenge" | "review" | "implement" | "explore" | "spec" | "discuss";
+  /** Phase that emitted the signal (F-EC-1: "spec" and "discuss" added; mat-* for maturation) */
+  source:
+    | "challenge"
+    | "review"
+    | "implement"
+    | "explore"
+    | "spec"
+    | "discuss"
+    | "mat-explore"
+    | "mat-confront"
+    | "mat-synthesize"
+    | "mat-advocate"
+    | "mat-understand";
   details?: string;
 }
 
@@ -280,6 +291,21 @@ export function generateOverlayText(
     discuss: {
       default: `ATTENTION : ${failureCount} echecs recents lors de la phase discussion. Assure-toi de bien capturer les decisions et contraintes avant de passer a la specification.`,
     },
+    "mat-explore": {
+      default: `ATTENTION : ${failureCount} phases exploration maturation recentes insuffisantes. Approfondi l'analyse des alternatives et des analogies pour enrichir la spec.`,
+    },
+    "mat-confront": {
+      default: `ATTENTION : ${failureCount} critiques maturation recentes ont detecte des showstoppers. Sois plus rigoureux dans l'identification des risques techniques et produit.`,
+    },
+    "mat-synthesize": {
+      default: `ATTENTION : ${failureCount} syntheses maturation recentes ont un score de maturite insuffisant. Assure-toi que la SPEC-UNIFIEE couvre tous les aspects critiques avec precision.`,
+    },
+    "mat-advocate": {
+      default: `ATTENTION : ${failureCount} phases avocat-du-diable maturation ont genere des showstoppers. Verifie les hypotheses fondamentales et les risques bloquants avant de conclure.`,
+    },
+    "mat-understand": {
+      default: `ATTENTION : ${failureCount} phases comprehension maturation recentes avec score d'ambiguite eleve. Ameliore la precision des questions de clarification.`,
+    },
   };
 
   const sourceTemplates = templates[source] || templates.challenge;
@@ -288,6 +314,71 @@ export function generateOverlayText(
     sourceTemplates.default ||
     `ATTENTION : ${failureCount} echecs recents detectes. Ameliore la qualite de ton output.`
   );
+}
+
+// ── Maturation filesystem signals (F-SC-1) ───────────────────
+
+/**
+ * Build feedback signals from maturation filesystem runs.
+ * Resolves F-SC-1: maturation doesn't emit to Supabase agent_events,
+ * so we read meta.json files directly from .maturation/runs/.
+ */
+export async function buildMaturationSignals(): Promise<AgentFeedbackSignal[]> {
+  try {
+    const { listRuns } = await import("./maturation.ts");
+    const runs = await listRuns();
+    const signals: AgentFeedbackSignal[] = [];
+
+    for (const run of runs) {
+      const advocateStep = run.steps.advocate;
+      if (
+        advocateStep &&
+        advocateStep.status === "ok" &&
+        advocateStep.verdict?.toUpperCase().includes("SHOWSTOPPER")
+      ) {
+        signals.push({
+          agentRole: "devils-advocate",
+          outcome: "FAILED",
+          timestamp: advocateStep.completedAt ?? run.updatedAt,
+          source: "mat-advocate",
+          details: advocateStep.verdict,
+        });
+      }
+
+      const synthesizeStep = run.steps.synthesize;
+      if (synthesizeStep && synthesizeStep.status === "ok" && synthesizeStep.score !== undefined) {
+        if (synthesizeStep.score < 7) {
+          signals.push({
+            agentRole: "synthesizer",
+            outcome: "GO_WITH_CHANGES",
+            timestamp: synthesizeStep.completedAt ?? run.updatedAt,
+            source: "mat-synthesize",
+            details: `Score maturite ${synthesizeStep.score}/10`,
+          });
+        }
+      }
+
+      const confrontStep = run.steps.confront;
+      if (
+        confrontStep &&
+        confrontStep.status === "ok" &&
+        confrontStep.verdict?.toUpperCase().includes("SHOWSTOPPER")
+      ) {
+        signals.push({
+          agentRole: "confront-critic",
+          outcome: "FAILED",
+          timestamp: confrontStep.completedAt ?? run.updatedAt,
+          source: "mat-confront",
+          details: confrontStep.verdict,
+        });
+      }
+    }
+
+    return signals;
+  } catch (err) {
+    log.warn("buildMaturationSignals: error reading runs", { error: String(err) });
+    return [];
+  }
 }
 
 // ── Orchestrator ─────────────────────────────────────────────
@@ -313,10 +404,14 @@ export async function runFeedbackLoop(): Promise<FeedbackLoopResult> {
   // Step 1: Expire old overlays
   const expiredCount = expireOverlays();
 
-  // Step 2: Fetch recent signals
+  // Step 2: Fetch recent signals (SDD + maturation filesystem)
   let signals: AgentFeedbackSignal[];
   try {
-    signals = await deps.fetchSignals();
+    const [sddSignals, matSignals] = await Promise.all([
+      deps.fetchSignals(),
+      buildMaturationSignals(),
+    ]);
+    signals = [...sddSignals, ...matSignals];
   } catch (err) {
     log.error("Failed to fetch feedback signals", { error: String(err) });
     return { skipped: false, overlaysCreated: 0, expiredCount, patternsDetected: 0 };

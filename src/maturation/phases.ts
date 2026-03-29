@@ -6,7 +6,9 @@
  */
 
 import { spawnClaude } from "../agent.ts";
+import { isFeatureEnabled } from "../feature-flags.ts";
 import { createLogger } from "../logger.ts";
+import { buildEnrichedPrompt } from "../prompt-overlay.ts";
 import { buildPhasePrompt, getAgentConfig } from "./agents.ts";
 import { getRunDir, readDocument, writeDocument } from "./documents.ts";
 import type { PhaseResult } from "./engine.ts";
@@ -14,6 +16,34 @@ import { extractAmbiguityScore, extractMaturityScore, extractShowstopper } from 
 import type { MaturationDocType, MaturationRun } from "./types.ts";
 
 const log = createLogger("maturation/phases");
+
+// ── Test hook ─────────────────────────────────────────────────
+
+let _featureFlagHook: ((flag: string) => boolean) | undefined;
+
+/** @internal — for tests: override feature flag checks without mock.module() */
+export function _setFeatureFlagHookForTests(fn: ((flag: string) => boolean) | undefined): void {
+  _featureFlagHook = fn;
+}
+
+function checkFeatureFlag(flag: string): boolean {
+  if (_featureFlagHook !== undefined) return _featureFlagHook(flag);
+  return isFeatureEnabled(flag);
+}
+
+let _enrichPromptHook: ((role: string, base: string) => string) | undefined;
+
+/** @internal — for tests: override buildEnrichedPrompt without mock.module() */
+export function _setEnrichPromptHookForTests(
+  fn: ((role: string, base: string) => string) | undefined,
+): void {
+  _enrichPromptHook = fn;
+}
+
+function callBuildEnrichedPrompt(role: string, base: string): string {
+  if (_enrichPromptHook !== undefined) return _enrichPromptHook(role, base);
+  return buildEnrichedPrompt(role, base);
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -34,10 +64,16 @@ async function collectDocuments(
   return docs;
 }
 
+interface SpawnAgentResult {
+  docPath: string;
+  overlaysUsed: boolean;
+}
+
 /**
- * Spawn a single agent and write its output. Returns the written doc path, or null on failure.
+ * Spawn a single agent and write its output.
+ * Returns SpawnAgentResult with docPath and overlaysUsed, or null on failure.
  */
-async function spawnAgent(run: MaturationRun, role: string): Promise<string | null> {
+async function spawnAgent(run: MaturationRun, role: string): Promise<SpawnAgentResult | null> {
   const config = getAgentConfig(role);
   if (!config) {
     log.warn("unknown agent role", { role });
@@ -60,7 +96,7 @@ async function spawnAgent(run: MaturationRun, role: string): Promise<string | nu
     // checkpoint module may not be available, ignore
   }
 
-  const prompt = buildPhasePrompt(role, {
+  const basePrompt = buildPhasePrompt(role, {
     rawInput: run.rawInput,
     runDir,
     documents,
@@ -71,6 +107,10 @@ async function spawnAgent(run: MaturationRun, role: string): Promise<string | nu
     })),
     globalDecisions,
   });
+
+  const overlaysEnabled = checkFeatureFlag("prompt_feedback_loop");
+  const prompt = overlaysEnabled ? callBuildEnrichedPrompt(role, basePrompt) : basePrompt;
+  const overlaysUsed = overlaysEnabled && prompt !== basePrompt;
 
   const result = await spawnClaude({
     prompt,
@@ -85,7 +125,7 @@ async function spawnAgent(run: MaturationRun, role: string): Promise<string | nu
 
   try {
     const docPath = await writeDocument(run.id, config.outputDoc, result.stdout);
-    return docPath;
+    return { docPath, overlaysUsed };
   } catch (err) {
     log.warn("failed to write agent output", { role, error: String(err) });
     return null;
@@ -98,9 +138,9 @@ async function spawnAgent(run: MaturationRun, role: string): Promise<string | nu
  * Understand phase: spawns the understander agent and extracts the ambiguity score.
  */
 export async function runUnderstandPhase(run: MaturationRun): Promise<PhaseResult> {
-  const docPath = await spawnAgent(run, "understander");
+  const agentResult = await spawnAgent(run, "understander");
 
-  if (!docPath) {
+  if (!agentResult) {
     return { status: "failed", documents: [] };
   }
 
@@ -109,9 +149,10 @@ export async function runUnderstandPhase(run: MaturationRun): Promise<PhaseResul
 
   return {
     status: "ok",
-    documents: [docPath],
+    documents: [agentResult.docPath],
     verdict: `ambiguity:${ambiguityScore}`,
     score: ambiguityScore,
+    overlaysUsed: agentResult.overlaysUsed,
   };
 }
 
@@ -125,9 +166,11 @@ export async function runExplorePhase(run: MaturationRun): Promise<PhaseResult> 
   const results = await Promise.allSettled(roles.map((role) => spawnAgent(run, role)));
 
   const documents: string[] = [];
+  let overlaysUsed = false;
   for (const result of results) {
     if (result.status === "fulfilled" && result.value !== null) {
-      documents.push(result.value);
+      documents.push(result.value.docPath);
+      if (result.value.overlaysUsed) overlaysUsed = true;
     }
   }
 
@@ -136,7 +179,7 @@ export async function runExplorePhase(run: MaturationRun): Promise<PhaseResult> 
     return { status: "failed", documents: [] };
   }
 
-  return { status: "ok", documents };
+  return { status: "ok", documents, overlaysUsed };
 }
 
 /**
@@ -149,9 +192,11 @@ export async function runConfrontPhase(run: MaturationRun): Promise<PhaseResult>
   const results = await Promise.allSettled(roles.map((role) => spawnAgent(run, role)));
 
   const documents: string[] = [];
+  let overlaysUsed = false;
   for (const result of results) {
     if (result.status === "fulfilled" && result.value !== null) {
-      documents.push(result.value);
+      documents.push(result.value.docPath);
+      if (result.value.overlaysUsed) overlaysUsed = true;
     }
   }
 
@@ -160,16 +205,16 @@ export async function runConfrontPhase(run: MaturationRun): Promise<PhaseResult>
     return { status: "failed", documents: [] };
   }
 
-  return { status: "ok", documents };
+  return { status: "ok", documents, overlaysUsed };
 }
 
 /**
  * Synthesize phase: spawns the synthesizer agent and extracts the maturity score.
  */
 export async function runSynthesizePhase(run: MaturationRun): Promise<PhaseResult> {
-  const docPath = await spawnAgent(run, "synthesizer");
+  const agentResult = await spawnAgent(run, "synthesizer");
 
-  if (!docPath) {
+  if (!agentResult) {
     return { status: "failed", documents: [] };
   }
 
@@ -178,8 +223,9 @@ export async function runSynthesizePhase(run: MaturationRun): Promise<PhaseResul
 
   return {
     status: "ok",
-    documents: [docPath],
+    documents: [agentResult.docPath],
     score: maturityScore,
+    overlaysUsed: agentResult.overlaysUsed,
   };
 }
 
@@ -187,9 +233,9 @@ export async function runSynthesizePhase(run: MaturationRun): Promise<PhaseResul
  * Advocate phase: spawns the devil's advocate agent and detects showstoppers.
  */
 export async function runAdvocatePhase(run: MaturationRun): Promise<PhaseResult> {
-  const docPath = await spawnAgent(run, "devils-advocate");
+  const agentResult = await spawnAgent(run, "devils-advocate");
 
-  if (!docPath) {
+  if (!agentResult) {
     return { status: "failed", documents: [] };
   }
 
@@ -205,7 +251,8 @@ export async function runAdvocatePhase(run: MaturationRun): Promise<PhaseResult>
 
   return {
     status: "ok",
-    documents: [docPath],
+    documents: [agentResult.docPath],
     verdict,
+    overlaysUsed: agentResult.overlaysUsed,
   };
 }

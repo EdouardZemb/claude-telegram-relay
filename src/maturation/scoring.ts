@@ -1,9 +1,18 @@
+import { getConfig } from "../config.ts";
 import { createLogger } from "../logger.ts";
 import type { GateResult } from "./types.ts";
 
 const log = createLogger("maturation/scoring");
 
-const MATURITY_THRESHOLD = 7;
+const MATURITY_THRESHOLD_DEFAULT = 7;
+
+function getMaturityThreshold(): number {
+  try {
+    return getConfig().maturityThreshold;
+  } catch {
+    return MATURITY_THRESHOLD_DEFAULT;
+  }
+}
 
 const MATURITY_RE =
   /(?:score\s*(?:de\s*)?maturit[eé]\s*[:=]?\s*\**|score\s*[:=]\s*\**)(\d+(?:\.\d+)?)\s*\/\s*10/i;
@@ -43,11 +52,12 @@ export function evaluateGate(
     return { passed: false, score, issues, recommendation: "human" };
   }
 
-  if (score >= MATURITY_THRESHOLD) {
+  const threshold = getMaturityThreshold();
+  if (score >= threshold) {
     return { passed: true, score, issues, recommendation: "advance" };
   }
 
-  issues.push(`Score ${score}/10 < seuil ${MATURITY_THRESHOLD}/10`);
+  issues.push(`Score ${score}/10 < seuil ${threshold}/10`);
 
   if (currentIteration < maxIterations) {
     return { passed: false, score, issues, recommendation: "loop" };

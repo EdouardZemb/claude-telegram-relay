@@ -69,6 +69,8 @@ export interface MaturationStep {
   jobId?: string;
   startedAt?: string;
   completedAt?: string;
+  /** V2.5: true if prompt overlays were active during agent execution */
+  overlaysUsed?: boolean;
 }
 
 export interface MaturationRun {

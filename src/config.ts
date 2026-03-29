@@ -54,6 +54,8 @@ const OptionalEnvSchema = z.object({
   HEARTBEAT_DEBUG: z.string().default(""),
   TMPDIR: z.string().default(""),
   MATURATION_DIR: z.string().default(""),
+  MATURITY_THRESHOLD: z.coerce.number().default(7),
+  QUORUM_THRESHOLD: z.coerce.number().default(2),
 });
 
 // ============================================================
@@ -95,6 +97,8 @@ export type AppConfig = {
   heartbeatDebug: string;
   tmpDir: string;
   maturationDir: string;
+  maturityThreshold: number;
+  quorumThreshold: number;
 };
 
 // ============================================================
@@ -163,6 +167,8 @@ export function getConfig(): AppConfig {
     heartbeatDebug: optionalResult.HEARTBEAT_DEBUG,
     tmpDir: optionalResult.TMPDIR,
     maturationDir: optionalResult.MATURATION_DIR,
+    maturityThreshold: optionalResult.MATURITY_THRESHOLD,
+    quorumThreshold: optionalResult.QUORUM_THRESHOLD,
   };
 
   return _config;

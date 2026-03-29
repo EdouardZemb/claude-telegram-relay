@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { _resetConfigForTesting } from "../../src/config.ts";
 import {
   evaluateGate,
   extractAmbiguityScore,
@@ -71,6 +72,31 @@ describe("maturation/scoring", () => {
       expect(result.passed).toBe(false);
       expect(result.recommendation).toBe("human");
       expect(result.issues).toContain("Critical flaw");
+    });
+
+    describe("AR2: configurable threshold", () => {
+      beforeEach(() => {
+        _resetConfigForTesting();
+      });
+
+      afterEach(() => {
+        delete process.env.MATURITY_THRESHOLD;
+        _resetConfigForTesting();
+      });
+
+      it("V5: uses custom threshold from env", () => {
+        process.env.MATURITY_THRESHOLD = "9";
+        // Score 8 should fail with threshold 9
+        const result = evaluateGate(8, null, 0, 2);
+        expect(result.passed).toBe(false);
+        expect(result.issues[0]).toContain("seuil 9/10");
+      });
+
+      it("V6: falls back to default threshold 7 without env", () => {
+        // No MATURITY_THRESHOLD set, getConfig() will throw (required vars absent)
+        const result = evaluateGate(7, null, 0, 2);
+        expect(result.passed).toBe(true);
+      });
     });
   });
 });

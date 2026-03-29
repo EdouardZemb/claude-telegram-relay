@@ -8,6 +8,7 @@
 import { Composer, type Context } from "grammy";
 import type { BotContext, Reminder } from "../bot-context.ts";
 import { createLogger } from "../logger.ts";
+import { formatMaturationStats, getMaturationStats } from "../maturation.ts";
 import {
   archiveIdea,
   clusterMemories,
@@ -48,7 +49,10 @@ export default function memoryCmds(bctx: BotContext): Composer<Context> {
       await ctx.replyWithChatAction("typing");
       try {
         const stats = await memoryHealthStats(bctx.supabase);
-        await bctx.sendResponseHtml(ctx, formatMemoryHealth(stats));
+        const matStats = await getMaturationStats();
+        const memSection = formatMemoryHealth(stats);
+        const matSection = formatMaturationStats(matStats);
+        await bctx.sendResponseHtml(ctx, `${memSection}\n\n${matSection}`);
       } catch (error) {
         log.error("Brain health error", { error: String(error) });
         await ctx.reply("Erreur lors du calcul des metriques memoire.", bctx.threadOpts(ctx));
