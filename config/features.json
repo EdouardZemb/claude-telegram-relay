@@ -14,5 +14,6 @@
   "sdd_pipeline_watchdog": true,
   "agent_context_injection": false,
   "pipeline_v3": false,
-  "github_sync": false
+  "github_sync": false,
+  "doc_auto_update": false
 }

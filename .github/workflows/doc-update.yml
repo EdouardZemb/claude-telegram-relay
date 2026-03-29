@@ -1,0 +1,47 @@
+name: Auto Doc Update
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+
+jobs:
+  doc-update:
+    runs-on: [self-hosted, linux]
+    # Prevent concurrent runs to avoid branch conflicts
+    concurrency:
+      group: doc-auto-update
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check doc_auto_update feature flag
+        id: check_flag
+        run: |
+          ENABLED=$(bun -e "
+            try {
+              const f = require('./config/features.json');
+              console.log(f.doc_auto_update !== false ? 'true' : 'false');
+            } catch { console.log('false'); }
+          " 2>/dev/null || echo "false")
+          echo "ENABLED=$ENABLED" >> "\$GITHUB_OUTPUT"
+          echo "[doc-update] doc_auto_update=$ENABLED"
+
+      - name: Run doc auto-update
+        if: steps.check_flag.outputs.ENABLED == 'true'
+        run: bun run scripts/doc-auto-update.ts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+
+      - name: Doc update skipped (flag disabled)
+        if: steps.check_flag.outputs.ENABLED != 'true'
+        run: echo "[doc-update] doc_auto_update flag is disabled — skipping automatic documentation update"
