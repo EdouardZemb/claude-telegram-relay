@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
   _ghExecForTests,
+  _resetEnsuredLabelsForTests,
   _setGhExecHookForTests,
   _setSyncEnabledForTests,
   addToProject,
@@ -60,25 +61,25 @@ describe("github-sync core", () => {
   });
 
   describe("ghExec", () => {
-    it("V2: uses test hook when set", () => {
+    it("V2: uses test hook when set", async () => {
       const calls: string[][] = [];
       _setGhExecHookForTests((args) => {
         calls.push(args);
         return { stdout: "ok", stderr: "", exitCode: 0 };
       });
-      const result: GhResult = _ghExecForTests(["issue", "list"]);
+      const result: GhResult = await _ghExecForTests(["issue", "list"]);
       expect(calls).toHaveLength(1);
       expect(calls[0]).toEqual(["issue", "list"]);
       expect(result.stdout).toBe("ok");
     });
 
-    it("V3: returns exitCode from hook", () => {
+    it("V3: returns exitCode from hook", async () => {
       _setGhExecHookForTests(() => ({
         stdout: "",
         stderr: "not found",
         exitCode: 1,
       }));
-      const result = _ghExecForTests(["issue", "view", "999"]);
+      const result = await _ghExecForTests(["issue", "view", "999"]);
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toBe("not found");
     });
@@ -88,9 +89,10 @@ describe("github-sync core", () => {
 describe("issue operations", () => {
   afterEach(() => {
     _setGhExecHookForTests(undefined);
+    _resetEnsuredLabelsForTests();
   });
 
-  it("V4: createIssue parses issue number and URL from gh output", () => {
+  it("V4: createIssue parses issue number and URL from gh output", async () => {
     _setGhExecHookForTests((args) => {
       if (args[0] === "issue" && args[1] === "create") {
         return {
@@ -101,41 +103,41 @@ describe("issue operations", () => {
       }
       return { stdout: "", stderr: "", exitCode: 1 };
     });
-    const result = createIssue("Test Issue", "Body text", ["label1"]);
+    const result = await createIssue("Test Issue", "Body text", ["label1"]);
     expect(result).not.toBeNull();
     expect(result!.number).toBe(42);
     expect(result!.url).toContain("/issues/42");
   });
 
-  it("V5: createIssue returns null on gh failure", () => {
+  it("V5: createIssue returns null on gh failure", async () => {
     _setGhExecHookForTests(() => ({
       stdout: "",
       stderr: "error",
       exitCode: 1,
     }));
-    const result = createIssue("Fail", "Body", []);
+    const result = await createIssue("Fail", "Body", []);
     expect(result).toBeNull();
   });
 
-  it("V6: commentOnIssue sends body to gh issue comment", () => {
+  it("V6: commentOnIssue sends body to gh issue comment", async () => {
     const calls: string[][] = [];
     _setGhExecHookForTests((args) => {
       calls.push(args);
       return { stdout: "ok", stderr: "", exitCode: 0 };
     });
-    const ok = commentOnIssue(42, "Hello world");
+    const ok = await commentOnIssue(42, "Hello world");
     expect(ok).toBe(true);
     expect(calls[0]).toContain("comment");
     expect(calls[0]).toContain("42");
   });
 
-  it("V7: closeIssue calls gh issue close", () => {
+  it("V7: closeIssue calls gh issue close", async () => {
     const calls: string[][] = [];
     _setGhExecHookForTests((args) => {
       calls.push(args);
       return { stdout: "", stderr: "", exitCode: 0 };
     });
-    const ok = closeIssue(42);
+    const ok = await closeIssue(42);
     expect(ok).toBe(true);
     expect(calls[0]).toContain("close");
   });
@@ -155,20 +157,20 @@ describe("project board operations", () => {
       calls.push(args);
       return { stdout: "PVTI_abc123", stderr: "", exitCode: 0 };
     });
-    const itemId = addToProject("https://github.com/o/r/issues/42");
+    const itemId = await addToProject("https://github.com/o/r/issues/42");
     delete process.env.GITHUB_PROJECT_NUMBER;
     _resetConfigForTesting();
     expect(itemId).toBe("PVTI_abc123");
     expect(calls[0]).toContain("item-add");
   });
 
-  it("V9: addToProject returns null when no project number configured", () => {
+  it("V9: addToProject returns null when no project number configured", async () => {
     _setGhExecHookForTests(() => ({
       stdout: "",
       stderr: "no project",
       exitCode: 1,
     }));
-    const itemId = addToProject("https://github.com/o/r/issues/42");
+    const itemId = await addToProject("https://github.com/o/r/issues/42");
     expect(itemId).toBeNull();
   });
 });
@@ -263,13 +265,13 @@ describe("document operations", () => {
     expect(chunks.join("\n")).toBe(content);
   });
 
-  it("V14: postDocument posts single comment for small doc", () => {
+  it("V14: postDocument posts single comment for small doc", async () => {
     const calls: string[][] = [];
     _setGhExecHookForTests((args) => {
       calls.push(args);
       return { stdout: "ok", stderr: "", exitCode: 0 };
     });
-    const ok = postDocument(42, "UNDERSTANDING", "Small content here");
+    const ok = await postDocument(42, "UNDERSTANDING", "Small content here");
     expect(ok).toBe(true);
     expect(calls).toHaveLength(1);
     const bodyArg = calls[0][calls[0].indexOf("--body") + 1];
@@ -277,14 +279,14 @@ describe("document operations", () => {
     expect(bodyArg).toContain("Small content here");
   });
 
-  it("V15: postDocument posts multiple comments for large doc", () => {
+  it("V15: postDocument posts multiple comments for large doc", async () => {
     const calls: string[][] = [];
     _setGhExecHookForTests((args) => {
       calls.push(args);
       return { stdout: "ok", stderr: "", exitCode: 0 };
     });
     const bigContent = "x".repeat(70000);
-    const ok = postDocument(42, "SPEC-UNIFIEE", bigContent);
+    const ok = await postDocument(42, "SPEC-UNIFIEE", bigContent);
     expect(ok).toBe(true);
     expect(calls.length).toBeGreaterThan(1);
   });
@@ -294,6 +296,7 @@ describe("high-level sync API", () => {
   afterEach(() => {
     _setGhExecHookForTests(undefined);
     _setSyncEnabledForTests(undefined);
+    _resetEnsuredLabelsForTests();
   });
 
   const makeMockSupabase = () => {
@@ -443,10 +446,121 @@ describe("high-level sync API", () => {
 });
 
 describe("maturation integration", () => {
-  it("V19: handlePhaseResult triggers syncPhaseComplete when github_sync enabled", async () => {
-    const { syncPhaseComplete } = await import("../../src/github-sync.ts");
-    expect(typeof syncPhaseComplete).toBe("function");
-    expect(syncPhaseComplete.length).toBeGreaterThanOrEqual(4);
+  it("V19: syncPhaseComplete accepts all required params and returns Promise", async () => {
+    const { syncPhaseComplete: fn } = await import("../../src/github-sync.ts");
+    expect(typeof fn).toBe("function");
+    // Verify it returns a Promise (async function)
+    _setSyncEnabledForTests(false);
+    const result = fn(
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock for type check
+      {} as any,
+      "run-id",
+      "phase",
+      "maturation",
+      [],
+    );
+    expect(result).toBeInstanceOf(Promise);
+    await result;
+    _setSyncEnabledForTests(undefined);
+  });
+});
+
+describe("label resilience", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _resetEnsuredLabelsForTests();
+  });
+
+  it("V21: createIssue ensures labels exist before creating issue", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[0] === "label" && args[1] === "create") {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      if (args[0] === "issue" && args[1] === "create") {
+        return {
+          stdout: "https://github.com/o/r/issues/50",
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    });
+
+    const result = await createIssue("Test", "Body", ["maturation", "pipeline-sync"]);
+    expect(result).not.toBeNull();
+    expect(result!.number).toBe(50);
+
+    const labelCalls = calls.filter((c) => c[0] === "label" && c[1] === "create");
+    expect(labelCalls).toHaveLength(2);
+    expect(labelCalls.some((c) => c.includes("maturation"))).toBe(true);
+    expect(labelCalls.some((c) => c.includes("pipeline-sync"))).toBe(true);
+  });
+
+  it("V22: createIssue retries without labels if first attempt fails", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[0] === "label") {
+        return { stdout: "", stderr: "permission denied", exitCode: 1 };
+      }
+      if (args[0] === "issue" && args[1] === "create") {
+        const hasLabels = args.includes("--label");
+        if (hasLabels) {
+          return { stdout: "", stderr: "label 'xyz' not found", exitCode: 1 };
+        }
+        return {
+          stdout: "https://github.com/o/r/issues/51",
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    });
+
+    const result = await createIssue("Fallback test", "Body", ["xyz"]);
+    expect(result).not.toBeNull();
+    expect(result!.number).toBe(51);
+
+    const issueCalls = calls.filter((c) => c[0] === "issue" && c[1] === "create");
+    expect(issueCalls).toHaveLength(2); // first with labels, second without
+  });
+
+  it("V23: ensured labels are cached — second call skips gh label create", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[0] === "label") return { stdout: "", stderr: "", exitCode: 0 };
+      if (args[0] === "issue" && args[1] === "create") {
+        return { stdout: "https://github.com/o/r/issues/52", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    });
+
+    await createIssue("First", "Body", ["cached-label"]);
+    const firstLabelCalls = calls.filter((c) => c[0] === "label").length;
+    expect(firstLabelCalls).toBe(1);
+
+    calls.length = 0;
+    await createIssue("Second", "Body", ["cached-label"]);
+    const secondLabelCalls = calls.filter((c) => c[0] === "label").length;
+    expect(secondLabelCalls).toBe(0); // cached, no gh call
+  });
+
+  it("V24: createIssue with no labels skips ensureLabel entirely", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[0] === "issue" && args[1] === "create") {
+        return { stdout: "https://github.com/o/r/issues/53", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    });
+
+    const result = await createIssue("No labels", "Body", []);
+    expect(result).not.toBeNull();
+    expect(calls.filter((c) => c[0] === "label")).toHaveLength(0);
   });
 });
 
@@ -454,6 +568,7 @@ describe("V3 pipeline integration", () => {
   afterEach(() => {
     _setGhExecHookForTests(undefined);
     _setSyncEnabledForTests(undefined);
+    _resetEnsuredLabelsForTests();
   });
 
   it("V20: syncPhaseComplete works with v3 pipeline_type", async () => {

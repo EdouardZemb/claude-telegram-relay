@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { spawnSync } from "bun";
+import { spawn } from "bun";
 import { getConfig } from "./config.ts";
 import { isFeatureEnabled } from "./feature-flags.ts";
 import { createLogger } from "./logger.ts";
+import { Semaphore } from "./semaphore.ts";
 
 const log = createLogger("github-sync");
+const _syncSemaphore = new Semaphore(2);
 
 // ============================================================
 // TYPES
@@ -47,7 +49,7 @@ export function _setSyncEnabledForTests(value: boolean | undefined): void {
 // GH CLI WRAPPER
 // ============================================================
 
-function ghExec(args: string[]): GhResult {
+async function ghExec(args: string[]): Promise<GhResult> {
   if (_ghExecHook) return _ghExecHook(args);
 
   const { githubRepo, projectDir } = getConfig();
@@ -56,39 +58,108 @@ function ghExec(args: string[]): GhResult {
     return { stdout: "", stderr: "GITHUB_REPO not configured", exitCode: 1 };
   }
 
-  const result = spawnSync(["gh", ...args], {
+  const proc = spawn(["gh", ...args], {
     cwd: projectDir || process.cwd(),
-    timeout: 30_000,
+    stdout: "pipe",
+    stderr: "pipe",
   });
 
-  return {
-    stdout: new TextDecoder().decode(result.stdout).trim(),
-    stderr: new TextDecoder().decode(result.stderr).trim(),
-    exitCode: result.exitCode ?? 1,
-  };
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<GhResult>((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {}
+      resolve({ stdout: "", stderr: "gh command timed out after 30s", exitCode: 1 });
+    }, 30_000);
+  });
+
+  const execPromise = Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]).then(([stdout, stderr, exitCode]) => ({
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+    exitCode: exitCode ?? 1,
+  }));
+
+  const result = await Promise.race([execPromise, timeoutPromise]);
+  clearTimeout(timeoutHandle);
+  return result;
 }
 
 /** Exposed for tests only — production code uses ghExec internally. */
-export function _ghExecForTests(args: string[]): GhResult {
+export async function _ghExecForTests(args: string[]): Promise<GhResult> {
   return ghExec(args);
+}
+
+// ============================================================
+// LABEL MANAGEMENT
+// ============================================================
+
+const _ensuredLabels = new Set<string>();
+
+export function _resetEnsuredLabelsForTests(): void {
+  _ensuredLabels.clear();
+}
+
+async function ensureLabel(label: string): Promise<void> {
+  if (_ensuredLabels.has(label)) return;
+
+  const { githubRepo } = getConfig();
+  const result = await ghExec(["label", "create", label, "--repo", githubRepo, "--force"]);
+  if (result.exitCode === 0) {
+    _ensuredLabels.add(label);
+  } else {
+    log.warn("Failed to ensure label, will try issue creation anyway", {
+      label,
+      stderr: result.stderr.slice(0, 200),
+    });
+  }
 }
 
 // ============================================================
 // ISSUE OPERATIONS
 // ============================================================
 
-export function createIssue(
+export async function createIssue(
   title: string,
   body: string,
   labels: string[],
-): { number: number; url: string } | null {
+): Promise<{ number: number; url: string } | null> {
   const { githubRepo } = getConfig();
+
+  // Ensure all labels exist before creating the issue (parallel)
+  await Promise.all(labels.map((label) => ensureLabel(label)));
+
   const args = ["issue", "create", "--repo", githubRepo, "--title", title, "--body", body];
   for (const label of labels) {
     args.push("--label", label);
   }
 
-  const result = ghExec(args);
+  let result = await ghExec(args);
+
+  // If creation failed and we have labels, retry without labels as fallback
+  if (result.exitCode !== 0 && labels.length > 0) {
+    log.warn("Issue creation failed with labels, retrying without labels", {
+      title,
+      labels,
+      stderr: result.stderr.slice(0, 200),
+    });
+    const fallbackArgs = [
+      "issue",
+      "create",
+      "--repo",
+      githubRepo,
+      "--title",
+      title,
+      "--body",
+      body,
+    ];
+    result = await ghExec(fallbackArgs);
+  }
+
   if (result.exitCode !== 0) {
     log.error("Failed to create issue", { title, stderr: result.stderr.slice(0, 300) });
     return null;
@@ -104,9 +175,9 @@ export function createIssue(
   return { number: parseInt(match[1], 10), url };
 }
 
-export function commentOnIssue(issueNumber: number, body: string): boolean {
+export async function commentOnIssue(issueNumber: number, body: string): Promise<boolean> {
   const { githubRepo } = getConfig();
-  const result = ghExec([
+  const result = await ghExec([
     "issue",
     "comment",
     String(issueNumber),
@@ -122,9 +193,9 @@ export function commentOnIssue(issueNumber: number, body: string): boolean {
   return true;
 }
 
-export function closeIssue(issueNumber: number): boolean {
+export async function closeIssue(issueNumber: number): Promise<boolean> {
   const { githubRepo } = getConfig();
-  const result = ghExec(["issue", "close", String(issueNumber), "--repo", githubRepo]);
+  const result = await ghExec(["issue", "close", String(issueNumber), "--repo", githubRepo]);
   if (result.exitCode !== 0) {
     log.error("Failed to close issue", { issueNumber, stderr: result.stderr.slice(0, 300) });
     return false;
@@ -136,15 +207,15 @@ export function closeIssue(issueNumber: number): boolean {
 // PROJECT BOARD OPERATIONS
 // ============================================================
 
-export function addToProject(issueUrl: string): string | null {
-  const { githubProjectNumber } = getConfig();
+export async function addToProject(issueUrl: string): Promise<string | null> {
+  const { githubProjectNumber, githubRepo } = getConfig();
   if (!githubProjectNumber) {
     log.debug("No GITHUB_PROJECT_NUMBER configured, skipping project board");
     return null;
   }
 
-  const owner = getConfig().githubRepo.split("/")[0];
-  const result = ghExec([
+  const owner = githubRepo.split("/")[0];
+  const result = await ghExec([
     "project",
     "item-add",
     String(githubProjectNumber),
@@ -262,14 +333,18 @@ export function chunkDocument(content: string, maxLen: number = MAX_COMMENT_LENG
   return chunks;
 }
 
-export function postDocument(issueNumber: number, docType: string, content: string): boolean {
+export async function postDocument(
+  issueNumber: number,
+  docType: string,
+  content: string,
+): Promise<boolean> {
   const chunks = chunkDocument(content);
   let allOk = true;
 
   for (let i = 0; i < chunks.length; i++) {
     const header =
       chunks.length === 1 ? `## ${docType}\n\n` : `## ${docType} (${i + 1}/${chunks.length})\n\n`;
-    const ok = commentOnIssue(issueNumber, header + chunks[i]);
+    const ok = await commentOnIssue(issueNumber, header + chunks[i]);
     if (!ok) allOk = false;
   }
 
@@ -292,42 +367,47 @@ export async function syncRunStart(
 ): Promise<void> {
   if (!isSyncEnabled()) return;
 
-  const existing = await getRunIssue(supabase, run.id);
-  if (existing) {
-    log.debug("Run issue already exists", { runId: run.id, issueNumber: existing.issue_number });
-    return;
+  await _syncSemaphore.acquire();
+  try {
+    const existing = await getRunIssue(supabase, run.id);
+    if (existing) {
+      log.debug("Run issue already exists", { runId: run.id, issueNumber: existing.issue_number });
+      return;
+    }
+
+    const title =
+      pipelineType === "maturation" ? `[Maturation] ${run.name}` : `[Pipeline V3] ${run.name}`;
+
+    const body = [
+      `## ${pipelineType === "maturation" ? "Maturation" : "Pipeline V3"} Run`,
+      "",
+      `**Run ID:** \`${run.id.substring(0, 8)}\``,
+      `**Input:** ${run.rawInput.substring(0, 500)}`,
+      "",
+      "### Phases",
+      "_(Sub-issues will be created as phases complete)_",
+    ].join("\n");
+
+    const labels = [pipelineType, "pipeline-sync"];
+    const result = await createIssue(title, body, labels);
+    if (!result) return;
+
+    log.info("Created run issue", { runId: run.id, issueNumber: result.number });
+
+    const projectItemId = await addToProject(result.url);
+
+    await saveEntity(supabase, {
+      run_id: run.id,
+      pipeline_type: pipelineType,
+      entity_type: "run_issue",
+      phase: null,
+      issue_number: result.number,
+      issue_url: result.url,
+      project_item_id: projectItemId,
+    });
+  } finally {
+    _syncSemaphore.release();
   }
-
-  const title =
-    pipelineType === "maturation" ? `[Maturation] ${run.name}` : `[Pipeline V3] ${run.name}`;
-
-  const body = [
-    `## ${pipelineType === "maturation" ? "Maturation" : "Pipeline V3"} Run`,
-    "",
-    `**Run ID:** \`${run.id.substring(0, 8)}\``,
-    `**Input:** ${run.rawInput.substring(0, 500)}`,
-    "",
-    "### Phases",
-    "_(Sub-issues will be created as phases complete)_",
-  ].join("\n");
-
-  const labels = [pipelineType, "pipeline-sync"];
-  const result = createIssue(title, body, labels);
-  if (!result) return;
-
-  log.info("Created run issue", { runId: run.id, issueNumber: result.number });
-
-  const projectItemId = addToProject(result.url);
-
-  await saveEntity(supabase, {
-    run_id: run.id,
-    pipeline_type: pipelineType,
-    entity_type: "run_issue",
-    phase: null,
-    issue_number: result.number,
-    issue_url: result.url,
-    project_item_id: projectItemId,
-  });
 }
 
 export async function syncPhaseComplete(
@@ -340,53 +420,61 @@ export async function syncPhaseComplete(
 ): Promise<void> {
   if (!isSyncEnabled()) return;
 
-  const parentIssue = await getRunIssue(supabase, runId);
-  if (!parentIssue) {
-    log.warn("No parent issue found for run, skipping phase sync", { runId, phase });
-    return;
-  }
-
-  const existingPhaseIssue = await getPhaseIssue(supabase, runId, phase);
-  let phaseIssueNumber: number;
-
-  if (existingPhaseIssue) {
-    phaseIssueNumber = existingPhaseIssue.issue_number;
-  } else {
-    const title = `[${phase}] ${pipelineType === "maturation" ? "Maturation" : "V3"} — #${parentIssue.issue_number}`;
-    const body = [
-      `Phase: **${phase}**`,
-      `Parent: #${parentIssue.issue_number}`,
-      verdict ? `Verdict: ${verdict}` : "",
-      "",
-      `Part of ${parentIssue.issue_url}`,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    const result = createIssue(title, body, [pipelineType, `phase:${phase}`]);
-    if (!result) return;
-
-    phaseIssueNumber = result.number;
-    await saveEntity(supabase, {
-      run_id: runId,
-      pipeline_type: pipelineType,
-      entity_type: "phase_issue",
-      phase,
-      issue_number: result.number,
-      issue_url: result.url,
-      project_item_id: null,
-    });
-
-    log.info("Created phase sub-issue", { runId, phase, issueNumber: result.number });
-  }
-
-  for (const content of documentContents) {
-    if (content.trim()) {
-      postDocument(phaseIssueNumber, phase.toUpperCase(), content);
+  await _syncSemaphore.acquire();
+  try {
+    const parentIssue = await getRunIssue(supabase, runId);
+    if (!parentIssue) {
+      log.warn("No parent issue found for run, skipping phase sync", { runId, phase });
+      return;
     }
-  }
 
-  closeIssue(phaseIssueNumber);
+    const existingPhaseIssue = await getPhaseIssue(supabase, runId, phase);
+    let phaseIssueNumber: number;
+
+    if (existingPhaseIssue) {
+      phaseIssueNumber = existingPhaseIssue.issue_number;
+    } else {
+      const title = `[${phase}] ${pipelineType === "maturation" ? "Maturation" : "V3"} — #${parentIssue.issue_number}`;
+      const body = [
+        `Phase: **${phase}**`,
+        `Parent: #${parentIssue.issue_number}`,
+        verdict ? `Verdict: ${verdict}` : "",
+        "",
+        `Part of ${parentIssue.issue_url}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const result = await createIssue(title, body, [pipelineType, `phase:${phase}`]);
+      if (!result) return;
+
+      phaseIssueNumber = result.number;
+      await saveEntity(supabase, {
+        run_id: runId,
+        pipeline_type: pipelineType,
+        entity_type: "phase_issue",
+        phase,
+        issue_number: result.number,
+        issue_url: result.url,
+        project_item_id: null,
+      });
+
+      log.info("Created phase sub-issue", { runId, phase, issueNumber: result.number });
+    }
+
+    for (const content of documentContents) {
+      if (content.trim()) {
+        const ok = await postDocument(phaseIssueNumber, phase.toUpperCase(), content);
+        if (!ok) {
+          log.warn("Some document chunks failed to post", { runId, phase, phaseIssueNumber });
+        }
+      }
+    }
+
+    await closeIssue(phaseIssueNumber);
+  } finally {
+    _syncSemaphore.release();
+  }
 }
 
 export async function syncRunComplete(
@@ -396,10 +484,18 @@ export async function syncRunComplete(
 ): Promise<void> {
   if (!isSyncEnabled()) return;
 
-  const parentIssue = await getRunIssue(supabase, runId);
-  if (!parentIssue) return;
+  await _syncSemaphore.acquire();
+  try {
+    const parentIssue = await getRunIssue(supabase, runId);
+    if (!parentIssue) return;
 
-  commentOnIssue(parentIssue.issue_number, `## Run Complete\n\n**Final status:** ${finalStatus}`);
-  closeIssue(parentIssue.issue_number);
-  log.info("Closed run issue", { runId, issueNumber: parentIssue.issue_number, finalStatus });
+    await commentOnIssue(
+      parentIssue.issue_number,
+      `## Run Complete\n\n**Final status:** ${finalStatus}`,
+    );
+    await closeIssue(parentIssue.issue_number);
+    log.info("Closed run issue", { runId, issueNumber: parentIssue.issue_number, finalStatus });
+  } finally {
+    _syncSemaphore.release();
+  }
 }
