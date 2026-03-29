@@ -1,10 +1,12 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   buildMaturationStatusBar,
   buildValidationKeyboard,
   formatRunSummary,
   parseIdeaCommand,
+  runMaturationPipeline,
 } from "../../src/commands/maturation.ts";
+import { _setGhExecHookForTests, _setSyncEnabledForTests } from "../../src/github-sync.ts";
 import { createEmptyRun } from "../../src/maturation/types.ts";
 
 describe("commands/maturation", () => {
@@ -121,5 +123,75 @@ describe("commands/maturation", () => {
       const boldMatches = summary.match(/<b>Clarification<\/b>/g);
       expect(boldMatches).toBeNull();
     });
+  });
+});
+
+describe("runMaturationPipeline syncRunComplete bug fix", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _setSyncEnabledForTests(undefined);
+  });
+
+  it("V-bugfix-1: syncRunComplete is called with maturation_ready when pipeline completes", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    // Create a run that is already at validate phase (all phases done)
+    const run = createEmptyRun(1, undefined, "test-idea", "My description");
+    run.steps.understand.status = "ok";
+    run.steps.clarify.status = "skipped";
+    run.steps.explore.status = "ok";
+    run.steps.confront.status = "ok";
+    run.steps.synthesize.status = "ok";
+    run.steps.advocate.status = "ok";
+    run.steps.validate.status = "ok";
+    run.currentPhase = "validate";
+
+    // Mock supabase with a run_issue to be closed
+    const sb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              is: () => ({
+                maybeSingle: () => ({
+                  data: { run_id: run.id, issue_number: 55 },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    const messages: string[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: mock BotContext
+    const bctx: any = {
+      supabase: sb,
+      callClaude: async () => "ok",
+      sendResponse: async () => {},
+    };
+
+    const result = await runMaturationPipeline(
+      run,
+      async (msg) => {
+        messages.push(msg);
+      },
+      bctx,
+    );
+    expect(result).toContain("MATURATION_READY");
+
+    // Wait a tick for fire-and-forget async operations
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // syncRunComplete should have called gh issue close
+    const closeCalls = ghCalls.filter((c) => c[1] === "close");
+    expect(closeCalls.length).toBeGreaterThanOrEqual(1);
+    expect(closeCalls[0]).toContain("55");
   });
 });

@@ -8,12 +8,17 @@ import {
   chunkDocument,
   closeIssue,
   commentOnIssue,
+  convertPRToReady,
+  createDraftPR,
   createIssue,
   type EntityMapEntry,
+  ensureMilestone,
   type GhResult,
   getRunIssue,
   postDocument,
   saveEntity,
+  setIssueMilestone,
+  swapPhaseLabel,
   syncPhaseComplete,
   syncRunComplete,
   syncRunStart,
@@ -614,5 +619,208 @@ describe("V3 pipeline integration", () => {
       "APPROVED",
     );
     expect(ghCalls.some((c) => c[1] === "create")).toBe(true);
+  });
+});
+
+describe("phase label swap", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _resetEnsuredLabelsForTests();
+  });
+
+  it("V25: swapPhaseLabel removes old label and adds new label", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    const ok = await swapPhaseLabel(42, "phase:spec", "phase:implement");
+    expect(ok).toBe(true);
+
+    const removeCalls = calls.filter((c) => c[1] === "edit" && c.includes("--remove-label"));
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toContain("phase:spec");
+
+    const addCalls = calls.filter((c) => c[1] === "edit" && c.includes("--add-label"));
+    expect(addCalls).toHaveLength(1);
+    expect(addCalls[0]).toContain("phase:implement");
+  });
+
+  it("V26: swapPhaseLabel returns false on gh failure", async () => {
+    _setGhExecHookForTests(() => ({ stdout: "", stderr: "error", exitCode: 1 }));
+    const ok = await swapPhaseLabel(99, "phase:spec", "phase:implement");
+    expect(ok).toBe(false);
+  });
+
+  it("V27: swapPhaseLabel with no old label only adds new label", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    const ok = await swapPhaseLabel(42, null, "phase:review");
+    expect(ok).toBe(true);
+
+    const removeCalls = calls.filter((c) => c[1] === "edit" && c.includes("--remove-label"));
+    expect(removeCalls).toHaveLength(0);
+
+    const addCalls = calls.filter((c) => c[1] === "edit" && c.includes("--add-label"));
+    expect(addCalls).toHaveLength(1);
+    expect(addCalls[0]).toContain("phase:review");
+  });
+});
+
+describe("milestones", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+  });
+
+  it("V28: ensureMilestone creates milestone and returns its number", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[0] === "api" && args.some((a) => a.includes("milestones"))) {
+        return {
+          stdout: JSON.stringify({ number: 5, title: "S23" }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: "", exitCode: 1 };
+    });
+
+    const milestoneNumber = await ensureMilestone("S23");
+    expect(milestoneNumber).toBe(5);
+    expect(calls.some((c) => c[0] === "api")).toBe(true);
+  });
+
+  it("V29: ensureMilestone returns null on failure", async () => {
+    _setGhExecHookForTests(() => ({ stdout: "", stderr: "error", exitCode: 1 }));
+    const milestoneNumber = await ensureMilestone("S99");
+    expect(milestoneNumber).toBeNull();
+  });
+
+  it("V30: setIssueMilestone calls gh api to set milestone on issue", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({ number: 10 }), stderr: "", exitCode: 0 };
+    });
+
+    const ok = await setIssueMilestone(42, 5);
+    expect(ok).toBe(true);
+    expect(calls.some((c) => c[0] === "api")).toBe(true);
+    // Should contain the issue number in the path
+    const apiCalls = calls.filter((c) => c[0] === "api");
+    expect(apiCalls[0].some((arg) => arg.includes("42"))).toBe(true);
+  });
+
+  it("V31: setIssueMilestone returns false on failure", async () => {
+    _setGhExecHookForTests(() => ({ stdout: "", stderr: "error", exitCode: 1 }));
+    const ok = await setIssueMilestone(42, 5);
+    expect(ok).toBe(false);
+  });
+});
+
+describe("draft PR lifecycle", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _resetEnsuredLabelsForTests();
+  });
+
+  it("V32: createDraftPR creates a draft PR and returns number+url", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      if (args[1] === "create") {
+        return {
+          stdout: "https://github.com/o/r/pull/7",
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    const result = await createDraftPR("feat/my-branch", "My Feature", "Description here");
+    expect(result).not.toBeNull();
+    expect(result!.number).toBe(7);
+    expect(result!.url).toContain("/pull/7");
+
+    const prCalls = calls.filter((c) => c[0] === "pr" && c[1] === "create");
+    expect(prCalls).toHaveLength(1);
+    expect(prCalls[0]).toContain("--draft");
+  });
+
+  it("V33: createDraftPR returns null on failure", async () => {
+    _setGhExecHookForTests(() => ({ stdout: "", stderr: "error", exitCode: 1 }));
+    const result = await createDraftPR("feat/x", "Title", "Body");
+    expect(result).toBeNull();
+  });
+
+  it("V34: convertPRToReady marks draft PR as ready for review", async () => {
+    const calls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    const ok = await convertPRToReady(7);
+    expect(ok).toBe(true);
+
+    const readyCalls = calls.filter((c) => c[0] === "pr" && c[1] === "ready");
+    expect(readyCalls).toHaveLength(1);
+    expect(readyCalls[0]).toContain("7");
+  });
+
+  it("V35: convertPRToReady returns false on failure", async () => {
+    _setGhExecHookForTests(() => ({ stdout: "", stderr: "error", exitCode: 1 }));
+    const ok = await convertPRToReady(99);
+    expect(ok).toBe(false);
+  });
+});
+
+describe("syncRunComplete called for maturation", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _setSyncEnabledForTests(undefined);
+    _resetEnsuredLabelsForTests();
+  });
+
+  it("V36: syncRunComplete posts final status comment and closes issue", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    const sb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              is: () => ({
+                maybeSingle: () => ({
+                  data: { run_id: "mat-run", issue_number: 20 },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+    await syncRunComplete(sb as any, "mat-run", "maturation_ready");
+
+    const commentCalls = ghCalls.filter((c) => c[1] === "comment");
+    expect(commentCalls).toHaveLength(1);
+    const bodyArg = commentCalls[0][commentCalls[0].indexOf("--body") + 1];
+    expect(bodyArg).toContain("maturation_ready");
+
+    const closeCalls = ghCalls.filter((c) => c[1] === "close");
+    expect(closeCalls).toHaveLength(1);
   });
 });

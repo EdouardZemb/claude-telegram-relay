@@ -203,6 +203,162 @@ export async function closeIssue(issueNumber: number): Promise<boolean> {
   return true;
 }
 
+/**
+ * Swap a phase label on an issue: remove the old label (if provided) and add the new label.
+ * Used to track pipeline phase transitions (e.g. phase:spec → phase:implement).
+ * Returns true if the add-label call succeeded.
+ */
+export async function swapPhaseLabel(
+  issueNumber: number,
+  oldLabel: string | null,
+  newLabel: string,
+): Promise<boolean> {
+  const { githubRepo } = getConfig();
+
+  // Remove old label first (best-effort, failure is non-blocking)
+  if (oldLabel) {
+    const removeResult = await ghExec([
+      "issue",
+      "edit",
+      String(issueNumber),
+      "--repo",
+      githubRepo,
+      "--remove-label",
+      oldLabel,
+    ]);
+    if (removeResult.exitCode !== 0) {
+      log.warn("Failed to remove old phase label (continuing)", {
+        issueNumber,
+        oldLabel,
+        stderr: removeResult.stderr.slice(0, 200),
+      });
+    }
+  }
+
+  // Add new label
+  await ensureLabel(newLabel);
+  const addResult = await ghExec([
+    "issue",
+    "edit",
+    String(issueNumber),
+    "--repo",
+    githubRepo,
+    "--add-label",
+    newLabel,
+  ]);
+
+  if (addResult.exitCode !== 0) {
+    log.error("Failed to add new phase label", {
+      issueNumber,
+      newLabel,
+      stderr: addResult.stderr.slice(0, 300),
+    });
+    return false;
+  }
+  return true;
+}
+
+// ============================================================
+// MILESTONE OPERATIONS
+// ============================================================
+
+/**
+ * Ensure a GitHub milestone with the given title exists.
+ * Creates it if it does not exist, returns its number.
+ * Returns null on failure.
+ */
+export async function ensureMilestone(sprintName: string): Promise<number | null> {
+  const { githubRepo } = getConfig();
+  const [owner, repo] = githubRepo.split("/");
+
+  // Try to create the milestone — if it already exists, gh api returns the existing one
+  const result = await ghExec([
+    "api",
+    `repos/${owner}/${repo}/milestones`,
+    "--method",
+    "POST",
+    "-f",
+    `title=${sprintName}`,
+  ]);
+
+  if (result.exitCode === 0) {
+    try {
+      const data = JSON.parse(result.stdout);
+      return data.number ?? null;
+    } catch {
+      log.warn("Failed to parse milestone creation response", {
+        stdout: result.stdout.slice(0, 200),
+      });
+      return null;
+    }
+  }
+
+  // Creation failed — maybe already exists (422 unprocessable entity)
+  // Try to list milestones and find matching title
+  const listResult = await ghExec([
+    "api",
+    `repos/${owner}/${repo}/milestones`,
+    "--method",
+    "GET",
+    "-f",
+    "state=open",
+  ]);
+
+  if (listResult.exitCode !== 0) {
+    log.error("Failed to list milestones", { sprintName, stderr: listResult.stderr.slice(0, 300) });
+    return null;
+  }
+
+  try {
+    const milestones = JSON.parse(listResult.stdout);
+    const found = Array.isArray(milestones)
+      ? milestones.find((m: { title: string; number: number }) => m.title === sprintName)
+      : null;
+    if (found) {
+      return found.number;
+    }
+  } catch {
+    // ignore parse failure
+  }
+
+  log.error("Could not create or find milestone", {
+    sprintName,
+    stderr: result.stderr.slice(0, 300),
+  });
+  return null;
+}
+
+/**
+ * Set the milestone on an existing GitHub issue.
+ * Returns true on success.
+ */
+export async function setIssueMilestone(
+  issueNumber: number,
+  milestoneNumber: number,
+): Promise<boolean> {
+  const { githubRepo } = getConfig();
+  const [owner, repo] = githubRepo.split("/");
+
+  const result = await ghExec([
+    "api",
+    `repos/${owner}/${repo}/issues/${issueNumber}`,
+    "--method",
+    "PATCH",
+    "-F",
+    `milestone=${milestoneNumber}`,
+  ]);
+
+  if (result.exitCode !== 0) {
+    log.error("Failed to set issue milestone", {
+      issueNumber,
+      milestoneNumber,
+      stderr: result.stderr.slice(0, 300),
+    });
+    return false;
+  }
+  return true;
+}
+
 // ============================================================
 // PROJECT BOARD OPERATIONS
 // ============================================================
@@ -349,6 +505,66 @@ export async function postDocument(
   }
 
   return allOk;
+}
+
+// ============================================================
+// DRAFT PR LIFECYCLE
+// ============================================================
+
+/**
+ * Create a draft pull request for the given branch.
+ * Returns the PR number and URL, or null on failure.
+ */
+export async function createDraftPR(
+  branch: string,
+  title: string,
+  body: string,
+): Promise<{ number: number; url: string } | null> {
+  const { githubRepo } = getConfig();
+
+  const result = await ghExec([
+    "pr",
+    "create",
+    "--repo",
+    githubRepo,
+    "--head",
+    branch,
+    "--title",
+    title,
+    "--body",
+    body,
+    "--draft",
+  ]);
+
+  if (result.exitCode !== 0) {
+    log.error("Failed to create draft PR", { branch, title, stderr: result.stderr.slice(0, 300) });
+    return null;
+  }
+
+  const url = result.stdout.trim();
+  const match = url.match(/\/pull\/(\d+)/);
+  if (!match) {
+    log.error("Could not parse PR number from gh output", { stdout: url });
+    return null;
+  }
+
+  return { number: parseInt(match[1], 10), url };
+}
+
+/**
+ * Convert a draft PR to ready for review.
+ * Returns true on success.
+ */
+export async function convertPRToReady(prNumber: number): Promise<boolean> {
+  const { githubRepo } = getConfig();
+
+  const result = await ghExec(["pr", "ready", String(prNumber), "--repo", githubRepo]);
+
+  if (result.exitCode !== 0) {
+    log.error("Failed to convert PR to ready", { prNumber, stderr: result.stderr.slice(0, 300) });
+    return false;
+  }
+  return true;
 }
 
 // ============================================================
