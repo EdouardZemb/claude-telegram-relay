@@ -38,6 +38,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `maturation/phases.ts` | Phase execution: P0-P3b runners with parallel agent spawning |
 | `maturation/agents.ts` | Maturation agent configuration: prompt builders, model/effort mapping |
 | `maturation/checkpoint.ts` | Interactive decision checkpoints: pipeline pause, advisor, keyboard, global decisions |
+| `maturation/observability.ts` | V1 observability: getMaturationStats(), formatMaturationStats() — aggregated run stats for /brain health |
 | `maturation/clarify.ts` | Socratic clarification loop: async Q&A via Telegram, clarifier agent calls, pipeline pause/resume |
 | `maturation/index.ts` | Barrel re-export for maturation sub-modules |
 | `maturation.ts` | Root barrel re-export for maturation module (barrel convention) |
@@ -165,7 +166,7 @@ Details: see CHANGELOG.md and docs/sprints/ for version history.
 src/                    76 TypeScript modules (core logic)
   commands/             13 Composer modules (Telegram command handlers)
   memory/               6 sub-modules (core, classification, scoring, ideas, graph, agent-memory)
-  maturation/           7 sub-modules (types, documents, scoring, engine, phases, agents, barrel)
+  maturation/           8 sub-modules (types, documents, scoring, engine, phases, agents, observability, barrel)
   pipeline-v3/          5 sub-modules (types, reviewers, engine, orchestrator, barrel)
 dashboard/              Kanban board (server.ts + index.html)
 config/                 profile.md, workflow.yaml, bmad-templates/

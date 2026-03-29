@@ -19,12 +19,18 @@ mock.module("../../src/agent.ts", () => ({
   },
 }));
 
+// Track buildEnrichedPrompt calls (via hook — avoids mock.module() pollution)
+const enrichedPromptCalls: Array<{ role: string; base: string }> = [];
+let mockEnrichedSuffix = ""; // empty = no overlay active
+
 const {
   runUnderstandPhase,
   runExplorePhase,
   runConfrontPhase,
   runSynthesizePhase,
   runAdvocatePhase,
+  _setFeatureFlagHookForTests,
+  _setEnrichPromptHookForTests,
 } = await import("../../src/maturation/phases.ts");
 
 import { _setBaseDirForTests, initRun } from "../../src/maturation/documents.ts";
@@ -35,8 +41,10 @@ const TEST_DIR = join(import.meta.dir, "..", ".test-maturation-phases");
 describe("maturation/phases", () => {
   beforeEach(async () => {
     spawnCalls.length = 0;
+    enrichedPromptCalls.length = 0;
     mockStdout = "## Score d'ambiguite : 3/10\n\nClair.";
     mockExitCode = 0;
+    mockEnrichedSuffix = "";
     try {
       await rm(TEST_DIR, { recursive: true, force: true });
     } catch {}
@@ -46,6 +54,8 @@ describe("maturation/phases", () => {
 
   afterEach(async () => {
     _setBaseDirForTests(undefined);
+    _setFeatureFlagHookForTests(undefined);
+    _setEnrichPromptHookForTests(undefined);
     try {
       await rm(TEST_DIR, { recursive: true, force: true });
     } catch {}
@@ -124,6 +134,50 @@ describe("maturation/phases", () => {
       await initRun(run);
       const result = await runAdvocatePhase(run);
       expect(result.verdict).toContain("PASS");
+    });
+  });
+
+  describe("V2: overlay wiring", () => {
+    it("V2-1: overlaysUsed=false when flag is off", async () => {
+      _setFeatureFlagHookForTests(() => false);
+      _setEnrichPromptHookForTests((_role, base) => base); // returns unchanged
+      mockStdout = "## Score d'ambiguite : 3/10\n\nClair.";
+      const run = createEmptyRun(1, undefined, "test", "Export CSV");
+      await initRun(run);
+      const result = await runUnderstandPhase(run);
+      expect(result.status).toBe("ok");
+      expect(result.overlaysUsed).toBe(false);
+    });
+
+    it("V2-2: overlaysUsed=false when flag is on but no active overlays", async () => {
+      _setFeatureFlagHookForTests((flag) => flag === "prompt_feedback_loop");
+      // buildEnrichedPrompt returns base unchanged => no overlay
+      _setEnrichPromptHookForTests((_role, base) => {
+        enrichedPromptCalls.push({ role: _role, base });
+        return base; // no change = no overlay
+      });
+      mockStdout = "## Score d'ambiguite : 3/10\n\nClair.";
+      const run = createEmptyRun(1, undefined, "test", "Export CSV");
+      await initRun(run);
+      const result = await runUnderstandPhase(run);
+      expect(result.status).toBe("ok");
+      expect(result.overlaysUsed).toBe(false);
+    });
+
+    it("V2-3: overlaysUsed=true when flag on and overlay injected", async () => {
+      _setFeatureFlagHookForTests((flag) => flag === "prompt_feedback_loop");
+      // buildEnrichedPrompt appends overlay => prompt differs from base
+      _setEnrichPromptHookForTests((_role, base) => {
+        enrichedPromptCalls.push({ role: _role, base });
+        return `${base}\n\nATTENTION : correctif actif`;
+      });
+      mockStdout = "## Score d'ambiguite : 3/10\n\nClair.";
+      const run = createEmptyRun(1, undefined, "test", "Export CSV");
+      await initRun(run);
+      const result = await runUnderstandPhase(run);
+      expect(result.status).toBe("ok");
+      expect(result.overlaysUsed).toBe(true);
+      expect(enrichedPromptCalls.length).toBeGreaterThan(0);
     });
   });
 });

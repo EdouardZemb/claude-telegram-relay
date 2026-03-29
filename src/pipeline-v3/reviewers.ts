@@ -6,6 +6,7 @@
  */
 
 import { type SpawnClaudeOptions, type SpawnClaudeResult, spawnClaude } from "../agent.ts";
+import { getConfig } from "../config.ts";
 import { createLogger } from "../logger.ts";
 import {
   ALL_REVIEWER_ROLES,
@@ -257,7 +258,14 @@ export function computePanelVerdict(findings: ReviewerFinding[]): PanelVerdict {
   }
 
   // Rule 2: Quorum check
-  if (approvedCount >= QUORUM_THRESHOLD) {
+  const quorumThreshold = (() => {
+    try {
+      return getConfig().quorumThreshold;
+    } catch {
+      return QUORUM_THRESHOLD;
+    }
+  })();
+  if (approvedCount >= quorumThreshold) {
     return {
       verdict: "APPROVED",
       approvedCount,

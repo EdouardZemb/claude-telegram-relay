@@ -63,6 +63,8 @@ export interface PhaseResult {
   documents: string[];
   verdict?: string;
   score?: number;
+  /** V2.5: true if prompt overlays were active during any agent in this phase */
+  overlaysUsed?: boolean;
 }
 
 export function handlePhaseResult(
@@ -76,6 +78,9 @@ export function handlePhaseResult(
   step.verdict = result.verdict;
   step.score = result.score;
   step.completedAt = new Date().toISOString();
+  if (result.overlaysUsed !== undefined) {
+    step.overlaysUsed = result.overlaysUsed;
+  }
   run.updatedAt = new Date().toISOString();
 
   if (result.status === "failed") {

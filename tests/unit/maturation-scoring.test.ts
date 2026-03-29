@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  _setMaturityThresholdForTests,
   evaluateGate,
   extractAmbiguityScore,
   extractMaturityScore,
@@ -71,6 +72,26 @@ describe("maturation/scoring", () => {
       expect(result.passed).toBe(false);
       expect(result.recommendation).toBe("human");
       expect(result.issues).toContain("Critical flaw");
+    });
+
+    describe("AR2: configurable threshold", () => {
+      it("V5: uses custom threshold via hook", () => {
+        _setMaturityThresholdForTests(9);
+        try {
+          // Score 8 should fail with threshold 9
+          const result = evaluateGate(8, null, 0, 2);
+          expect(result.passed).toBe(false);
+          expect(result.issues[0]).toContain("seuil 9/10");
+        } finally {
+          _setMaturityThresholdForTests(undefined);
+        }
+      });
+
+      it("V6: uses default threshold 7 without override", () => {
+        _setMaturityThresholdForTests(undefined);
+        const result = evaluateGate(7, null, 0, 2);
+        expect(result.passed).toBe(true);
+      });
     });
   });
 });
