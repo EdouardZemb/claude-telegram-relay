@@ -74,6 +74,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `tts.ts` | Text-to-speech via Piper (local) |
 | `job-manager.ts` | Background job manager: fire-and-forget, semaphore concurrency, persistence, batch result parsing, progress messaging |
 | `feature-flags.ts` | Feature flags: Supabase persistence + in-memory cache, file fallback (initFeatureFlags, refreshFeatureFlags, isFeatureEnabled, setFeature async) |
+| `github-sync.ts` | GitHub sync: unidirectional push of pipeline activity to GitHub Issues + Project Board, gh CLI wrapper, entity map CRUD, document chunking, fire-and-forget hooks |
 | `pipeline-tracker.ts` | SDD pipeline tracker: per-chat state tracking, disk persistence, status bar formatting, pipeline context injection for prompts |
 | `conversation-handoff.ts` | Conversation-to-agent handoff: local pattern matching extraction of decisions/constraints |
 | `sdd-agents.ts` | SDD agent functions: business logic for each pipeline phase (explore, spec, challenge, implement, review), auto-merge via gh pr merge --auto |
@@ -126,7 +127,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 
 ### Database (Supabase)
 
-Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`, `prompt_versions`, `agent_memory`, `feature_flags`
+Tables: `messages`, `memory`, `memory_archive`, `tasks`, `projects`, `prds`, `sprint_metrics`, `workflow_logs`, `feedback_rules`, `workflow_proposals`, `retros`, `logs`, `document_shards`, `cost_tracking`, `blackboard`, `pipeline_runs`, `gate_evaluations`, `trust_scores`, `agent_events`, `document_categories`, `documents`, `prompt_versions`, `agent_memory`, `feature_flags`, `github_entity_map`
 
 RPCs: `get_recent_messages`, `get_active_goals`, `get_facts`, `get_sprint_summary`, `match_messages`, `match_memory`, `match_documents`, `archive_old_memories`, `bump_memory_access`
 
