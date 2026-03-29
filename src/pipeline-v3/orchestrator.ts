@@ -7,6 +7,7 @@
 
 import { readFile } from "fs/promises";
 import { type SpawnClaudeOptions, type SpawnClaudeResult, spawnClaude } from "../agent.ts";
+import { syncPhaseComplete, syncRunComplete, syncRunStart } from "../github-sync.ts";
 import { createLogger } from "../logger.ts";
 import { handleV3PhaseResult } from "./engine.ts";
 import { runReviewPanel } from "./reviewers.ts";
@@ -161,6 +162,8 @@ export async function runV3Pipeline(
   name: string,
   specPath: string,
   onProgress: OnV3Progress,
+  // biome-ignore lint/suspicious/noExplicitAny: supabase client type not available here
+  supabase?: any,
 ): Promise<{ result: string; run: V3Run }> {
   const run = createEmptyV3Run(maturationRunId, name, specPath);
   log.info("V3 pipeline started", { runId: run.id, name, specPath });
@@ -178,6 +181,14 @@ export async function runV3Pipeline(
       result: `Spec loaded (${specContent.length} chars)`,
     });
     await onProgress(`[V3] Bridge OK (${specContent.length} chars)`);
+    // Fire-and-forget GitHub sync
+    if (supabase) {
+      syncRunStart(
+        supabase,
+        { id: run.id, name, rawInput: specContent.substring(0, 500) },
+        "v3",
+      ).catch((err) => log.warn("GitHub sync failed for V3 run start", { error: String(err) }));
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     handleV3PhaseResult(run, "bridge", { status: "failed", result: msg });
@@ -228,6 +239,18 @@ export async function runV3Pipeline(
           status: "ok",
           result: result.stdout.substring(0, 500),
         });
+        if (supabase) {
+          syncPhaseComplete(
+            supabase,
+            run.id,
+            "implement",
+            "v3",
+            [result.stdout.substring(0, 2000)],
+            run.branchName || "",
+          ).catch((err) =>
+            log.warn("GitHub sync failed", { phase: "implement", error: String(err) }),
+          );
+        }
         await onProgress(`[V3] Implementation OK`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -255,6 +278,18 @@ export async function runV3Pipeline(
           panelVerdict,
           result: `${panelVerdict.verdict} (${panelVerdict.approvedCount}/${panelVerdict.totalResponded})`,
         });
+
+        if (supabase) {
+          const verdictSummary = `${panelVerdict.verdict} (${panelVerdict.approvedCount}/${panelVerdict.totalResponded})`;
+          syncPhaseComplete(
+            supabase,
+            run.id,
+            `review-${run.iteration}`,
+            "v3",
+            [panelVerdict.changeRequests || ""],
+            verdictSummary,
+          ).catch((err) => log.warn("GitHub sync failed", { phase: "review", error: String(err) }));
+        }
 
         if (panelVerdict.verdict === "APPROVED") {
           await onProgress(
@@ -311,6 +346,11 @@ export async function runV3Pipeline(
   if (run.finalStatus === "merged") {
     const prInfo = run.prUrl || "no PR URL";
     log.info("V3 pipeline completed successfully", { runId: run.id, name, prUrl: run.prUrl });
+    if (supabase) {
+      syncRunComplete(supabase, run.id, run.finalStatus || "unknown").catch((err) =>
+        log.warn("GitHub sync failed for V3 completion", { error: String(err) }),
+      );
+    }
     return { result: `V3_DONE:${name} — ${prInfo}`, run };
   }
 
@@ -320,6 +360,11 @@ export async function runV3Pipeline(
       name,
       iterations: run.iteration,
     });
+    if (supabase) {
+      syncRunComplete(supabase, run.id, run.finalStatus || "unknown").catch((err) =>
+        log.warn("GitHub sync failed for V3 completion", { error: String(err) }),
+      );
+    }
     return { result: `V3_CIRCUIT_BREAKER:${name}`, run };
   }
 

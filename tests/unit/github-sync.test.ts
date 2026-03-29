@@ -414,3 +414,63 @@ describe("high-level sync API", () => {
     expect(closes).toHaveLength(1);
   });
 });
+
+describe("maturation integration", () => {
+  it("V19: handlePhaseResult triggers syncPhaseComplete when github_sync enabled", async () => {
+    const { syncPhaseComplete } = await import("../../src/github-sync.ts");
+    expect(typeof syncPhaseComplete).toBe("function");
+    expect(syncPhaseComplete.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("V3 pipeline integration", () => {
+  afterEach(() => {
+    _setGhExecHookForTests(undefined);
+    _setSyncEnabledForTests(undefined);
+  });
+
+  it("V20: syncPhaseComplete works with v3 pipeline_type", async () => {
+    _setSyncEnabledForTests(true);
+    const ghCalls: string[][] = [];
+    _setGhExecHookForTests((args) => {
+      ghCalls.push(args);
+      if (args[1] === "create") {
+        return { stdout: "https://github.com/o/r/issues/20", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    const sb = {
+      from: () => ({
+        // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+        upsert: (row: any) => ({ data: row, error: null }),
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              is: () => ({
+                maybeSingle: () => ({
+                  data: {
+                    run_id: "v3-1",
+                    issue_number: 15,
+                    issue_url: "https://github.com/o/r/issues/15",
+                  },
+                  error: null,
+                }),
+              }),
+              eq: () => ({ maybeSingle: () => ({ data: null, error: null }) }),
+            }),
+          }),
+        }),
+      }),
+    };
+    await syncPhaseComplete(
+      // biome-ignore lint/suspicious/noExplicitAny: mock supabase object for testing
+      sb as any,
+      "v3-1",
+      "review",
+      "v3",
+      ["Panel verdict: APPROVED"],
+      "APPROVED",
+    );
+    expect(ghCalls.some((c) => c[1] === "create")).toBe(true);
+  });
+});

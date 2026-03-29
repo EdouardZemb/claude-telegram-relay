@@ -174,6 +174,32 @@ export async function runMaturationPipeline(
     run = handlePhaseResult(run, phaseName, result);
     await saveRunMeta(run);
 
+    // Fire-and-forget GitHub sync
+    if (bctx.supabase) {
+      const sb = bctx.supabase;
+      import("../github-sync.ts").then(({ syncPhaseComplete }) => {
+        const docContents = result.documents.map((docPath: string) => {
+          try {
+            return Bun.file(docPath).text();
+          } catch {
+            return Promise.resolve("");
+          }
+        });
+        Promise.all(docContents).then((contents) => {
+          syncPhaseComplete(
+            sb,
+            run.id,
+            phaseName,
+            "maturation",
+            contents.filter(Boolean),
+            result.verdict,
+          ).catch((err: unknown) =>
+            log.warn("GitHub sync failed for phase", { phase: phaseName, error: String(err) }),
+          );
+        });
+      });
+    }
+
     if (result.status === "failed") {
       await onProgress(buildMaturationStatusBar(run));
       return `MATURATION_FAILED:${phaseName}:${run.name}`;
@@ -271,6 +297,33 @@ export async function resumeMaturationAfterClarify(
       const result = await runUnderstandPhase(run);
       const { handlePhaseResult } = await import("../maturation/engine.ts");
       run = handlePhaseResult(run, "understand", result);
+
+      // Fire-and-forget GitHub sync
+      if (bctx.supabase) {
+        const sb = bctx.supabase;
+        import("../github-sync.ts").then(({ syncPhaseComplete }) => {
+          const docContents = result.documents.map((docPath: string) => {
+            try {
+              return Bun.file(docPath).text();
+            } catch {
+              return Promise.resolve("");
+            }
+          });
+          Promise.all(docContents).then((contents) => {
+            syncPhaseComplete(
+              sb,
+              run.id,
+              "understand",
+              "maturation",
+              contents.filter(Boolean),
+              result.verdict,
+            ).catch((err: unknown) =>
+              log.warn("GitHub sync failed for phase", { phase: "understand", error: String(err) }),
+            );
+          });
+        });
+      }
+
       // Force skip clarify after re-run (already clarified)
       run.steps.clarify.status = "ok";
       run.currentPhase = "explore";
@@ -376,6 +429,16 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
     const run = createEmptyRun(chatId, threadId, name, description);
     await initRun(run);
 
+    // Fire-and-forget GitHub sync for run start
+    if (bctx.supabase) {
+      const sb = bctx.supabase;
+      import("../github-sync.ts").then(({ syncRunStart }) => {
+        syncRunStart(sb, { id: run.id, name: run.name, rawInput: description }, "maturation").catch(
+          (err: unknown) => log.warn("GitHub sync failed for run start", { error: String(err) }),
+        );
+      });
+    }
+
     const statusBar = buildMaturationStatusBar(run);
     await sendResponseHtml(
       ctx,
@@ -455,7 +518,13 @@ export default function maturationCommands(bctx: BotContext): Composer<Context> 
               const onProgress = async (msg: string) => {
                 await sendProgressMessage(chatId, threadId, msg);
               };
-              const { result } = await runV3Pipeline(run.id, run.name, specPath, onProgress);
+              const { result } = await runV3Pipeline(
+                run.id,
+                run.name,
+                specPath,
+                onProgress,
+                bctx.supabase,
+              );
               return result;
             },
             { messageThreadId: threadId },
