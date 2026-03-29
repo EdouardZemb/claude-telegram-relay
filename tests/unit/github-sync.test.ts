@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
   _ghExecForTests,
   _setGhExecHookForTests,
@@ -17,6 +17,33 @@ import {
   syncRunComplete,
   syncRunStart,
 } from "../../src/github-sync.ts";
+
+// CI does not have TELEGRAM_BOT_TOKEN etc. — ensure getConfig() works
+const savedEnv: Record<string, string | undefined> = {};
+const ciEnv: Record<string, string> = {
+  TELEGRAM_BOT_TOKEN: "test-token",
+  TELEGRAM_USER_ID: "123",
+  SUPABASE_URL: "https://test.supabase.co",
+  SUPABASE_ANON_KEY: "test-key",
+};
+
+beforeAll(async () => {
+  for (const key of Object.keys(ciEnv)) {
+    savedEnv[key] = process.env[key];
+    if (!process.env[key]) process.env[key] = ciEnv[key];
+  }
+  const { _resetConfigForTesting } = await import("../../src/config.ts");
+  _resetConfigForTesting();
+});
+
+afterAll(async () => {
+  for (const [key, val] of Object.entries(savedEnv)) {
+    if (val === undefined) delete process.env[key];
+    else process.env[key] = val;
+  }
+  const { _resetConfigForTesting } = await import("../../src/config.ts");
+  _resetConfigForTesting();
+});
 
 describe("github-sync config", () => {
   it("V1: GITHUB_PROJECT_NUMBER defaults to 0", async () => {
