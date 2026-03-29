@@ -6,7 +6,15 @@ const log = createLogger("maturation/scoring");
 
 const MATURITY_THRESHOLD_DEFAULT = 7;
 
+let _maturityThresholdOverride: number | undefined;
+
+/** @internal — for tests: override threshold without requiring env vars */
+export function _setMaturityThresholdForTests(value: number | undefined): void {
+  _maturityThresholdOverride = value;
+}
+
 function getMaturityThreshold(): number {
+  if (_maturityThresholdOverride !== undefined) return _maturityThresholdOverride;
   try {
     return getConfig().maturityThreshold;
   } catch {

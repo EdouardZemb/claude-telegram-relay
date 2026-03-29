@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { _resetConfigForTesting } from "../../src/config.ts";
+import { describe, expect, it } from "bun:test";
 import {
+  _setMaturityThresholdForTests,
   evaluateGate,
   extractAmbiguityScore,
   extractMaturityScore,
@@ -75,25 +75,20 @@ describe("maturation/scoring", () => {
     });
 
     describe("AR2: configurable threshold", () => {
-      beforeEach(() => {
-        _resetConfigForTesting();
+      it("V5: uses custom threshold via hook", () => {
+        _setMaturityThresholdForTests(9);
+        try {
+          // Score 8 should fail with threshold 9
+          const result = evaluateGate(8, null, 0, 2);
+          expect(result.passed).toBe(false);
+          expect(result.issues[0]).toContain("seuil 9/10");
+        } finally {
+          _setMaturityThresholdForTests(undefined);
+        }
       });
 
-      afterEach(() => {
-        delete process.env.MATURITY_THRESHOLD;
-        _resetConfigForTesting();
-      });
-
-      it("V5: uses custom threshold from env", () => {
-        process.env.MATURITY_THRESHOLD = "9";
-        // Score 8 should fail with threshold 9
-        const result = evaluateGate(8, null, 0, 2);
-        expect(result.passed).toBe(false);
-        expect(result.issues[0]).toContain("seuil 9/10");
-      });
-
-      it("V6: falls back to default threshold 7 without env", () => {
-        // No MATURITY_THRESHOLD set, getConfig() will throw (required vars absent)
+      it("V6: uses default threshold 7 without override", () => {
+        _setMaturityThresholdForTests(undefined);
         const result = evaluateGate(7, null, 0, 2);
         expect(result.passed).toBe(true);
       });
