@@ -57,5 +57,17 @@ module.exports = {
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss",
     },
+    {
+      name: "claude-chrome-vnc",
+      script: "/home/edouard/chrome-vnc-service.sh",
+      autorestart: true,
+      max_restarts: 5,
+      min_uptime: "10s",
+      restart_delay: 5000,
+      error_file: "/home/edouard/.claude-relay/logs/chrome-vnc-error.log",
+      out_file: "/home/edouard/.claude-relay/logs/chrome-vnc-out.log",
+      merge_logs: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+    },
   ],
 };

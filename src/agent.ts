@@ -54,6 +54,8 @@ export interface SpawnClaudeOptions {
   timeout?: number;
   /** S34: Enable model cascade (Haiku -> Sonnet -> Opus). AC-011 to AC-015 */
   cascade?: boolean;
+  /** Enable Chrome browser integration via Claude in Chrome extension */
+  chrome?: boolean;
 }
 
 export interface SpawnClaudeResult {
@@ -191,6 +193,11 @@ async function spawnClaudeCore(options: SpawnClaudeOptions): Promise<SpawnClaude
   // PR context for code review
   if (options.fromPr !== undefined) {
     args.push("--from-pr", String(options.fromPr));
+  }
+
+  // Chrome browser integration
+  if (options.chrome) {
+    args.push("--chrome");
   }
 
   // Always skip permissions for automation
