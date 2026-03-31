@@ -10,6 +10,7 @@ import { unlink, writeFile } from "fs/promises";
 import { Composer, type Context } from "grammy";
 import { join } from "path";
 import { formatActionsForLLM } from "../action-registry.ts";
+import { spawnClaude } from "../agent.ts";
 import { recordResponseTime } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, BOT_TOKEN, formatDocumentContext, UPLOADS_DIR } from "../bot-context.ts";
@@ -359,6 +360,29 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       resume: true,
       heartbeat: bctx.heartbeatOpts(ctx),
     });
+
+    // Browser delegation: if Claude signals [BROWSE: ...], spawn Claude Code with Chrome
+    const browseMatch = rawResponse.match(/\[BROWSE:\s*(.+?)\]/s);
+    if (browseMatch) {
+      const browseInstruction = browseMatch[1].trim();
+      log.info(`Browser delegation detected: ${browseInstruction.substring(0, 80)}...`);
+      await ctx.replyWithChatAction("typing");
+      try {
+        const browseResult = await spawnClaude({
+          prompt: browseInstruction,
+          chrome: true,
+          effort: "high",
+          timeout: 180_000,
+        });
+        const browseResponse = browseResult.stdout.trim() || "Aucun résultat du navigateur.";
+        await bctx.saveMessage("assistant", browseResponse, meta);
+        await options.respond(ctx, browseResponse);
+      } catch (browseError) {
+        log.error("Browser delegation failed", { error: String(browseError) });
+        await options.respond(ctx, "La navigation web a échoué. Réessaie dans quelques instants.");
+      }
+      return;
+    }
 
     const finalResponse = await processMemoryIntents(bctx.supabase, rawResponse);
 

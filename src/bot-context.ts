@@ -600,6 +600,19 @@ function buildPrompt(
       "Prochaine etape: [suggested next step]",
   );
 
+  parts.push(
+    "\nBROWSER ACCESS:" +
+      "\nYou have access to a real Chrome browser on the server. When the user's request requires browsing the web " +
+      "(checking prices, reading a specific website, looking up real-time information, filling forms, etc.), " +
+      "respond ONLY with the tag [BROWSE: detailed instruction of what to do in the browser]. " +
+      "Do NOT attempt to answer from memory if the user explicitly asks to check a website or needs current data. " +
+      "Examples:" +
+      "\n- User: 'va sur sncf-connect.com et cherche les trains pour Paris' -> [BROWSE: Navigate to sncf-connect.com and search for trains to Paris]" +
+      "\n- User: 'quel est le prix du billet Mulhouse-Paris le 28 août' -> [BROWSE: Go to sncf-connect.com, search for Mulhouse to Paris on August 28, and report available trains with prices]" +
+      "\n- User: 'ouvre leboncoin et cherche des vélos' -> [BROWSE: Navigate to leboncoin.fr and search for vélos, report the first results with prices]" +
+      "\nDo NOT use [BROWSE] for questions you can answer from knowledge (general facts, coding, etc.).",
+  );
+
   if (process.env.VOICE_PROVIDER || process.env.TTS_PROVIDER) {
     parts.push(
       "\nVOICE CAPABILITIES:" +
