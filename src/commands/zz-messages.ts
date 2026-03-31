@@ -366,11 +366,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
     if (browseMatch) {
       const browseInstruction = browseMatch[1].trim();
       log.info(`Browser delegation detected: ${browseInstruction.substring(0, 80)}...`);
+      const vncUrl = "http://192.168.1.129:6080/vnc.html";
+      await options.respond(
+        ctx,
+        `Navigation en cours... Si un captcha apparait, interviens ici :\n${vncUrl}`,
+      );
       await ctx.replyWithChatAction("typing");
       try {
         const browseStart = Date.now();
         const browseResult = await spawnClaude({
-          prompt: browseInstruction,
+          prompt:
+            browseInstruction +
+            "\nIMPORTANT: Si tu rencontres un captcha ou une verification anti-bot, " +
+            "dis-le clairement dans ta reponse et attends 30 secondes avant de reessayer " +
+            "(l'utilisateur peut intervenir manuellement via noVNC).",
           chrome: true,
           effort: "high",
           timeout: 180_000,
