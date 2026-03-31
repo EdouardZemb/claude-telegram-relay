@@ -368,12 +368,20 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       log.info(`Browser delegation detected: ${browseInstruction.substring(0, 80)}...`);
       await ctx.replyWithChatAction("typing");
       try {
+        const browseStart = Date.now();
         const browseResult = await spawnClaude({
           prompt: browseInstruction,
           chrome: true,
           effort: "high",
           timeout: 180_000,
         });
+        const elapsed = ((Date.now() - browseStart) / 1000).toFixed(0);
+        log.info(
+          `Browser result: exit=${browseResult.exitCode} stdout=${browseResult.stdout.length}b stderr=${browseResult.stderr.length}b elapsed=${elapsed}s`,
+        );
+        if (browseResult.exitCode !== 0) {
+          log.error(`Browser stderr: ${browseResult.stderr.substring(0, 500)}`);
+        }
         const browseResponse = browseResult.stdout.trim() || "Aucun résultat du navigateur.";
         await bctx.saveMessage("assistant", browseResponse, meta);
         await options.respond(ctx, browseResponse);
