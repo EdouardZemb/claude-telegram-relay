@@ -1,0 +1,31 @@
+{
+  "93ac639ffe936026": {
+    "verdict": "GO",
+    "rationale": "OK",
+    "timestamp": 1775464125065
+  },
+  "ddf377084a322427": {
+    "verdict": "GO",
+    "rationale": "OK",
+    "timestamp": 1775464125065
+  },
+  "4b19bdb438295f9b": {
+    "verdict": "GO",
+    "rationale": "Feature bien definie et alignee avec roadmap",
+    "timestamp": 1775464125066
+  },
+  "c363f46c97e08d98": {
+    "verdict": "GO",
+    "rationale": "Feature pertinente sous conditions",
+    "timestamp": 1775464125066,
+    "conditions": [
+      "Valider avec 3 utilisateurs",
+      "Prototype avant implementation complete"
+    ]
+  },
+  "88a02320cc3603ae": {
+    "verdict": "GO",
+    "rationale": "Feature bien definie et alignee avec roadmap",
+    "timestamp": 1775464125066
+  }
+}

@@ -26,10 +26,11 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `commands/documents.ts` | Composer: /docs + classification callbacks |
 | `commands/exploration.ts` | Composer: /explore — Explorer agent (Ada) |
 | `commands/jobs.ts` | Composer: /jobs (list, cancel) |
-| `commands/command-router.ts` | Routing helpers: actionVerb, buildClarificationQuestion, routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate |
+| `commands/command-router.ts` | Routing helpers: actionVerb, buildClarificationQuestion, routeIntent, checkPendingClarification, handleConfirmationCallback, buildSyntheticUpdate, showFeatureRequestWithAR2 |
 | `commands/sdd-flow.ts` | Composer: SDD InlineKeyboard callbacks (sdd_ prefix), contextual keyboard construction, convergence detection |
 | `commands/utilities.ts` | Composer: /speak, /export, /feature, /rollback + callbacks |
 | `commands/zz-messages.ts` | Composer: message handlers (text, voice, photo, document) with intent routing and SDD pipeline context injection |
+| `commands/zz-messages-pipeline.ts` | Shared processMessageInput pipeline extracted from zz-messages.ts (S3 split): maturation intercepts, intent detection, AR2 gate routing, LLM fallback, SDD convergence |
 | `commands/maturation.ts` | Composer: /idea (maturation pipeline launch + mat_ callbacks) |
 | `maturation/types.ts` | Maturation engine types: phases, steps, runs, documents, quality gates |
 | `maturation/documents.ts` | Maturation filesystem I/O: run directories, atomic document persistence |
@@ -61,6 +62,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `memory/ideas.ts` | Ideas CRUD: listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList |
 | `memory/graph.ts` | Memory linking, chains, clustering, health stats, buildMemoryChains |
 | `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
+| `ar2-gate.ts` | AR2 expert-persona gate: GO/NO-GO feature request validation before maturation, rolling context compression (17K tokens), JSON persistence, dedicated semaphore |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, cost tracking, observability |

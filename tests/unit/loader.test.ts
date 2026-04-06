@@ -308,9 +308,10 @@ export default c;
         expect(summary).toBeTruthy();
         const match = summary!.match(/(\d+)\/(\d+)/);
         expect(match).toBeTruthy();
-        // command-router.ts is a utility module (no default Composer export) — intentionally skipped.
+        // command-router.ts and zz-messages-pipeline.ts are utility modules
+        // (no default Composer export) — intentionally skipped.
         // All other real Composer modules should load successfully.
-        const KNOWN_NON_COMPOSER_COUNT = 1; // command-router.ts
+        const KNOWN_NON_COMPOSER_COUNT = 2; // command-router.ts, zz-messages-pipeline.ts
         const total = parseInt(match![2], 10);
         const loaded = parseInt(match![1], 10);
         expect(loaded).toBe(total - KNOWN_NON_COMPOSER_COUNT);
