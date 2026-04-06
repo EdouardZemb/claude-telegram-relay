@@ -334,10 +334,11 @@ export async function showFeatureRequestWithAR2(
   subject: string,
   threadOpts: Record<string, unknown>,
   callLLM: (prompt: string) => Promise<string>,
+  context?: string,
 ): Promise<void> {
   try {
     const { runAR2Gate } = await import("../ar2-gate.ts");
-    const ar2Result = await runAR2Gate(subject, "", callLLM);
+    const ar2Result = await runAR2Gate(subject, context ?? "", callLLM);
 
     const key = confirmationKey(ctx);
     pendingFeatureRequests.set(key, { subject, timestamp: Date.now() });

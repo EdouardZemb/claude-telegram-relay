@@ -62,7 +62,8 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `memory/ideas.ts` | Ideas CRUD: listIdeas, getIdea, reviewIdea, promoteIdea, archiveIdea, formatIdeasList |
 | `memory/graph.ts` | Memory linking, chains, clustering, health stats, buildMemoryChains |
 | `memory/agent-memory.ts` | Role-specific agent memory: ROLE_CANONICAL_TAGS, saveAgentMemory, getAgentMemories, graduateAgentMemory |
-| `ar2-gate.ts` | AR2 expert-persona gate: GO/NO-GO feature request validation before maturation, rolling context compression (17K tokens), JSON persistence, dedicated semaphore |
+| `ar2-gate.ts` | AR2 expert-persona gate: GO/NO-GO feature request validation before maturation, rolling context compression (17K tokens), JSON persistence, async I/O, cache TTL (5min), semaphore with acquisition timeout |
+| `browser-delegation.ts` | Browser delegation service: wraps spawnClaude with Chrome for web navigation, VNC URL from config (NOVNC_URL), instruction length capped at 500 chars (security) |
 | `gates.ts` | BMad gates: PRD approval, architecture validation, code review |
 | `semaphore.ts` | Promise-based counting semaphore (default max 3) |
 | `llm-ops.ts` | Unified LLM-Ops facade: prompt versioning, circuit-breaker, span attribution, cost tracking, observability |

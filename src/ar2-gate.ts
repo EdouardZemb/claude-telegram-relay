@@ -15,7 +15,8 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync } from "fs";
+import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { createLogger } from "./logger.ts";
 import { Semaphore } from "./semaphore.ts";
@@ -33,6 +34,12 @@ const MAX_CONTEXT_TOKENS = 17_000;
 /** JSON file path for persisting AR2 gate decisions */
 export const AR2_RESULTS_FILE = join(process.cwd(), ".ar2-gate-results.json");
 
+/** TTL for cached AR2 results (5 minutes in ms) */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Semaphore acquisition timeout in ms — prevents indefinite blocking */
+const SEMAPHORE_TIMEOUT_MS = 15_000;
+
 // ── Dedicated semaphore ──────────────────────────────────────────
 
 /**
@@ -40,6 +47,22 @@ export const AR2_RESULTS_FILE = join(process.cwd(), ".ar2-gate-results.json");
  * Prevents AR2 calls from competing with main bot operations.
  */
 const ar2Semaphore = new Semaphore(1);
+
+/**
+ * Acquire the semaphore with a timeout.
+ * Rejects with a timeout error if the semaphore is not acquired within timeoutMs.
+ */
+async function acquireWithTimeout(semaphore: Semaphore, timeoutMs: number): Promise<void> {
+  return Promise.race([
+    semaphore.acquire(),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`AR2 semaphore acquisition timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      ),
+    ),
+  ]);
+}
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -87,17 +110,18 @@ function subjectKey(subject: string): string {
 
 /**
  * Persist an AR2 gate result to the local JSON file.
- * Creates or updates the file atomically (overwrite with full content).
+ * Creates or updates the file (overwrite with full content).
+ * Async to avoid blocking the event loop.
  */
-export function persistAR2Result(subject: string, result: AR2Result): void {
+export async function persistAR2Result(subject: string, result: AR2Result): Promise<void> {
   try {
     let data: Record<string, AR2Result> = {};
     if (existsSync(AR2_RESULTS_FILE)) {
-      const raw = readFileSync(AR2_RESULTS_FILE, "utf-8");
+      const raw = await readFile(AR2_RESULTS_FILE, "utf-8");
       data = JSON.parse(raw) as Record<string, AR2Result>;
     }
     data[subjectKey(subject)] = result;
-    writeFileSync(AR2_RESULTS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    await writeFile(AR2_RESULTS_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
     log.error("Failed to persist AR2 result", { error: String(err) });
   }
@@ -105,12 +129,13 @@ export function persistAR2Result(subject: string, result: AR2Result): void {
 
 /**
  * Load a previously persisted AR2 result for a subject.
- * Returns null if no result exists (file missing or subject not found).
+ * Returns null if no result exists (file missing, subject not found, or I/O error).
+ * Async to avoid blocking the event loop.
  */
-export function loadAR2Result(subject: string): AR2Result | null {
+export async function loadAR2Result(subject: string): Promise<AR2Result | null> {
   try {
     if (!existsSync(AR2_RESULTS_FILE)) return null;
-    const raw = readFileSync(AR2_RESULTS_FILE, "utf-8");
+    const raw = await readFile(AR2_RESULTS_FILE, "utf-8");
     const data = JSON.parse(raw) as Record<string, AR2Result>;
     return data[subjectKey(subject)] ?? null;
   } catch {
@@ -158,7 +183,24 @@ export async function runAR2Gate(
   context: string,
   callLLM: (prompt: string) => Promise<string>,
 ): Promise<AR2Result> {
-  await ar2Semaphore.acquire();
+  // Cache lookup: return cached result if within TTL (avoids repeated LLM calls for same subject)
+  const cached = await loadAR2Result(subject);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    log.info(`AR2 cache hit for subject: ${subject.substring(0, 40)}`);
+    return cached;
+  }
+
+  try {
+    await acquireWithTimeout(ar2Semaphore, SEMAPHORE_TIMEOUT_MS);
+  } catch (timeoutErr) {
+    log.error("AR2 semaphore timeout, failing open", { error: String(timeoutErr) });
+    return {
+      verdict: "GO",
+      rationale: "Evaluation non disponible (timeout).",
+      timestamp: Date.now(),
+    };
+  }
+
   try {
     const compressedContext = compressContext(context);
     const prompt = buildAR2Prompt(subject, compressedContext);
@@ -200,7 +242,7 @@ export async function runAR2Gate(
         : {}),
     };
 
-    persistAR2Result(subject, result);
+    await persistAR2Result(subject, result);
     return result;
   } finally {
     ar2Semaphore.release();

@@ -11,13 +11,15 @@
  * V4: runAR2Gate falls back to GO on malformed LLM response (fail-open)
  * V5: compressContext is a no-op for short text (under threshold)
  * V6: compressContext truncates long text and appends truncation marker
- * V7: persistAR2Result writes JSON file for subject hash
- * V8: loadAR2Result reads back the persisted result
+ * V7: persistAR2Result writes JSON file for subject hash (async)
+ * V8: loadAR2Result reads back the persisted result (async)
  * V9: loadAR2Result returns null for unknown subject
  * V10: runAR2Gate calls LLM with expert persona prompt containing subject
  * V11: AR2Result includes timestamp
  * V12: compressContext preserves recent content (rolling: keeps tail)
  * V13: runAR2Gate conditions array is populated when present in LLM response
+ * V14: runAR2Gate returns cached result within TTL (no LLM call)
+ * V15: runAR2Gate calls LLM when cache is expired
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -162,7 +164,7 @@ describe("compressContext — preserves tail (rolling) (V12)", () => {
   });
 });
 
-// ── V7: persistAR2Result writes JSON ─────────────────────────────
+// ── V7: persistAR2Result writes JSON (async) ─────────────────────
 
 describe("persistAR2Result — writes JSON (V7)", () => {
   beforeEach(() => {
@@ -177,8 +179,8 @@ describe("persistAR2Result — writes JSON (V7)", () => {
     }
   });
 
-  it("creates the results file", () => {
-    persistAR2Result("test-feature", {
+  it("creates the results file", async () => {
+    await persistAR2Result("test-feature", {
       verdict: "GO",
       rationale: "Test rationale",
       timestamp: Date.now(),
@@ -186,18 +188,18 @@ describe("persistAR2Result — writes JSON (V7)", () => {
     expect(existsSync(AR2_RESULTS_FILE)).toBe(true);
   });
 
-  it("writes the result with correct verdict", () => {
-    persistAR2Result("test-feature", {
+  it("writes the result with correct verdict", async () => {
+    await persistAR2Result("test-feature", {
       verdict: "NO_GO",
       rationale: "Not aligned",
       timestamp: Date.now(),
     });
-    const loaded = loadAR2Result("test-feature");
+    const loaded = await loadAR2Result("test-feature");
     expect(loaded?.verdict).toBe("NO_GO");
   });
 });
 
-// ── V8: loadAR2Result reads persisted result ─────────────────────
+// ── V8: loadAR2Result reads persisted result (async) ─────────────
 
 describe("loadAR2Result — reads persisted result (V8)", () => {
   beforeEach(() => {
@@ -212,26 +214,26 @@ describe("loadAR2Result — reads persisted result (V8)", () => {
     }
   });
 
-  it("reads back the verdict", () => {
-    persistAR2Result("my-feature", {
+  it("reads back the verdict", async () => {
+    await persistAR2Result("my-feature", {
       verdict: "GO",
       rationale: "All good",
       timestamp: 12345,
     });
-    const result = loadAR2Result("my-feature");
+    const result = await loadAR2Result("my-feature");
     expect(result?.verdict).toBe("GO");
     expect(result?.rationale).toBe("All good");
     expect(result?.timestamp).toBe(12345);
   });
 
-  it("reads back conditions when present", () => {
-    persistAR2Result("conditional-feature", {
+  it("reads back conditions when present", async () => {
+    await persistAR2Result("conditional-feature", {
       verdict: "GO",
       rationale: "With conditions",
       conditions: ["condition A"],
       timestamp: 99999,
     });
-    const result = loadAR2Result("conditional-feature");
+    const result = await loadAR2Result("conditional-feature");
     expect(result?.conditions).toEqual(["condition A"]);
   });
 });
@@ -251,17 +253,17 @@ describe("loadAR2Result — null for unknown subject (V9)", () => {
     }
   });
 
-  it("returns null when file does not exist", () => {
-    expect(loadAR2Result("unknown")).toBeNull();
+  it("returns null when file does not exist", async () => {
+    expect(await loadAR2Result("unknown")).toBeNull();
   });
 
-  it("returns null for subject not in file", () => {
-    persistAR2Result("other-feature", {
+  it("returns null for subject not in file", async () => {
+    await persistAR2Result("other-feature", {
       verdict: "GO",
       rationale: "other",
       timestamp: 1,
     });
-    expect(loadAR2Result("unknown-subject")).toBeNull();
+    expect(await loadAR2Result("unknown-subject")).toBeNull();
   });
 });
 
@@ -307,5 +309,78 @@ describe("AR2 Gate — conditions populated (V13)", () => {
   it("conditions is undefined when not in LLM response", async () => {
     const result = await runAR2Gate("simple feature", "", makeGoLLM());
     expect(result.conditions).toBeUndefined();
+  });
+});
+
+// ── V14: cache TTL — returns cached result within TTL ────────────
+
+describe("AR2 Gate — cache TTL (V14)", () => {
+  beforeEach(() => {
+    if (existsSync(AR2_RESULTS_FILE)) {
+      rmSync(AR2_RESULTS_FILE);
+    }
+  });
+
+  afterEach(() => {
+    if (existsSync(AR2_RESULTS_FILE)) {
+      rmSync(AR2_RESULTS_FILE);
+    }
+  });
+
+  it("returns cached result without calling LLM when within TTL", async () => {
+    // Pre-seed a recent cached result
+    await persistAR2Result("cached-feature", {
+      verdict: "NO_GO",
+      rationale: "Cached verdict",
+      timestamp: Date.now(), // fresh timestamp
+    });
+
+    let llmCalled = false;
+    const trackingLLM = async (_prompt: string): Promise<string> => {
+      llmCalled = true;
+      return JSON.stringify({ verdict: "GO", rationale: "Fresh LLM result" });
+    };
+
+    const result = await runAR2Gate("cached-feature", "", trackingLLM);
+    expect(llmCalled).toBe(false);
+    expect(result.verdict).toBe("NO_GO");
+    expect(result.rationale).toBe("Cached verdict");
+  });
+});
+
+// ── V15: cache TTL — calls LLM when cache is expired ─────────────
+
+describe("AR2 Gate — expired cache (V15)", () => {
+  beforeEach(() => {
+    if (existsSync(AR2_RESULTS_FILE)) {
+      rmSync(AR2_RESULTS_FILE);
+    }
+  });
+
+  afterEach(() => {
+    if (existsSync(AR2_RESULTS_FILE)) {
+      rmSync(AR2_RESULTS_FILE);
+    }
+  });
+
+  it("calls LLM when cached result is older than TTL", async () => {
+    // Pre-seed an expired cached result (6 minutes ago)
+    const SIX_MINUTES_MS = 6 * 60 * 1000;
+    await persistAR2Result("expired-feature", {
+      verdict: "NO_GO",
+      rationale: "Stale cached verdict",
+      timestamp: Date.now() - SIX_MINUTES_MS,
+    });
+
+    let llmCalled = false;
+    const trackingLLM = async (_prompt: string): Promise<string> => {
+      llmCalled = true;
+      return JSON.stringify({ verdict: "GO", rationale: "Fresh LLM result" });
+    };
+
+    const result = await runAR2Gate("expired-feature", "", trackingLLM);
+    expect(llmCalled).toBe(true);
+    expect(result.verdict).toBe("GO");
+    expect(result.rationale).toBe("Fresh LLM result");
   });
 });

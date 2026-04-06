@@ -7,7 +7,6 @@
 
 import type { Context } from "grammy";
 import { formatActionsForLLM } from "../action-registry.ts";
-import { spawnClaude } from "../agent.ts";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, formatDocumentContext } from "../bot-context.ts";
 import type { DocumentSearchResult } from "../documents.ts";
@@ -37,6 +36,32 @@ import { buildSddKeyboard, detectConvergenceInResponse } from "./sdd-flow.ts";
 
 const log = createLogger("zz-messages-pipeline");
 
+// ── Browse intent detection ──────────────────────────────────────
+
+/**
+ * Detect if the user's input is a web browsing request.
+ * Used to gate browser delegation BEFORE the LLM call.
+ * Detection is code-side (not LLM-response-side) to prevent prompt injection.
+ */
+export function detectBrowseIntent(input: string): boolean {
+  if (/https?:\/\/|www\.[a-z]/i.test(input)) return true;
+  const lower = input.toLowerCase();
+  const browseKeywords = [
+    "va sur ",
+    "vas sur ",
+    "aller sur ",
+    "ouvre ",
+    "navigue vers ",
+    "visite le site",
+    "consulte le site",
+    "browse ",
+    "go to ",
+    "open the website",
+    "check the site",
+  ];
+  return browseKeywords.some((kw) => lower.includes(kw));
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 /**
@@ -53,10 +78,6 @@ export interface MessageInputOptions {
   /** Response function: sendResponse for text, sendVoiceResponse for voice */
   respond: (ctx: Context, text: string) => Promise<void>;
 }
-
-// ── Constants ────────────────────────────────────────────────────
-
-const VNC_URL = "http://192.168.1.129:6080/vnc.html";
 
 // ── Core pipeline ────────────────────────────────────────────────
 
@@ -87,10 +108,11 @@ export async function processMessageInput(
   await bctx.saveMessage("user", options.saveMessageText, meta);
 
   // Maturation clarify: intercept messages when a Socratic question is pending
-  const { checkMaturationClarify } = await import("../maturation/clarify.ts");
+  const { checkMaturationClarify, handleClarifyResponse } = await import(
+    "../maturation/clarify.ts"
+  );
   const matRun = await checkMaturationClarify(ctx.chat?.id ?? 0, threadId);
   if (matRun) {
-    const { handleClarifyResponse } = await import("../maturation/clarify.ts");
     const clarifyResult = await handleClarifyResponse(matRun, input, bctx.callClaude);
     if (clarifyResult.status === "waiting" && clarifyResult.question) {
       await bctx.sendResponseHtml(ctx, `\u2753 ${clarifyResult.question}`);
@@ -140,6 +162,27 @@ export async function processMessageInput(
     return;
   }
 
+  // Secure browse delegation: detect from user input (not LLM output — prevents prompt injection)
+  if (isFeatureEnabled("chrome_browse") && detectBrowseIntent(input)) {
+    log.info(`Browse intent detected in user input: ${input.substring(0, 80)}...`);
+    try {
+      const { response, vncUrl } = await bctx.browseClaude(input);
+      if (vncUrl) {
+        await options.respond(
+          ctx,
+          `Navigation en cours... Si un captcha apparait, interviens ici :\n${vncUrl}`,
+        );
+        await ctx.replyWithChatAction("typing");
+      }
+      await bctx.saveMessage("assistant", response, meta);
+      await options.respond(ctx, response);
+    } catch (browseError) {
+      log.error("Browser delegation failed", { error: String(browseError) });
+      await options.respond(ctx, "La navigation web a échoué. Réessaie dans quelques instants.");
+    }
+    return;
+  }
+
   // Context assembly (document search only for text messages)
   const userId = ctx.from?.id?.toString() || ALLOWED_USER_ID;
   const contextPromises: [
@@ -186,7 +229,13 @@ export async function processMessageInput(
   if (regexResult.detected && isFeatureRequestIntent(regexResult.detected)) {
     const subject = regexResult.detected.args || input;
     if (isFeatureEnabled("ar2_gate_enabled")) {
-      await showFeatureRequestWithAR2(ctx, subject, bctx.threadOpts(ctx), bctx.callClaude);
+      await showFeatureRequestWithAR2(
+        ctx,
+        subject,
+        bctx.threadOpts(ctx),
+        bctx.callClaude,
+        recentMessages,
+      );
     } else {
       await showFeatureRequestConfirmation(ctx, subject, bctx.threadOpts(ctx));
     }
@@ -209,7 +258,13 @@ export async function processMessageInput(
     if (llmResult.detected && isFeatureRequestIntent(llmResult.detected)) {
       const subject = llmResult.detected.args || input;
       if (isFeatureEnabled("ar2_gate_enabled")) {
-        await showFeatureRequestWithAR2(ctx, subject, bctx.threadOpts(ctx), bctx.callClaude);
+        await showFeatureRequestWithAR2(
+          ctx,
+          subject,
+          bctx.threadOpts(ctx),
+          bctx.callClaude,
+          recentMessages,
+        );
       } else {
         await showFeatureRequestConfirmation(ctx, subject, bctx.threadOpts(ctx));
       }
@@ -249,38 +304,21 @@ export async function processMessageInput(
     heartbeat: bctx.heartbeatOpts(ctx),
   });
 
-  // Browser delegation: if Claude signals [BROWSE: ...], spawn Claude Code with Chrome
-  const browseMatch = rawResponse.match(/\[BROWSE:\s*(.+?)\]/s);
-  if (browseMatch) {
-    const browseInstruction = browseMatch[1].trim();
-    log.info(`Browser delegation detected: ${browseInstruction.substring(0, 80)}...`);
-    await options.respond(
-      ctx,
-      `Navigation en cours... Si un captcha apparait, interviens ici :\n${VNC_URL}`,
-    );
-    await ctx.replyWithChatAction("typing");
+  // Secure [BROWSE_YES] delegation: Claude emits a content-free token (no injection vector).
+  // The instruction comes from the user's original input, not the LLM output.
+  if (isFeatureEnabled("chrome_browse") && /^\s*\[BROWSE_YES\]\s*$/.test(rawResponse)) {
+    log.info(`[BROWSE_YES] from Claude — delegating with user input as instruction`);
     try {
-      const browseStart = Date.now();
-      const browseResult = await spawnClaude({
-        prompt:
-          browseInstruction +
-          "\nIMPORTANT: Si tu rencontres un captcha ou une verification anti-bot, " +
-          "dis-le clairement dans ta reponse et attends 30 secondes avant de reessayer " +
-          "(l'utilisateur peut intervenir manuellement via noVNC).",
-        chrome: true,
-        effort: "high",
-        timeout: 180_000,
-      });
-      const elapsed = ((Date.now() - browseStart) / 1000).toFixed(0);
-      log.info(
-        `Browser result: exit=${browseResult.exitCode} stdout=${browseResult.stdout.length}b stderr=${browseResult.stderr.length}b elapsed=${elapsed}s`,
-      );
-      if (browseResult.exitCode !== 0) {
-        log.error(`Browser stderr: ${browseResult.stderr.substring(0, 500)}`);
+      const { response, vncUrl } = await bctx.browseClaude(input);
+      if (vncUrl) {
+        await options.respond(
+          ctx,
+          `Navigation en cours... Si un captcha apparait, interviens ici :\n${vncUrl}`,
+        );
+        await ctx.replyWithChatAction("typing");
       }
-      const browseResponse = browseResult.stdout.trim() || "Aucun résultat du navigateur.";
-      await bctx.saveMessage("assistant", browseResponse, meta);
-      await options.respond(ctx, browseResponse);
+      await bctx.saveMessage("assistant", response, meta);
+      await options.respond(ctx, response);
     } catch (browseError) {
       log.error("Browser delegation failed", { error: String(browseError) });
       await options.respond(ctx, "La navigation web a échoué. Réessaie dans quelques instants.");

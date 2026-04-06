@@ -176,9 +176,7 @@ describe("Coding standards — S3: LOC threshold", () => {
 
   // Temporary allowlist for files currently above threshold.
   // These are tracked for future refactoring — see CLAUDE.md "File size guideline".
-  const LOC_ALLOWLIST: Record<string, number> = {
-    "bot-context.ts": 806, // S44 growth — candidate for sub-module refactor
-  };
+  const LOC_ALLOWLIST: Record<string, number> = {};
 
   const files = getAllSourceFiles().filter((f) => {
     if (f.endsWith(".d.ts")) return false;

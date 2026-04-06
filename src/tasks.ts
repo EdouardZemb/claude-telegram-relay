@@ -11,8 +11,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { escapeHtml } from "./bot-context.ts";
 import { kvLine, progressBar, sectionTitle, statusIcon } from "./html-format-helpers.ts";
+import { escapeHtml } from "./html-utils.ts";
 import { createLogger } from "./logger.ts";
 
 const log = createLogger("tasks");
