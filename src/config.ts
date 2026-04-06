@@ -56,6 +56,7 @@ const OptionalEnvSchema = z.object({
   MATURATION_DIR: z.string().default(""),
   MATURITY_THRESHOLD: z.coerce.number().default(7),
   QUORUM_THRESHOLD: z.coerce.number().default(2),
+  NOVNC_URL: z.string().default(""),
 });
 
 // ============================================================
@@ -99,6 +100,7 @@ export type AppConfig = {
   maturationDir: string;
   maturityThreshold: number;
   quorumThreshold: number;
+  novncUrl: string;
 };
 
 // ============================================================
@@ -169,6 +171,7 @@ export function getConfig(): AppConfig {
     maturationDir: optionalResult.MATURATION_DIR,
     maturityThreshold: optionalResult.MATURITY_THRESHOLD,
     quorumThreshold: optionalResult.QUORUM_THRESHOLD,
+    novncUrl: optionalResult.NOVNC_URL,
   };
 
   return _config;

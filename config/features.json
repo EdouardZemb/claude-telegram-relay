@@ -15,5 +15,6 @@
   "agent_context_injection": false,
   "pipeline_v3": false,
   "github_sync": false,
-  "doc_auto_update": false
+  "doc_auto_update": false,
+  "chrome_browse": false
 }
