@@ -5,7 +5,7 @@
  * executeBrowseInstruction tested via mock of spawnClaude.
  */
 
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 
 // ── Mock spawnClaude before importing browser-delegation ───────
 let spawnClaudeMockResult = { stdout: "Browse result", stderr: "", exitCode: 0 };
@@ -20,20 +20,21 @@ mock.module("../../src/agent.ts", () => ({
   },
 }));
 
-// Mock config to control novncUrl
-let mockNovncUrl = "http://localhost:6080/vnc.html";
-let configShouldThrow = false;
+// ── Set required env vars so getConfig() works without mocking config.ts ───
+// Save originals for cleanup
+const savedEnv: Record<string, string | undefined> = {};
+const ENV_DEFAULTS: Record<string, string> = {
+  TELEGRAM_BOT_TOKEN: "test-token",
+  TELEGRAM_USER_ID: "123",
+  SUPABASE_URL: "http://localhost:54321",
+  SUPABASE_ANON_KEY: "test-anon-key",
+  NOVNC_URL: "http://localhost:6080/vnc.html",
+};
 
-mock.module("../../src/config.ts", () => ({
-  getConfig: () => {
-    if (configShouldThrow) throw new Error("config not available");
-    return {
-      novncUrl: mockNovncUrl,
-      telegramToken: "test",
-      allowedUserId: "123",
-    };
-  },
-}));
+for (const [key, val] of Object.entries(ENV_DEFAULTS)) {
+  savedEnv[key] = process.env[key];
+  process.env[key] = val;
+}
 
 import {
   BROWSE_MAX_INSTRUCTION_LENGTH,
@@ -41,6 +42,15 @@ import {
   executeBrowseInstruction,
   matchesBrowsePatterns,
 } from "../../src/browser-delegation.ts";
+import { _resetConfigForTesting } from "../../src/config.ts";
+
+afterEach(() => {
+  // Restore all env vars and reset config after each test
+  for (const [key, val] of Object.entries(ENV_DEFAULTS)) {
+    process.env[key] = val;
+  }
+  _resetConfigForTesting();
+});
 
 // ── Module exports shape ─────────────────────────────────────
 
@@ -204,8 +214,8 @@ describe("executeBrowseInstruction", () => {
   beforeEach(() => {
     spawnClaudeCalls = [];
     spawnClaudeMockResult = { stdout: "Browse result", stderr: "", exitCode: 0 };
-    configShouldThrow = false;
-    mockNovncUrl = "http://localhost:6080/vnc.html";
+    process.env.NOVNC_URL = "http://localhost:6080/vnc.html";
+    _resetConfigForTesting();
   });
 
   it("returns response from spawnClaude stdout", async () => {
@@ -215,15 +225,21 @@ describe("executeBrowseInstruction", () => {
   });
 
   it("returns vncUrl from config", async () => {
-    mockNovncUrl = "http://myhost:6080/vnc.html";
+    process.env.NOVNC_URL = "http://myhost:6080/vnc.html";
+    _resetConfigForTesting();
     const result = await executeBrowseInstruction("va sur google.com");
     expect(result.vncUrl).toBe("http://myhost:6080/vnc.html");
   });
 
   it("returns empty vncUrl when config throws", async () => {
-    configShouldThrow = true;
+    // Remove required env var to make getConfig() throw
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    _resetConfigForTesting();
     const result = await executeBrowseInstruction("va sur google.com");
     expect(result.vncUrl).toBe("");
+    // Restore for other tests
+    process.env.TELEGRAM_BOT_TOKEN = "test-token";
+    _resetConfigForTesting();
   });
 
   it("passes chrome: true to spawnClaude", async () => {
