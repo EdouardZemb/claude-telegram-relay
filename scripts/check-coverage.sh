@@ -37,7 +37,7 @@ ALLOWLIST=(
   "src/commands/quality.ts"
   "src/commands/tasks.ts"
   "src/commands/utilities.ts"
-  "src/commands/zz-messages.ts"
+  # src/commands/zz-messages.ts — removed: now has 34%+ coverage via zz-messages-handlers.test.ts
   # Infrastructure: requires Telegram bot context or external services
   "src/document-sharding.ts"
   "src/heartbeat.ts"
