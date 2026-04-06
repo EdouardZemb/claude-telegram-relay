@@ -173,8 +173,8 @@ export interface BotContext {
   profileContext: string;
   reloadProfile: () => Promise<void>;
 
-  // Idea helper
   findIdeaByPrefix: (prefix: string) => Promise<import("./memory.ts").Idea | null>;
+  vncUrl: string; // noVNC URL for browser delegation (NOVNC_URL env var)
 }
 
 // ============================================================
@@ -590,27 +590,12 @@ function buildPrompt(
       "\n[DONE: search text for completed goal]",
   );
 
-  // SDD CONVERGENCE instruction — always present (F-DA-1 correction).
-  // Behavioral guidance: no side-effect if no SDD pipeline is active.
-  // Positioned after MEMORY MANAGEMENT, before VOICE CAPABILITIES (F-DA-2).
+  // SDD CONVERGENCE — always present (F-DA-1). No side-effect if no SDD pipeline active (F-DA-2).
   parts.push(
     "\nSDD CONVERGENCE: When the conversation converges on clear decisions, " +
       "produce this exact format at the end of your response:\n" +
       "Decisions:\n- [decision 1]\n- [decision 2]\n" +
       "Prochaine etape: [suggested next step]",
-  );
-
-  parts.push(
-    "\nBROWSER ACCESS:" +
-      "\nYou have access to a real Chrome browser on the server. When the user's request requires browsing the web " +
-      "(checking prices, reading a specific website, looking up real-time information, filling forms, etc.), " +
-      "respond ONLY with the tag [BROWSE: detailed instruction of what to do in the browser]. " +
-      "Do NOT attempt to answer from memory if the user explicitly asks to check a website or needs current data. " +
-      "Examples:" +
-      "\n- User: 'va sur sncf-connect.com et cherche les trains pour Paris' -> [BROWSE: Navigate to sncf-connect.com and search for trains to Paris]" +
-      "\n- User: 'quel est le prix du billet Mulhouse-Paris le 28 août' -> [BROWSE: Go to sncf-connect.com, search for Mulhouse to Paris on August 28, and report available trains with prices]" +
-      "\n- User: 'ouvre leboncoin et cherche des vélos' -> [BROWSE: Navigate to leboncoin.fr and search for vélos, report the first results with prices]" +
-      "\nDo NOT use [BROWSE] for questions you can answer from knowledge (general facts, coding, etc.).",
   );
 
   if (process.env.VOICE_PROVIDER || process.env.TTS_PROVIDER) {
@@ -772,6 +757,13 @@ export async function createBotContext(bot: Bot): Promise<BotContext> {
   _botRef = bot;
   await loadReminders();
 
+  const novncUrl = (() => {
+    try {
+      return getConfig().novncUrl;
+    } catch {
+      return "";
+    }
+  })();
   return {
     bot,
     supabase,
@@ -802,5 +794,6 @@ export async function createBotContext(bot: Bot): Promise<BotContext> {
       }
     },
     findIdeaByPrefix,
+    vncUrl: novncUrl,
   };
 }

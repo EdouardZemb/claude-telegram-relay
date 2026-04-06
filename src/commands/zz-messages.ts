@@ -10,10 +10,10 @@ import { unlink, writeFile } from "fs/promises";
 import { Composer, type Context } from "grammy";
 import { join } from "path";
 import { formatActionsForLLM } from "../action-registry.ts";
-import { spawnClaude } from "../agent.ts";
 import { recordResponseTime } from "../alerts.ts";
 import type { BotContext } from "../bot-context.ts";
 import { ALLOWED_USER_ID, BOT_TOKEN, formatDocumentContext, UPLOADS_DIR } from "../bot-context.ts";
+import { detectBrowseIntent, executeBrowseInstruction } from "../browser-delegation.ts";
 import type { DocumentCreateInput, DocumentSearchResult } from "../documents.ts";
 import { checkDuplicate, computeFileHash, createDocument, searchDocuments } from "../documents.ts";
 import { isFeatureEnabled } from "../feature-flags.ts";
@@ -334,6 +334,24 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       }
     }
 
+    if (detectBrowseIntent(input)) {
+      log.info(`Browse intent detected, delegating to Chrome`);
+      const vncMsg = bctx.vncUrl
+        ? `Navigation en cours... Si un captcha apparait, interviens ici :\n${bctx.vncUrl}`
+        : "Navigation en cours...";
+      await options.respond(ctx, vncMsg);
+      await ctx.replyWithChatAction("typing");
+      try {
+        const browseResult = await executeBrowseInstruction(input);
+        await bctx.saveMessage("assistant", browseResult.response, meta);
+        await options.respond(ctx, browseResult.response);
+      } catch (browseError) {
+        log.error("Browser delegation failed", { error: String(browseError) });
+        await options.respond(ctx, "La navigation web a échoué. Réessaie dans quelques instants.");
+      }
+      return;
+    }
+
     // Conversation fallback with action awareness
     const actionContext = `\nACTIONS DISPONIBLES (tu peux orienter l'utilisateur vers ces commandes si pertinent):\n${formatActionsForLLM()}`;
 
@@ -360,46 +378,6 @@ export default function messagesComposer(bctx: BotContext): Composer<Context> {
       resume: true,
       heartbeat: bctx.heartbeatOpts(ctx),
     });
-
-    // Browser delegation: if Claude signals [BROWSE: ...], spawn Claude Code with Chrome
-    const browseMatch = rawResponse.match(/\[BROWSE:\s*(.+?)\]/s);
-    if (browseMatch) {
-      const browseInstruction = browseMatch[1].trim();
-      log.info(`Browser delegation detected: ${browseInstruction.substring(0, 80)}...`);
-      const vncUrl = "http://192.168.1.129:6080/vnc.html";
-      await options.respond(
-        ctx,
-        `Navigation en cours... Si un captcha apparait, interviens ici :\n${vncUrl}`,
-      );
-      await ctx.replyWithChatAction("typing");
-      try {
-        const browseStart = Date.now();
-        const browseResult = await spawnClaude({
-          prompt:
-            browseInstruction +
-            "\nIMPORTANT: Si tu rencontres un captcha ou une verification anti-bot, " +
-            "dis-le clairement dans ta reponse et attends 30 secondes avant de reessayer " +
-            "(l'utilisateur peut intervenir manuellement via noVNC).",
-          chrome: true,
-          effort: "high",
-          timeout: 180_000,
-        });
-        const elapsed = ((Date.now() - browseStart) / 1000).toFixed(0);
-        log.info(
-          `Browser result: exit=${browseResult.exitCode} stdout=${browseResult.stdout.length}b stderr=${browseResult.stderr.length}b elapsed=${elapsed}s`,
-        );
-        if (browseResult.exitCode !== 0) {
-          log.error(`Browser stderr: ${browseResult.stderr.substring(0, 500)}`);
-        }
-        const browseResponse = browseResult.stdout.trim() || "Aucun résultat du navigateur.";
-        await bctx.saveMessage("assistant", browseResponse, meta);
-        await options.respond(ctx, browseResponse);
-      } catch (browseError) {
-        log.error("Browser delegation failed", { error: String(browseError) });
-        await options.respond(ctx, "La navigation web a échoué. Réessaie dans quelques instants.");
-      }
-      return;
-    }
 
     const finalResponse = await processMemoryIntents(bctx.supabase, rawResponse);
 

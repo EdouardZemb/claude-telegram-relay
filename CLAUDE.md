@@ -49,6 +49,7 @@ Modular TypeScript monolith: Telegram bot orchestrating BMad AI agents via Supab
 | `pipeline-v3/index.ts` | Barrel re-export for pipeline-v3 sub-modules |
 | `pipeline-v3.ts` | Root barrel re-export for pipeline-v3 module (barrel convention) |
 | `agent.ts` | Sub-agent execution: centralized spawnClaude() with branch-PR workflow |
+| `browser-delegation.ts` | Chrome browser delegation service: code-side intent detection (matchesBrowsePatterns, detectBrowseIntent) + execution (executeBrowseInstruction) behind chrome_browse feature flag |
 | `agent-context.ts` | Enriched Supabase context builder for SDD agents: buildAgentContext(supabase, role, phase) with parallel fetch, timeout, size cap |
 | `html-format-helpers.ts` | Shared HTML formatting helpers for Telegram: sectionTitle, separator, progressBar, kvLine, statusIcon, bulletList, collapsibleSection |
 | `html-utils.ts` | HTML escaping for Telegram HTML parse_mode: escapeHtml() — extracted to avoid circular imports with memory sub-modules |
