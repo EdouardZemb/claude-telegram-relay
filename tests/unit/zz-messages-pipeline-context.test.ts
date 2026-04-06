@@ -13,7 +13,15 @@ import { describe, expect, it } from "bun:test";
 import { readFile } from "fs/promises";
 import { join } from "path";
 
-const ZZ_MESSAGES_PATH = join(import.meta.dir, "..", "..", "src", "commands", "zz-messages.ts");
+// processMessageInput was extracted to zz-messages-pipeline.ts (S3 split)
+const ZZ_MESSAGES_PATH = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "src",
+  "commands",
+  "zz-messages-pipeline.ts",
+);
 
 describe("zz-messages pipeline context injection", () => {
   let sourceCode: string;

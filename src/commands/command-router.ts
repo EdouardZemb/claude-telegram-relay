@@ -321,3 +321,46 @@ export function handleFeatureRequestCallback(
   }
   return null;
 }
+
+/**
+ * Show the feature request confirmation with AR2 expert-persona gate pre-assessment.
+ * AR2 gate evaluates the request before showing the Maturer/Non merci buttons.
+ * Falls back to standard confirmation on error (fail-open for UX continuity).
+ *
+ * Feature flag: ar2_gate_enabled
+ */
+export async function showFeatureRequestWithAR2(
+  ctx: Context,
+  subject: string,
+  threadOpts: Record<string, unknown>,
+  callLLM: (prompt: string) => Promise<string>,
+  context?: string,
+): Promise<void> {
+  try {
+    const { runAR2Gate } = await import("../ar2-gate.ts");
+    const ar2Result = await runAR2Gate(subject, context ?? "", callLLM);
+
+    const key = confirmationKey(ctx);
+    pendingFeatureRequests.set(key, { subject, timestamp: Date.now() });
+
+    const verdictIcon = ar2Result.verdict === "GO" ? "\u2705" : "\u26a0\ufe0f";
+    const rationale = ar2Result.rationale.substring(0, 200);
+
+    const keyboard = new InlineKeyboard()
+      .text("Maturer", "feature_request_confirm")
+      .text("Non merci", "feature_request_cancel");
+
+    const displaySubject = subject ? ` : "${subject}"` : "";
+    await ctx.reply(
+      `Ca ressemble a une idee${displaySubject}.\n\n${verdictIcon} <b>Evaluation expert</b> : ${rationale}\n\nLancer la maturation ?`,
+      {
+        ...threadOpts,
+        reply_markup: keyboard,
+        parse_mode: "HTML" as const,
+      },
+    );
+  } catch {
+    // Fail-open: fall back to standard confirmation on AR2 error
+    await showFeatureRequestConfirmation(ctx, subject, threadOpts);
+  }
+}

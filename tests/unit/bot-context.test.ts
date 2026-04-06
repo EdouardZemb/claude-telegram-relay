@@ -300,12 +300,14 @@ describe("bot-context", () => {
       expect(sddStart).toBeGreaterThan(-1);
       // Find end of the convergence block (next section or end)
       const afterSdd = prompt.substring(sddStart);
-      // The instruction ends before the next \n\n section header
-      const nextSection = afterSdd.indexOf("\nVOICE CAPABILITIES");
+      // Look for the next section header after SDD CONVERGENCE.
+      // BROWSER ACCESS was added after SDD CONVERGENCE (feat/browse); VOICE CAPABILITIES is optional.
+      const nextBrowser = afterSdd.indexOf("\nBROWSER ACCESS");
+      const nextVoice = afterSdd.indexOf("\nVOICE CAPABILITIES");
+      const candidates = [nextBrowser, nextVoice].filter((i) => i > 0);
+      const nextSection = candidates.length > 0 ? Math.min(...candidates) : -1;
       const sddBlock =
-        nextSection > 0
-          ? afterSdd.substring(0, nextSection)
-          : afterSdd.split("\n\n")[0] + "\n" + (afterSdd.split("\n\n")[1] || "");
+        nextSection > 0 ? afterSdd.substring(0, nextSection) : afterSdd.split("\n\n")[0];
       const wordCount = sddBlock.split(/\s+/).filter(Boolean).length;
       expect(wordCount).toBeLessThan(100);
     });

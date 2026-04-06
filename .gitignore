@@ -45,3 +45,5 @@ deploy_key*
 # Test temp files
 tests/unit/.tts-test-tmp/
 .worktrees/
+.ar2-gate-results.json
+.test-prompt-overlay-*/
