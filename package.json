@@ -34,7 +34,7 @@
     "groq-sdk": "^0.8.0",
     "pdf-parse": "^2.4.5",
     "yaml": "^2.8.2",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
